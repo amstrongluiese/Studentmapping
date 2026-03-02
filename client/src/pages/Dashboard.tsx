@@ -73,8 +73,8 @@ export default function Dashboard() {
               <GraduationCap className="w-6 h-6 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-display font-bold leading-tight">Student Origins</h1>
-              <p className="text-sm text-muted-foreground">Laguna Mapping System</p>
+              <h1 className="text-xl font-display font-bold leading-tight">Student Enrollment Origins</h1>
+              <p className="text-sm text-muted-foreground">New Students per School (Laguna)</p>
             </div>
           </div>
 

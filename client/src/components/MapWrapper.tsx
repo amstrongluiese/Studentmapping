@@ -15,35 +15,29 @@ const LAGUNA_BOUNDS: L.LatLngBoundsExpression = [
 
 // Helper to create beautiful HTML icons
 const createClusterIcon = (count: number, name: string) => {
-  // Scale size based on count, max 60px
-  const size = Math.min(36 + (count * 0.5), 60); 
-  const isHighVolume = count > 50;
-  
   return L.divIcon({
     html: `
       <div class="custom-marker-wrapper group cursor-pointer">
         <div class="relative flex flex-col items-center">
-          <div class="flex items-center justify-center shadow-lg border-[3px] border-white dark:border-gray-800 transition-colors ${
-            isHighVolume ? 'bg-destructive' : 'bg-primary'
-          }" style="width: ${size}px; height: ${size}px; border-radius: 50%;">
-            <span class="text-white text-lg drop-shadow-md">🏫</span>
+          <div class="text-3xl drop-shadow-md filter hover:scale-110 transition-transform">
+            📍
           </div>
           
-          <div class="absolute -top-3 -right-3 min-w-[24px] h-[24px] flex items-center justify-center px-1.5 bg-foreground text-background text-xs font-bold rounded-full shadow-md border-2 border-background">
+          <div class="absolute -top-2 -right-2 min-w-[20px] h-[20px] flex items-center justify-center px-1 bg-primary text-primary-foreground text-[10px] font-bold rounded-full shadow-md border border-background">
             ${count}
           </div>
           
           <!-- Tooltip on hover -->
-          <div class="absolute top-full mt-2 bg-foreground text-background text-xs px-2 py-1 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+          <div class="absolute top-full mt-1 bg-foreground text-background text-[10px] px-1.5 py-0.5 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
             ${name}
           </div>
         </div>
       </div>
     `,
     className: 'custom-leaflet-icon',
-    iconSize: [size, size],
-    iconAnchor: [size/2, size/2],
-    popupAnchor: [0, -size/2],
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+    popupAnchor: [0, -32],
   });
 };
 
