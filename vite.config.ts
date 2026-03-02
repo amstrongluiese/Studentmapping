@@ -4,6 +4,9 @@ import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
 export default defineConfig({
+  // 🔴 REQUIRED for GitHub Pages
+  base: "/Studentmapping/",
+
   plugins: [
     react(),
     runtimeErrorOverlay(),
@@ -19,6 +22,7 @@ export default defineConfig({
         ]
       : []),
   ],
+
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),
@@ -26,11 +30,16 @@ export default defineConfig({
       "@assets": path.resolve(import.meta.dirname, "attached_assets"),
     },
   },
+
+  // Replit project root
   root: path.resolve(import.meta.dirname, "client"),
+
+  // 🔴 GitHub Pages build output
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
   },
+
   server: {
     fs: {
       strict: true,
