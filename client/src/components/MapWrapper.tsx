@@ -27,9 +27,9 @@ const createClusterIcon = (count: number, name: string) => {
             ${count}
           </div>
           
-          <!-- Tooltip on hover -->
-          <div class="absolute top-full mt-1 bg-foreground text-background text-[10px] px-1.5 py-0.5 rounded shadow-xl opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
-            ${name}
+          <!-- Permanent Floating Label -->
+          <div class="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-card/90 backdrop-blur-sm border border-border px-2 py-1 rounded-md shadow-sm whitespace-nowrap pointer-events-none transition-all group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary group-hover:scale-105 group-hover:shadow-md">
+            <span class="text-[11px] font-bold">${name}</span>
           </div>
         </div>
       </div>

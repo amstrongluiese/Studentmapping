@@ -13,7 +13,9 @@ import {
   MoreVertical, 
   Trash2, 
   Edit,
-  GraduationCap
+  GraduationCap,
+  Maximize2,
+  Minimize2
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -24,6 +26,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { School } from "@shared/schema";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 
 export default function Dashboard() {
   const { data: schools, isLoading } = useSchools();
@@ -33,6 +36,7 @@ export default function Dashboard() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [isPresenting, setIsPresenting] = useState(false);
 
   const filteredSchools = schools?.filter(s => 
     s.name.toLowerCase().includes(search.toLowerCase())
@@ -63,10 +67,13 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-screen w-full bg-background overflow-hidden">
+    <div className="flex flex-col md:flex-row h-screen w-full bg-background overflow-hidden relative">
       
       {/* Sidebar - Data List */}
-      <div className="w-full md:w-[400px] flex-shrink-0 flex flex-col border-r border-border bg-card shadow-xl z-20 h-[50vh] md:h-screen transition-all">
+      <div className={cn(
+        "w-full md:w-[400px] flex-shrink-0 flex flex-col border-r border-border bg-card shadow-xl z-20 h-[50vh] md:h-screen transition-all duration-500",
+        isPresenting && "md:-ml-[400px] opacity-0"
+      )}>
         <div className="p-6 pb-4 border-b border-border bg-card/50 backdrop-blur-sm">
           <div className="flex items-center gap-3 mb-6">
             <div className="bg-primary p-2.5 rounded-xl shadow-inner border border-primary/20">
@@ -170,6 +177,17 @@ export default function Dashboard() {
 
       {/* Main Map Area */}
       <div className="flex-1 relative z-10 h-[50vh] md:h-screen">
+        {/* Fullscreen Toggle Button */}
+        <Button
+          size="icon"
+          variant="secondary"
+          className="absolute top-6 left-6 z-[1100] shadow-xl hover-elevate border border-border/50 bg-background/80 backdrop-blur-md"
+          onClick={() => setIsPresenting(!isPresenting)}
+          title={isPresenting ? "Exit Presentation Mode" : "Enter Presentation Mode"}
+        >
+          {isPresenting ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
+        </Button>
+
         {/* Subtle inner shadow for depth */}
         <div className="absolute inset-0 pointer-events-none shadow-[inset_0_0_20px_rgba(0,0,0,0.05)] z-[100]" />
         
