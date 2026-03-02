@@ -73,8 +73,8 @@ export default function Dashboard() {
               <GraduationCap className="w-6 h-6 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-display font-bold leading-tight">Student Enrollment Origins</h1>
-              <p className="text-sm text-muted-foreground">New Students per School (Laguna)</p>
+              <h1 className="text-xl font-display font-bold leading-tight">Trimex Colleges Student Mapping</h1>
+              <p className="text-sm text-muted-foreground">Enrolled Students by Senior High Origin (Laguna)</p>
             </div>
           </div>
 

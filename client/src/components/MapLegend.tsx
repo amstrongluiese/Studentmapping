@@ -10,11 +10,14 @@ export function MapLegend() {
   const topSchool = [...schools].sort((a, b) => b.studentCount - a.studentCount)[0];
 
   return (
-    <div className="absolute bottom-6 right-6 z-[1000] glass-panel rounded-2xl p-5 min-w-[250px] shadow-2xl animate-in slide-in-from-bottom-8 fade-in duration-500 hidden md:block">
-      <h3 className="font-display font-bold text-lg mb-4 flex items-center gap-2">
+    <div className="absolute bottom-6 right-6 z-[1000] glass-panel rounded-2xl p-5 min-w-[280px] shadow-2xl animate-in slide-in-from-bottom-8 fade-in duration-500 hidden md:block">
+      <h3 className="font-display font-bold text-lg mb-1 flex items-center gap-2">
         <MapPinIcon />
-        Enrollment Legend
+        Trimex Student Origins
       </h3>
+      <p className="text-[10px] text-muted-foreground mb-4 leading-tight italic">
+        Visualizing where our students came from before enrolling at Trimex Colleges.
+      </p>
       
       <div className="space-y-4">
         <div className="flex items-center justify-between p-3 bg-primary/10 rounded-xl border border-primary/20">
@@ -23,7 +26,7 @@ export function MapLegend() {
               <Users className="w-5 h-5" />
             </div>
             <div>
-              <p className="text-sm font-medium text-muted-foreground">Total Enrollees</p>
+              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Total Trimex Enrollees</p>
               <p className="text-xl font-bold text-foreground">{totalStudents.toLocaleString()}</p>
             </div>
           </div>
@@ -31,21 +34,21 @@ export function MapLegend() {
 
         {topSchool && (
           <div className="p-3 bg-card rounded-xl border border-border">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" /> Top Feeder School
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1">
+              <TrendingUp className="w-3 h-3" /> Top Source School
             </p>
             <p className="font-semibold text-sm truncate" title={topSchool.name}>
               {topSchool.name}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
-              {topSchool.studentCount} students mapped
+              {topSchool.studentCount} students enrolled at Trimex
             </p>
           </div>
         )}
         
-        <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2">
-          <AlertCircle className="w-3 h-3" />
-          <p>Pins scale dynamically by student volume</p>
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1 border-t border-border/50">
+          <AlertCircle className="w-3 h-3 flex-shrink-0" />
+          <p>Counts reflect Trimex enrollment from these schools.</p>
         </div>
       </div>
     </div>

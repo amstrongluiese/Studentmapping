@@ -96,18 +96,21 @@ export default function MapWrapper({ onAddSchool, onEditSchool }: MapWrapperProp
         >
           <Popup className="custom-popup border-0">
             <div className="p-4 min-w-[200px]">
-              <h4 className="font-display font-bold text-lg leading-tight mb-2 pr-4">{school.name}</h4>
+              <h4 className="font-display font-bold text-lg leading-tight mb-1 pr-4">{school.name}</h4>
+              <p className="text-xs text-muted-foreground mb-3 italic">(Originating School)</p>
               
               <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
                 <MapPin className="w-4 h-4 text-primary" />
-                <span className="truncate">Lat: {school.lat.toFixed(4)}, Lng: {school.lng.toFixed(4)}</span>
+                <span className="truncate">Laguna Province</span>
               </div>
               
-              <div className="bg-primary/10 border border-primary/20 rounded-lg p-3 flex items-center justify-between mb-4">
-                <span className="text-sm font-semibold">Enrolled</span>
-                <div className="flex items-center gap-1.5 text-primary font-bold">
-                  <Users className="w-4 h-4" />
-                  <span>{school.studentCount} Students</span>
+              <div className="bg-primary/10 border border-primary/20 rounded-lg p-3 flex flex-col gap-1 mb-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Trimex Enrollment</span>
+                  <Users className="w-3.5 h-3.5 text-primary" />
+                </div>
+                <div className="text-xl font-bold text-primary">
+                  {school.studentCount} <span className="text-xs font-normal text-primary/70">Students</span>
                 </div>
               </div>
               
@@ -118,7 +121,7 @@ export default function MapWrapper({ onAddSchool, onEditSchool }: MapWrapperProp
                 onClick={() => onEditSchool(school)}
               >
                 <Edit2 className="w-4 h-4 mr-2" />
-                Edit Details
+                Update Enrollment
               </Button>
             </div>
           </Popup>
