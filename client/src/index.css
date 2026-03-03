@@ -87,7 +87,13 @@
     @apply border-border;
   }
   html, body, #root {
-    @apply h-full w-full overflow-hidden;
+    height: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    display: flex;
+    flex-direction: column;
   }
   body {
     @apply bg-background text-foreground antialiased;
@@ -103,6 +109,8 @@
 .leaflet-container {
   font-family: var(--font-sans);
   z-index: 10;
+  height: 100% !important;
+  width: 100% !important;
 }
 
 .leaflet-popup-content-wrapper {
@@ -146,4 +154,24 @@
 .active-elevate-2:active {
   transform: translateY(0);
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.01);
+}
+
+/* Fix Radix Tabs Content Height */
+[data-radix-collection-item] {
+  height: 100%;
+}
+
+.TabsContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Force TabsContent to fill parent */
+[role="tabpanel"] {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
