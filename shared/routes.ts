@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertSchoolSchema, schools } from './schema';
+import { insertSchoolSchema, schools, insertReferralSchema, referrals } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -59,6 +59,24 @@ export const api = {
       },
     },
   },
+  referrals: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/referrals' as const,
+      responses: {
+        200: z.array(z.custom<typeof referrals.$inferSelect>()),
+      },
+    },
+    create: {
+      method: 'POST' as const,
+      path: '/api/referrals' as const,
+      input: insertReferralSchema,
+      responses: {
+        201: z.custom<typeof referrals.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
+  },
 };
 
 export function buildUrl(path: string, params?: Record<string, string | number>): string {
@@ -75,3 +93,6 @@ export function buildUrl(path: string, params?: Record<string, string | number>)
 
 export type SchoolInput = z.infer<typeof api.schools.create.input>;
 export type SchoolResponse = z.infer<typeof api.schools.create.responses[201]>;
+
+export type ReferralInput = z.infer<typeof api.referrals.create.input>;
+export type ReferralResponse = z.infer<typeof api.referrals.create.responses[201]>;

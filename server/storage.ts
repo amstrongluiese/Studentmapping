@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { schools, type InsertSchool, type School } from "@shared/schema";
+import { schools, referrals, type InsertSchool, type School, type InsertReferral, type Referral } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 export interface IStorage {
@@ -8,6 +8,9 @@ export interface IStorage {
   createSchool(school: InsertSchool): Promise<School>;
   updateSchool(id: number, updates: Partial<InsertSchool>): Promise<School>;
   deleteSchool(id: number): Promise<void>;
+
+  getReferrals(): Promise<Referral[]>;
+  createReferral(referral: InsertReferral): Promise<Referral>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -35,6 +38,15 @@ export class DatabaseStorage implements IStorage {
 
   async deleteSchool(id: number): Promise<void> {
     await db.delete(schools).where(eq(schools.id, id));
+  }
+
+  async getReferrals(): Promise<Referral[]> {
+    return await db.select().from(referrals);
+  }
+
+  async createReferral(referral: InsertReferral): Promise<Referral> {
+    const [newReferral] = await db.insert(referrals).values(referral).returning();
+    return newReferral;
   }
 }
 

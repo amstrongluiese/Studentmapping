@@ -61,6 +61,27 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
+  app.get(api.referrals.list.path, async (req, res) => {
+    const referralsList = await storage.getReferrals();
+    res.json(referralsList);
+  });
+
+  app.post(api.referrals.create.path, async (req, res) => {
+    try {
+      const input = api.referrals.create.input.parse(req.body);
+      const referral = await storage.createReferral(input);
+      res.status(201).json(referral);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({
+          message: err.errors[0].message,
+          field: err.errors[0].path.join('.'),
+        });
+      }
+      throw err;
+    }
+  });
+
   // Seed database
   await seedDatabase();
 
@@ -94,6 +115,17 @@ async function seedDatabase() {
       lat: 14.2255,
       lng: 121.1711,
       studentCount: 85
+    });
+  }
+
+  const existingReferrals = await storage.getReferrals();
+  if (existingReferrals.length === 0) {
+    await storage.createReferral({
+      referrerName: "Juan Dela Cruz",
+      referredName: "Maria Clara",
+      relationship: "Friend",
+      contactNumber: "09123456789",
+      status: "pending"
     });
   }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, ZoomControl } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, ZoomControl, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useSchools } from "@/hooks/use-schools";
@@ -55,6 +55,18 @@ function MapInteractionHandler({ onAddSchool }: { onAddSchool: (lat: number, lng
   return null;
 }
 
+function InvalidateMapSize() {
+  const map = useMap();
+  useEffect(() => {
+    // Small delay to ensure container transition has finished or started
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [map]);
+  return null;
+}
+
 export default function MapWrapper({ onAddSchool, onEditSchool }: MapWrapperProps) {
   const { data: schools, isLoading } = useSchools();
   const [mounted, setMounted] = useState(false);
@@ -78,6 +90,8 @@ export default function MapWrapper({ onAddSchool, onEditSchool }: MapWrapperProp
       zoomControl={false} // We add it manually for positioning
       className="h-full w-full bg-[#f8f9fa] dark:bg-[#0f172a] z-0"
     >
+      <InvalidateMapSize />
+      
       {/* Sleek map tiles: CartoDB Positron for light, Dark Matter for dark */}
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
