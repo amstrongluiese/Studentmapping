@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertSchoolSchema, schools, insertReferralSchema, referrals } from './schema';
+import { insertSchoolSchema, schools, insertReferralSchema, referrals, students, insertStudentSchema } from './schema';
 
 export const errorSchemas = {
   validation: z.object({
@@ -59,6 +59,33 @@ export const api = {
       },
     },
   },
+  students: {
+    getByNumber: {
+      method: 'GET' as const,
+      path: '/api/students/:studentNumber' as const,
+      responses: {
+        200: z.custom<typeof students.$inferSelect>(),
+        404: errorSchemas.notFound,
+      },
+    },
+    getByCode: {
+      method: 'GET' as const,
+      path: '/api/students/code/:referralCode' as const,
+      responses: {
+        200: z.custom<typeof students.$inferSelect>(),
+        404: errorSchemas.notFound,
+      },
+    },
+    register: {
+      method: 'POST' as const,
+      path: '/api/students/register' as const,
+      input: insertStudentSchema,
+      responses: {
+        201: z.custom<typeof students.$inferSelect>(),
+        400: errorSchemas.validation,
+      },
+    },
+  },
   referrals: {
     list: {
       method: 'GET' as const,
@@ -93,6 +120,9 @@ export function buildUrl(path: string, params?: Record<string, string | number>)
 
 export type SchoolInput = z.infer<typeof api.schools.create.input>;
 export type SchoolResponse = z.infer<typeof api.schools.create.responses[201]>;
+
+export type StudentInput = z.infer<typeof api.students.register.input>;
+export type StudentResponse = z.infer<typeof api.students.register.responses[201]>;
 
 export type ReferralInput = z.infer<typeof api.referrals.create.input>;
 export type ReferralResponse = z.infer<typeof api.referrals.create.responses[201]>;

@@ -6,11 +6,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Dashboard from "./pages/Dashboard";
+import ReferralClient from "./pages/ReferralClient";
 
 function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/referral" component={ReferralClient} />
       <Route component={NotFound} />
     </Switch>
   );

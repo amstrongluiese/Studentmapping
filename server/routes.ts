@@ -8,6 +8,7 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // School routes
   app.get(api.schools.list.path, async (req, res) => {
     const schoolsList = await storage.getSchools();
     res.json(schoolsList);
@@ -15,9 +16,7 @@ export async function registerRoutes(
 
   app.get(api.schools.get.path, async (req, res) => {
     const school = await storage.getSchool(Number(req.params.id));
-    if (!school) {
-      return res.status(404).json({ message: 'School not found' });
-    }
+    if (!school) return res.status(404).json({ message: 'School not found' });
     res.json(school);
   });
 
@@ -27,12 +26,7 @@ export async function registerRoutes(
       const school = await storage.createSchool(input);
       res.status(201).json(school);
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({
-          message: err.errors[0].message,
-          field: err.errors[0].path.join('.'),
-        });
-      }
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
       throw err;
     }
   });
@@ -41,17 +35,10 @@ export async function registerRoutes(
     try {
       const input = api.schools.update.input.parse(req.body);
       const school = await storage.updateSchool(Number(req.params.id), input);
-      if (!school) {
-        return res.status(404).json({ message: 'School not found' });
-      }
+      if (!school) return res.status(404).json({ message: 'School not found' });
       res.json(school);
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({
-          message: err.errors[0].message,
-          field: err.errors[0].path.join('.'),
-        });
-      }
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
       throw err;
     }
   });
@@ -61,6 +48,35 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
+  // Student routes
+  app.get(api.students.getByNumber.path, async (req, res) => {
+    const student = await storage.getStudentByNumber(req.params.studentNumber);
+    if (!student) return res.status(404).json({ message: 'Student not found' });
+    res.json(student);
+  });
+
+  app.get(api.students.getByCode.path, async (req, res) => {
+    const student = await storage.getStudentByCode(req.params.referralCode);
+    if (!student) return res.status(404).json({ message: 'Referral code not found' });
+    res.json(student);
+  });
+
+  app.post(api.students.register.path, async (req, res) => {
+    try {
+      const input = api.students.register.input.parse(req.body);
+      // Basic referral code generation if not provided (should be provided by frontend logic or here)
+      if (!input.referralCode) {
+        input.referralCode = `TRX-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      }
+      const student = await storage.createStudent(input);
+      res.status(201).json(student);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      throw err;
+    }
+  });
+
+  // Referral routes
   app.get(api.referrals.list.path, async (req, res) => {
     const referralsList = await storage.getReferrals();
     res.json(referralsList);
@@ -72,60 +88,21 @@ export async function registerRoutes(
       const referral = await storage.createReferral(input);
       res.status(201).json(referral);
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({
-          message: err.errors[0].message,
-          field: err.errors[0].path.join('.'),
-        });
-      }
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
       throw err;
     }
   });
 
-  // Seed database
   await seedDatabase();
-
   return httpServer;
 }
 
 async function seedDatabase() {
   const existingSchools = await storage.getSchools();
   if (existingSchools.length === 0) {
-    // Seed some Laguna high schools
-    await storage.createSchool({
-      name: "Laguna Science National High School",
-      lat: 14.1610,
-      lng: 121.2335,
-      studentCount: 150
-    });
-    await storage.createSchool({
-      name: "Los Baños National High School",
-      lat: 14.1706,
-      lng: 121.2216,
-      studentCount: 300
-    });
-    await storage.createSchool({
-      name: "Pedro Guevara Memorial National High School",
-      lat: 14.2758,
-      lng: 121.4168,
-      studentCount: 420
-    });
-    await storage.createSchool({
-      name: "Calamba Bayside National High School",
-      lat: 14.2255,
-      lng: 121.1711,
-      studentCount: 85
-    });
-  }
-
-  const existingReferrals = await storage.getReferrals();
-  if (existingReferrals.length === 0) {
-    await storage.createReferral({
-      referrerName: "Juan Dela Cruz",
-      referredName: "Maria Clara",
-      relationship: "Friend",
-      contactNumber: "09123456789",
-      status: "pending"
-    });
+    await storage.createSchool({ name: "Laguna Science National High School", lat: 14.1610, lng: 121.2335, studentCount: 150 });
+    await storage.createSchool({ name: "Los Baños National High School", lat: 14.1706, lng: 121.2216, studentCount: 300 });
+    await storage.createSchool({ name: "Pedro Guevara Memorial National High School", lat: 14.2758, lng: 121.4168, studentCount: 420 });
+    await storage.createSchool({ name: "Calamba Bayside National High School", lat: 14.2255, lng: 121.1711, studentCount: 85 });
   }
 }

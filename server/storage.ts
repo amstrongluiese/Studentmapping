@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { schools, referrals, type InsertSchool, type School, type InsertReferral, type Referral } from "@shared/schema";
+import { schools, referrals, students, type InsertSchool, type School, type InsertReferral, type Referral, type InsertStudent, type Student } from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 export interface IStorage {
@@ -9,7 +9,13 @@ export interface IStorage {
   updateSchool(id: number, updates: Partial<InsertSchool>): Promise<School>;
   deleteSchool(id: number): Promise<void>;
 
+  getStudents(): Promise<Student[]>;
+  getStudentByNumber(studentNumber: string): Promise<Student | undefined>;
+  getStudentByCode(referralCode: string): Promise<Student | undefined>;
+  createStudent(student: InsertStudent): Promise<Student>;
+
   getReferrals(): Promise<Referral[]>;
+  getReferralsByStudent(studentId: number): Promise<Referral[]>;
   createReferral(referral: InsertReferral): Promise<Referral>;
 }
 
@@ -40,8 +46,31 @@ export class DatabaseStorage implements IStorage {
     await db.delete(schools).where(eq(schools.id, id));
   }
 
+  async getStudents(): Promise<Student[]> {
+    return await db.select().from(students);
+  }
+
+  async getStudentByNumber(studentNumber: string): Promise<Student | undefined> {
+    const [student] = await db.select().from(students).where(eq(students.studentNumber, studentNumber));
+    return student;
+  }
+
+  async getStudentByCode(referralCode: string): Promise<Student | undefined> {
+    const [student] = await db.select().from(students).where(eq(students.referralCode, referralCode));
+    return student;
+  }
+
+  async createStudent(student: InsertStudent): Promise<Student> {
+    const [newStudent] = await db.insert(students).values(student).returning();
+    return newStudent;
+  }
+
   async getReferrals(): Promise<Referral[]> {
     return await db.select().from(referrals);
+  }
+
+  async getReferralsByStudent(studentId: number): Promise<Referral[]> {
+    return await db.select().from(referrals).where(eq(referrals.referrerId, studentId));
   }
 
   async createReferral(referral: InsertReferral): Promise<Referral> {

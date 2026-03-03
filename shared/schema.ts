@@ -10,21 +10,32 @@ export const schools = pgTable("schools", {
   studentCount: integer("student_count").notNull().default(0),
 });
 
+export const students = pgTable("students", {
+  id: serial("id").primaryKey(),
+  studentNumber: text("student_number").notNull().unique(),
+  name: text("name").notNull(),
+  referralCode: text("referral_code").notNull().unique(),
+});
+
 export const referrals = pgTable("referrals", {
   id: serial("id").primaryKey(),
-  referrerName: text("referrer_name").notNull(),
+  referrerId: integer("referrer_id").references(() => students.id),
   referredName: text("referred_name").notNull(),
   relationship: text("relationship").notNull(),
   contactNumber: text("contact_number"),
-  status: text("status").notNull().default("pending"), // pending, enrolled
+  status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
 export const insertSchoolSchema = createInsertSchema(schools).omit({ id: true });
+export const insertStudentSchema = createInsertSchema(students).omit({ id: true });
 export const insertReferralSchema = createInsertSchema(referrals).omit({ id: true, createdAt: true });
 
 export type InsertSchool = z.infer<typeof insertSchoolSchema>;
 export type School = typeof schools.$inferSelect;
+
+export type InsertStudent = z.infer<typeof insertStudentSchema>;
+export type Student = typeof students.$inferSelect;
 
 export type InsertReferral = z.infer<typeof insertReferralSchema>;
 export type Referral = typeof referrals.$inferSelect;
