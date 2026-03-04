@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSchools, useDeleteSchool } from "@/hooks/use-schools";
-import { useReferrals, useCreateReferral } from "@/hooks/use-referrals";
+import { useReferrals, useCreateReferral, useUpdateReferral, useDeleteReferral } from "@/hooks/use-referrals";
 import { SchoolFormDialog } from "@/components/SchoolFormDialog";
 import MapWrapper from "@/components/MapWrapper";
 import { MapLegend } from "@/components/MapLegend";
@@ -20,7 +20,10 @@ import {
   BarChart2,
   UserPlus,
   Map as MapIcon,
-  Table as TableIcon
+  Table as TableIcon,
+  CheckCircle2,
+  XCircle,
+  ArrowUpDown
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -60,7 +63,7 @@ import {
 } from "@/components/ui/form";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertReferralSchema, type School, type ReferralInput } from "@shared/schema";
+import { insertReferralSchema, type School, type ReferralInput, type Referral } from "@shared/schema";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
@@ -70,8 +73,12 @@ export default function Dashboard() {
   const { data: referrals, isLoading: referralsLoading } = useReferrals();
   const deleteMutation = useDeleteSchool();
   const createReferralMutation = useCreateReferral();
+  const updateReferralMutation = useUpdateReferral();
+  const deleteReferralMutation = useDeleteReferral();
   
   const [search, setSearch] = useState("");
+  const [referralSearch, setReferralSearch] = useState("");
+  const [referralSort, setReferralSort] = useState<"name" | "status" | "date">("date");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<{lat: number, lng: number} | null>(null);
@@ -80,6 +87,14 @@ export default function Dashboard() {
   const filteredSchools = schools?.filter(s => 
     s.name.toLowerCase().includes(search.toLowerCase())
   ) || [];
+
+  const sortedReferrals = [...(referrals || [])]
+    .filter(r => r.referredName.toLowerCase().includes(referralSearch.toLowerCase()))
+    .sort((a, b) => {
+      if (referralSort === "name") return a.referredName.localeCompare(b.referredName);
+      if (referralSort === "status") return a.status.localeCompare(b.status);
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
 
   const handleAddClick = () => {
     setEditingSchool(null);
@@ -102,6 +117,16 @@ export default function Dashboard() {
   const handleDelete = (id: number) => {
     if (confirm("Are you sure you want to delete this school mapping?")) {
       deleteMutation.mutate(id);
+    }
+  };
+
+  const handleReferralAction = (id: number, status: string) => {
+    updateReferralMutation.mutate({ id, updates: { status } });
+  };
+
+  const handleReferralDelete = (id: number) => {
+    if (confirm("Are you sure you want to delete this referral?")) {
+      deleteReferralMutation.mutate(id);
     }
   };
 
@@ -322,96 +347,94 @@ export default function Dashboard() {
           </TabsContent>
 
           <TabsContent value="referral" className="flex-1 h-full w-full m-0 p-6 overflow-hidden flex flex-col gap-6 data-[state=inactive]:hidden">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 h-full overflow-hidden">
-              <Card className="hover-elevate transition-all overflow-y-auto">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-2xl"><UserPlus className="w-6 h-6 text-primary" /> Referral Form</CardTitle>
-                  <CardDescription>Invite friends and family to join Trimex Colleges</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Form {...referralForm}>
-                    <form onSubmit={referralForm.handleSubmit(onReferralSubmit)} className="space-y-4">
-                      <FormField
-                        control={referralForm.control}
-                        name="referredName"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Student Name (The one being referred)</FormLabel>
-                            <FormControl><Input placeholder="Jane Smith" {...field} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={referralForm.control}
-                        name="relationship"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Relationship</FormLabel>
-                            <FormControl><Input placeholder="Friend / Cousin / Sibling" {...field} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={referralForm.control}
-                        name="contactNumber"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Contact Number</FormLabel>
-                            <FormControl><Input placeholder="09XX XXX XXXX" {...field} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <Button type="submit" className="w-full h-11 text-lg shadow-lg" disabled={createReferralMutation.isPending}>
-                        {createReferralMutation.isPending ? "Submitting..." : "Submit Referral"}
-                      </Button>
-                    </form>
-                  </Form>
-                </CardContent>
-              </Card>
-
-              <Card className="flex flex-col min-h-0 hover-elevate transition-all overflow-hidden">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2"><TableIcon className="w-5 h-5 text-primary" /> Recent Referrals</CardTitle>
-                  <CardDescription>Status tracking for referred students</CardDescription>
-                </CardHeader>
-                <CardContent className="flex-1 p-0 overflow-hidden">
-                  <ScrollArea className="h-full px-6">
-                    {referralsLoading ? (
-                      <div className="space-y-4 py-4">
-                        {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
-                      </div>
-                    ) : (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Candidate</TableHead>
-                            <TableHead>Status</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {referrals?.map((ref) => (
-                            <TableRow key={ref.id} className="hover:bg-secondary/30 transition-colors">
-                              <TableCell>{ref.referredName}</TableCell>
-                              <TableCell>
-                                <span className={cn(
-                                  "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                                  ref.status === 'enrolled' ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"
-                                )}>
-                                  {ref.status}
-                                </span>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    )}
-                  </ScrollArea>
-                </CardContent>
-              </Card>
+            <div className="flex items-center justify-between gap-4 shrink-0">
+              <div className="flex-1 max-w-sm relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input 
+                  placeholder="Search referrals..." 
+                  className="pl-9"
+                  value={referralSearch}
+                  onChange={(e) => setReferralSearch(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setReferralSort("name")} className={cn(referralSort === "name" && "bg-primary/10")}>
+                  <ArrowUpDown className="w-4 h-4 mr-2" /> Name
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setReferralSort("status")} className={cn(referralSort === "status" && "bg-primary/10")}>
+                  <ArrowUpDown className="w-4 h-4 mr-2" /> Status
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setReferralSort("date")} className={cn(referralSort === "date" && "bg-primary/10")}>
+                  <ArrowUpDown className="w-4 h-4 mr-2" /> Date
+                </Button>
+              </div>
             </div>
+
+            <Card className="flex-1 flex flex-col min-h-0 hover-elevate transition-all overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-2xl"><UserPlus className="w-6 h-6 text-primary" /> Referral Management</CardTitle>
+                  <CardDescription>Approve or manage student referrals</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="flex-1 p-0 overflow-hidden">
+                <ScrollArea className="h-full px-6">
+                  {referralsLoading ? (
+                    <div className="space-y-4 py-4">
+                      {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Candidate</TableHead>
+                          <TableHead>Relationship</TableHead>
+                          <TableHead>Contact</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sortedReferrals.map((ref) => (
+                          <TableRow key={ref.id} className="hover:bg-secondary/30 transition-colors">
+                            <TableCell className="font-bold">{ref.referredName}</TableCell>
+                            <TableCell>{ref.relationship}</TableCell>
+                            <TableCell>{ref.contactNumber}</TableCell>
+                            <TableCell>
+                              <span className={cn(
+                                "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                ref.status === 'enrolled' ? "bg-primary/20 text-primary" : 
+                                ref.status === 'rejected' ? "bg-destructive/20 text-destructive" :
+                                "bg-muted text-muted-foreground"
+                              )}>
+                                {ref.status}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                {ref.status === 'pending' && (
+                                  <>
+                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10" onClick={() => handleReferralAction(ref.id, 'enrolled')}>
+                                      <CheckCircle2 className="h-4 w-4" />
+                                    </Button>
+                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleReferralAction(ref.id, 'rejected')}>
+                                      <XCircle className="h-4 w-4" />
+                                    </Button>
+                                  </>
+                                )}
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => handleReferralDelete(ref.id)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </ScrollArea>
+              </CardContent>
+            </Card>
           </TabsContent>
         </div>
       </Tabs>

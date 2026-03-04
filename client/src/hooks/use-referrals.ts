@@ -31,3 +31,44 @@ export function useCreateReferral() {
     },
   });
 }
+
+export function useUpdateReferral() {
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async ({ id, updates }: { id: number; updates: Partial<ReferralInput> }) => {
+      const res = await fetch(`/api/referrals/${id}`, {
+        method: 'PATCH',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error("Failed to update referral");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.referrals.list.path] });
+      toast({
+        title: "Success",
+        description: "Referral updated successfully",
+      });
+    },
+  });
+}
+
+export function useDeleteReferral() {
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetch(`/api/referrals/${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error("Failed to delete referral");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.referrals.list.path] });
+      toast({
+        title: "Success",
+        description: "Referral deleted successfully",
+      });
+    },
+  });
+}

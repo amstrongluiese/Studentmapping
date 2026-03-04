@@ -93,6 +93,23 @@ export async function registerRoutes(
     }
   });
 
+  app.patch(api.referrals.update.path, async (req, res) => {
+    try {
+      const input = api.referrals.update.input.parse(req.body);
+      const referral = await storage.updateReferral(Number(req.params.id), input);
+      if (!referral) return res.status(404).json({ message: 'Referral not found' });
+      res.json(referral);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      throw err;
+    }
+  });
+
+  app.delete(api.referrals.delete.path, async (req, res) => {
+    await storage.deleteReferral(Number(req.params.id));
+    res.status(204).send();
+  });
+
   await seedDatabase();
   return httpServer;
 }

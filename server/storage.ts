@@ -17,6 +17,8 @@ export interface IStorage {
   getReferrals(): Promise<Referral[]>;
   getReferralsByStudent(studentId: number): Promise<Referral[]>;
   createReferral(referral: InsertReferral): Promise<Referral>;
+  updateReferral(id: number, updates: Partial<InsertReferral>): Promise<Referral>;
+  deleteReferral(id: number): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -76,6 +78,18 @@ export class DatabaseStorage implements IStorage {
   async createReferral(referral: InsertReferral): Promise<Referral> {
     const [newReferral] = await db.insert(referrals).values(referral).returning();
     return newReferral;
+  }
+
+  async updateReferral(id: number, updates: Partial<InsertReferral>): Promise<Referral> {
+    const [updatedReferral] = await db.update(referrals)
+      .set(updates)
+      .where(eq(referrals.id, id))
+      .returning();
+    return updatedReferral;
+  }
+
+  async deleteReferral(id: number): Promise<void> {
+    await db.delete(referrals).where(eq(referrals.id, id));
   }
 }
 
