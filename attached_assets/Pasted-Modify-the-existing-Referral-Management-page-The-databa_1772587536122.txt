@@ -1,0 +1,131 @@
+Modify the existing Referral Management page. The database structure and current system already exist, so do NOT recreate them. Only implement the following improvements.
+
+1. Add Status Tabs Above the Table
+
+Add filtering tabs inside the Referral Management page above the referral table.
+
+Tabs:
+- All
+- Pending
+- Approved
+- Rejected
+
+Behavior:
+- All → show all referrals
+- Pending → show referrals with status "pending"
+- Approved → show referrals with status "approved"
+- Rejected → show referrals with status "rejected"
+
+This should only filter the table without creating a new page.
+
+2. Add Summary Statistics
+
+Above the tabs, add summary cards that show referral counts.
+
+Cards should display:
+
+- Total Referrals
+- Pending Referrals
+- Approved Referrals
+- Rejected Referrals
+
+These numbers must update dynamically based on the existing referral records.
+
+3. Add "Add Referral" Button
+
+Add a "+ Add Referral" button on the top-right of the Referral Management section.
+
+When clicked:
+- Open a modal form.
+
+Form fields:
+- Candidate Name
+- Relationship
+- Contact
+- Notes (optional)
+
+On submit:
+- Insert the referral into the existing referrals table.
+- Default status should be "pending".
+- Refresh the referral table after submission.
+
+4. Improve Approve and Reject Actions
+
+Before executing the action, show a confirmation dialog.
+
+Approve confirmation:
+"Are you sure you want to approve this referral?"
+
+Reject confirmation:
+"Are you sure you want to reject this referral?"
+
+If confirmed:
+- Approve → update status to "approved"
+- Reject → update status to "rejected"
+
+The table should update immediately.
+
+5. Improve Delete Action
+
+Add confirmation before deleting.
+
+Message:
+"This will permanently delete the referral. Continue?"
+
+If confirmed:
+Delete the referral record.
+
+6. Status Badge Colors
+
+Display colored badges in the table:
+
+Pending → gray  
+Approved → green  
+Rejected → red
+
+7. Referrer Search and Referral History
+
+Improve the search functionality.
+
+When the admin searches a student's name (the referrer):
+
+The system should:
+
+- Find the student account
+- Display that student's referral information
+- Show a list of all candidates that the student has referred
+
+Example behavior:
+
+If the admin searches "Juan Dela Cruz":
+
+The page should display:
+
+Referrer Information
+- Student Name
+- Student ID or Account
+- Contact Info
+
+Below that, show:
+
+Referrals by Juan Dela Cruz
+- Candidate
+- Relationship
+- Contact
+- Status
+- Date Submitted
+
+This allows the admin to quickly see which students referred multiple candidates.
+
+8. Keep Existing UI
+
+Do NOT redesign the page layout.
+
+Keep the current styling, referral table, and sorting system.
+
+Only add:
+- Status tabs
+- Summary cards
+- Add referral modal
+- Confirmation dialogs
+- Referrer referral history when searching

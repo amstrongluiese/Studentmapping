@@ -23,7 +23,8 @@ export const referrals = pgTable("referrals", {
   referredName: text("referred_name").notNull(),
   relationship: text("relationship").notNull(),
   contactNumber: text("contact_number"),
-  status: text("status").notNull().default("pending"),
+  notes: text("notes"),
+  status: text("status").notNull().default("pending"), // pending, approved, rejected
   createdAt: timestamp("created_at").defaultNow(),
 });
 

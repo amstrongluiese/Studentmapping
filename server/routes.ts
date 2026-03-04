@@ -49,6 +49,11 @@ export async function registerRoutes(
   });
 
   // Student routes
+  app.get("/api/students", async (req, res) => {
+    const studentsList = await storage.getStudents();
+    res.json(studentsList);
+  });
+
   app.get(api.students.getByNumber.path, async (req, res) => {
     const student = await storage.getStudentByNumber(req.params.studentNumber);
     if (!student) return res.status(404).json({ message: 'Student not found' });
@@ -64,7 +69,6 @@ export async function registerRoutes(
   app.post(api.students.register.path, async (req, res) => {
     try {
       const input = api.students.register.input.parse(req.body);
-      // Basic referral code generation if not provided (should be provided by frontend logic or here)
       if (!input.referralCode) {
         input.referralCode = `TRX-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
       }
