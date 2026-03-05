@@ -26,7 +26,8 @@ import {
   XCircle,
   ArrowUpDown,
   History,
-  Info
+  Info,
+  Key
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -59,6 +60,7 @@ import {
 import {
   Form,
   FormControl,
+  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -74,16 +76,19 @@ import {
 } from "@/components/ui/dialog";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { insertReferralSchema, type School, type ReferralInput, type Referral, type Student } from "@shared/schema";
+import { insertReferralSchema, insertStudentSchema, type School, type ReferralInput, type Referral, type Student } from "@shared/schema";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Textarea } from "@/components/ui/textarea";
+import { buildUrl, api } from "@shared/routes";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Dashboard() {
+  const { toast } = useToast();
   const { data: schools, isLoading: schoolsLoading } = useSchools();
   const { data: referrals, isLoading: referralsLoading } = useReferrals();
-  const { data: students } = useQuery<Student[]>({ queryKey: ["/api/students"] });
+  const { data: students } = useQuery<Student[]>({ queryKey: [api.students.list.path] });
   
   const deleteMutation = useDeleteSchool();
   const createReferralMutation = useCreateReferral();
@@ -118,10 +123,15 @@ export default function Dashboard() {
     };
   }, [referrals]);
 
-  // Find student by name for history
+  // Enhanced search for student name, student number, or referral code
   const matchedStudent = useMemo(() => {
     if (!referralSearch || !students) return null;
-    return students.find(s => s.name.toLowerCase().includes(referralSearch.toLowerCase()));
+    const s = referralSearch.toLowerCase();
+    return students.find(student => 
+      student.name.toLowerCase().includes(s) || 
+      student.studentNumber.toLowerCase().includes(s) || 
+      student.referralCode.toLowerCase().includes(s)
+    );
   }, [referralSearch, students]);
 
   const studentReferrals = useMemo(() => {
@@ -133,7 +143,8 @@ export default function Dashboard() {
     .filter(r => {
       const matchesSearch = r.referredName.toLowerCase().includes(referralSearch.toLowerCase());
       const matchesStatus = referralStatusFilter === "all" || r.status === referralStatusFilter;
-      return matchesSearch && matchesStatus;
+      const isMatchedViaReferrer = matchedStudent && r.referrerId === matchedStudent.id;
+      return (matchesSearch || isMatchedViaReferrer) && matchesStatus;
     })
     .sort((a, b) => {
       if (referralSort === "name") return a.referredName.localeCompare(b.referredName);
@@ -170,15 +181,17 @@ export default function Dashboard() {
     if (confirmAction.type === "delete") {
       deleteReferralMutation.mutate(confirmAction.id);
     } else {
-      updateReferralMutation.mutate({ id: confirmAction.id, updates: { status: confirmAction.status } });
+      const targetStatus = confirmAction.status === "approved" ? "approved" : "rejected";
+      updateReferralMutation.mutate({ id: confirmAction.id, updates: { status: targetStatus } });
     }
     setConfirmAction(null);
   };
 
-  const referralForm = useForm<ReferralInput>({
-    resolver: zodResolver(insertReferralSchema),
+  const referralForm = useForm<ReferralInput & { referralCode?: string }>({
+    resolver: zodResolver(insertReferralSchema.extend({ referralCode: insertStudentSchema.shape.referralCode.optional() })),
     defaultValues: {
       referrerId: undefined,
+      referralCode: "",
       referredName: "",
       relationship: "",
       contactNumber: "",
@@ -187,8 +200,28 @@ export default function Dashboard() {
     }
   });
 
-  const onReferralSubmit = (data: ReferralInput) => {
-    createReferralMutation.mutate(data, {
+  const onReferralSubmit = async (data: ReferralInput & { referralCode?: string }) => {
+    let referrerId = data.referrerId;
+    
+    // Logic: If referralCode is entered, find the student account
+    if (data.referralCode) {
+      try {
+        const res = await fetch(buildUrl(api.students.getByCode.path, { referralCode: data.referralCode }));
+        if (res.ok) {
+          const student = await res.json();
+          referrerId = student.id;
+        } else {
+          toast({ variant: "destructive", title: "Invalid Code", description: "Referral code not found." });
+          return;
+        }
+      } catch (e) {
+        toast({ variant: "destructive", title: "Error", description: "Could not validate referral code." });
+        return;
+      }
+    }
+
+    const { referralCode, ...submitData } = data;
+    createReferralMutation.mutate({ ...submitData, referrerId }, {
       onSuccess: () => {
         referralForm.reset();
         setAddReferralOpen(false);
@@ -339,7 +372,7 @@ export default function Dashboard() {
             <div className="flex flex-col md:flex-row items-center justify-between gap-4 shrink-0">
               <div className="flex-1 w-full max-w-sm relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="Search referrals or students..." className="pl-9" value={referralSearch} onChange={(e) => setReferralSearch(e.target.value)} />
+                <Input placeholder="Search name, number or code..." className="pl-9" value={referralSearch} onChange={(e) => setReferralSearch(e.target.value)} />
               </div>
               <div className="flex items-center gap-4 w-full md:w-auto">
                 <Tabs value={referralStatusFilter} onValueChange={setReferralStatusFilter} className="w-full md:w-auto">
@@ -404,41 +437,53 @@ export default function Dashboard() {
                         <TableHead>Candidate</TableHead>
                         <TableHead>Relationship</TableHead>
                         <TableHead>Contact</TableHead>
+                        <TableHead>Referrer</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {referralsLoading ? Array.from({ length: 5 }).map((_, i) => <TableRow key={i}><TableCell colSpan={5}><Skeleton className="h-12 w-full" /></TableCell></TableRow>) : 
-                        sortedReferrals.length === 0 ? <TableRow><TableCell colSpan={5} className="h-32 text-center text-muted-foreground italic">No referrals found matching the criteria.</TableCell></TableRow> :
-                        sortedReferrals.map((ref) => (
-                          <TableRow key={ref.id} className="hover:bg-secondary/30 transition-colors">
-                            <TableCell className="font-bold">{ref.referredName}</TableCell>
-                            <TableCell>{ref.relationship}</TableCell>
-                            <TableCell>{ref.contactNumber}</TableCell>
-                            <TableCell>
-                              <span className={cn(
-                                "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                                ref.status === 'approved' ? "bg-green-500/10 text-green-600" : 
-                                ref.status === 'rejected' ? "bg-red-500/10 text-red-600" :
-                                "bg-muted text-muted-foreground"
-                              )}>
-                                {ref.status}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                {ref.status === 'pending' && (
-                                  <>
-                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600 hover:bg-green-500/10" onClick={() => setConfirmAction({ id: ref.id, status: 'approved', type: 'approve' })} title="Approve"><CheckCircle2 className="h-4 w-4" /></Button>
-                                    <Button size="icon" variant="ghost" className="h-8 w-8 text-red-600 hover:bg-red-500/10" onClick={() => setConfirmAction({ id: ref.id, status: 'rejected', type: 'reject' })} title="Reject"><XCircle className="h-4 w-4" /></Button>
-                                  </>
-                                )}
-                                <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => setConfirmAction({ id: ref.id, status: '', type: 'delete' })} title="Delete"><Trash2 className="h-4 w-4" /></Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                      {referralsLoading ? Array.from({ length: 5 }).map((_, i) => <TableRow key={i}><TableCell colSpan={6}><Skeleton className="h-12 w-full" /></TableCell></TableRow>) : 
+                        sortedReferrals.length === 0 ? <TableRow><TableCell colSpan={6} className="h-32 text-center text-muted-foreground italic">No referrals found matching the criteria.</TableCell></TableRow> :
+                        sortedReferrals.map((ref) => {
+                          const referrer = students?.find(s => s.id === ref.referrerId);
+                          return (
+                            <TableRow key={ref.id} className="hover:bg-secondary/30 transition-colors">
+                              <TableCell className="font-bold">{ref.referredName}</TableCell>
+                              <TableCell>{ref.relationship}</TableCell>
+                              <TableCell>{ref.contactNumber}</TableCell>
+                              <TableCell>
+                                {referrer ? (
+                                  <div className="text-xs">
+                                    <p className="font-semibold">{referrer.name}</p>
+                                    <p className="text-muted-foreground font-mono">{referrer.referralCode}</p>
+                                  </div>
+                                ) : "System"}
+                              </TableCell>
+                              <TableCell>
+                                <span className={cn(
+                                  "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                  ref.status === 'approved' ? "bg-green-500/10 text-green-600" : 
+                                  ref.status === 'rejected' ? "bg-red-500/10 text-red-600" :
+                                  "bg-muted text-muted-foreground"
+                                )}>
+                                  {ref.status}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex items-center justify-end gap-2">
+                                  {ref.status === 'pending' && (
+                                    <>
+                                      <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600 hover:bg-green-500/10" onClick={() => setConfirmAction({ id: ref.id, status: 'approved', type: 'approve' })} title="Approve"><CheckCircle2 className="h-4 w-4" /></Button>
+                                      <Button size="icon" variant="ghost" className="h-8 w-8 text-red-600 hover:bg-red-500/10" onClick={() => setConfirmAction({ id: ref.id, status: 'rejected', type: 'reject' })} title="Reject"><XCircle className="h-4 w-4" /></Button>
+                                    </>
+                                  )}
+                                  <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => setConfirmAction({ id: ref.id, status: '', type: 'delete' })} title="Delete"><Trash2 className="h-4 w-4" /></Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                     </TableBody>
                   </Table>
                 </ScrollArea>
@@ -462,6 +507,19 @@ export default function Dashboard() {
               )} />
               <FormField control={referralForm.control} name="contactNumber" render={({ field }) => (
                 <FormItem><FormLabel>Contact Number</FormLabel><FormControl><Input placeholder="09XX XXX XXXX" {...field} /></FormControl><FormMessage /></FormItem>
+              )} />
+              <FormField control={referralForm.control} name="referralCode" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Referral Code (Optional)</FormLabel>
+                  <FormControl>
+                    <div className="relative">
+                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <Input placeholder="TRX-XXXXXX" className="pl-9" {...field} />
+                    </div>
+                  </FormControl>
+                  <FormDescription>Link this referral to an existing student</FormDescription>
+                  <FormMessage />
+                </FormItem>
               )} />
               <FormField control={referralForm.control} name="notes" render={({ field }) => (
                 <FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="Any additional information..." className="resize-none" {...field} value={field.value || ""} /></FormControl><FormMessage /></FormItem>

@@ -60,6 +60,13 @@ export const api = {
     },
   },
   students: {
+    list: {
+      method: 'GET' as const,
+      path: '/api/students' as const,
+      responses: {
+        200: z.array(z.custom<typeof students.$inferSelect>()),
+      },
+    },
     getByNumber: {
       method: 'GET' as const,
       path: '/api/students/:studentNumber' as const,
