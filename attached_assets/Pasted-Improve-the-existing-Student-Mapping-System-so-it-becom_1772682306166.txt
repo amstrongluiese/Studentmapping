@@ -1,0 +1,112 @@
+Improve the existing Student Mapping System so it becomes presentation-ready for meetings and reports. The map already shows school locations with pins and floating school names. Do not recreate the map or existing pin system. Only add presentation-related improvements.
+
+⸻
+
+1. Presentation Mode
+
+Add a “Presentation Mode” button.
+
+When activated:
+	•	Switch the map to full-screen presentation view.
+	•	Hide all UI elements such as:
+	•	sidebar
+	•	filters
+	•	search bar
+	•	admin buttons
+	•	menus and controls.
+	•	Only display:
+	•	the map
+	•	school pins
+	•	floating school names.
+
+The map style should change to a plain minimal basemap suitable for projectors:
+	•	grayscale or light monochrome
+	•	minimal labels
+	•	minimal roads
+	•	clean background.
+
+⸻
+
+2. Exit Presentation Mode
+
+Provide a way to easily return to the normal interface.
+
+Add:
+	•	A small floating “Exit Presentation” button on the corner of the map.
+	•	A keyboard shortcut (ESC) that exits presentation mode.
+
+When exiting presentation mode:
+	•	restore all hidden UI components
+	•	return the map to its normal system layout.
+
+⸻
+
+3. Color-Based Pin Indicators
+
+Improve map markers so they visually represent the number of students from each school.
+
+Pin color logic:
+
+Green → 1–5 students
+Yellow → 6–10 students
+Red → 11+ students
+
+This allows viewers to quickly identify major student source schools.
+
+⸻
+
+4. Map Legend for Presentation
+
+When Presentation Mode is active, display a small legend box on the map explaining the pin colors.
+
+Example:
+
+Green – 1–5 Students
+Yellow – 6–10 Students
+Red – 11+ Students
+
+The legend should appear on a corner of the map and remain visible during presentations.
+
+⸻
+
+5. Statistics Summary Panel
+
+During presentation mode, show a small statistics panel on the map with quick information such as:
+	•	Total Schools Mapped
+	•	Total Students from Map
+	•	Top Source School
+	•	Top Province / Region
+
+This allows presenters to quickly explain the data during meetings.
+
+⸻
+
+6. Tour Mode for Presentation
+
+Add a “Tour Mode” button.
+
+When activated:
+	•	The map automatically zooms and pans between schools with the highest number of students.
+	•	Each location is highlighted for a few seconds.
+	•	The presenter can explain the data while the map moves.
+
+⸻
+
+7. Keep Existing Features
+
+Do not remove or modify existing functionality including:
+	•	school pins
+	•	floating school names
+	•	filters
+	•	student mapping data
+	•	current fullscreen button.
+
+Only extend the system with:
+	•	presentation mode
+	•	exit presentation controls
+	•	color-coded markers
+	•	legend
+	•	statistics summary
+	•	tour mode.
+
+The goal is to make the Student Mapping System clean, readable, and professional for presentations during admissions meetings.

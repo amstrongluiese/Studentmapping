@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSchools, useDeleteSchool } from "@/hooks/use-schools";
 import { useReferrals, useCreateReferral, useUpdateReferral, useDeleteReferral } from "@/hooks/use-referrals";
 import { useQuery } from "@tanstack/react-query";
@@ -27,7 +27,9 @@ import {
   ArrowUpDown,
   History,
   Info,
-  Key
+  Key,
+  MonitorPlay,
+  Play
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -104,9 +106,21 @@ export default function Dashboard() {
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<{lat: number, lng: number} | null>(null);
   const [isPresenting, setIsPresenting] = useState(false);
+  const [isTouring, setIsTouring] = useState(false);
 
   const [addReferralOpen, setAddReferralOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ id: number; status: string; type: "approve" | "reject" | "delete" } | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isPresenting) {
+        setIsPresenting(false);
+        setIsTouring(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isPresenting]);
 
   const filteredSchools = schools?.filter(s => 
     s.name.toLowerCase().includes(search.toLowerCase())
@@ -297,12 +311,38 @@ export default function Dashboard() {
                 </ScrollArea>
               </div>
               <div className="flex-1 relative z-10 h-full w-full bg-background overflow-hidden flex flex-col m-0 p-0 border-0">
-                <Button size="icon" variant="secondary" className="absolute top-6 left-6 z-[1100] shadow-xl border border-border/50 bg-background/80 backdrop-blur-md" onClick={() => setIsPresenting(!isPresenting)}>
-                  {isPresenting ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
-                </Button>
+                <div className="absolute top-6 left-6 z-[1100] flex gap-2">
+                  <Button 
+                    size="icon" 
+                    variant={isPresenting ? "destructive" : "secondary"} 
+                    className="shadow-xl border border-border/50 bg-background/80 backdrop-blur-md hover-elevate" 
+                    onClick={() => {
+                      setIsPresenting(!isPresenting);
+                      setIsTouring(false);
+                    }}
+                  >
+                    {isPresenting ? <Minimize2 className="w-5 h-5" /> : <MonitorPlay className="w-5 h-5" />}
+                  </Button>
+                  {isPresenting && (
+                    <Button 
+                      size="icon" 
+                      variant={isTouring ? "destructive" : "secondary"} 
+                      className="shadow-xl border border-border/50 bg-background/80 backdrop-blur-md animate-in fade-in slide-in-from-left-4" 
+                      onClick={() => setIsTouring(!isTouring)}
+                    >
+                      <Play className={cn("w-5 h-5", isTouring && "animate-pulse")} />
+                    </Button>
+                  )}
+                </div>
+                
                 <div className="flex-1 w-full h-full relative overflow-hidden m-0 p-0 border-0">
-                  <MapWrapper onAddSchool={handleMapClick} onEditSchool={handleEdit} />
-                  <MapLegend />
+                  <MapWrapper 
+                    onAddSchool={handleMapClick} 
+                    onEditSchool={handleEdit} 
+                    isPresenting={isPresenting}
+                    isTouring={isTouring}
+                  />
+                  {!isPresenting && <MapLegend />}
                 </div>
               </div>
             </div>
