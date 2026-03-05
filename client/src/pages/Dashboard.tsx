@@ -314,8 +314,11 @@ export default function Dashboard() {
                 <div className="absolute top-6 left-6 z-[1100] flex gap-2">
                   <Button 
                     size="icon" 
-                    variant={isPresenting ? "destructive" : "secondary"} 
-                    className="shadow-xl border border-border/50 bg-background/80 backdrop-blur-md hover-elevate" 
+                    variant="secondary" 
+                    className={cn(
+                      "shadow-xl border border-border/50 backdrop-blur-md hover-elevate transition-colors",
+                      isPresenting ? "bg-blue-600 hover:bg-blue-700 text-white border-blue-500" : "bg-background/80 text-foreground"
+                    )} 
                     onClick={() => {
                       setIsPresenting(!isPresenting);
                       setIsTouring(false);
@@ -326,8 +329,11 @@ export default function Dashboard() {
                   {isPresenting && (
                     <Button 
                       size="icon" 
-                      variant={isTouring ? "destructive" : "secondary"} 
-                      className="shadow-xl border border-border/50 bg-background/80 backdrop-blur-md animate-in fade-in slide-in-from-left-4" 
+                      variant="secondary" 
+                      className={cn(
+                        "shadow-xl border border-border/50 backdrop-blur-md animate-in fade-in slide-in-from-left-4 transition-colors",
+                        isTouring ? "bg-green-600 hover:bg-green-700 text-white border-green-500" : "bg-background/80 text-foreground"
+                      )} 
                       onClick={() => setIsTouring(!isTouring)}
                     >
                       <Play className={cn("w-5 h-5", isTouring && "animate-pulse")} />

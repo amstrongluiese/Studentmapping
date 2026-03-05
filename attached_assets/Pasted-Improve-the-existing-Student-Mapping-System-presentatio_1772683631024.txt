@@ -1,0 +1,96 @@
+Improve the existing Student Mapping System presentation interface. The map already displays school pins, floating school names, legend, statistics panel, and presentation mode features. Do not recreate the system. Only fix and improve the UI and presentation layout.
+
+1. Restore Normal Map Style
+
+Remove the plain/monochrome map used in Presentation Mode.
+
+Use the default map style (normal OpenStreetMap style) so that:
+	•	roads
+	•	place labels
+	•	geographic context
+
+are visible during presentations. The map should look natural and easy to understand.
+
+⸻
+
+2. Fix Presentation and Tour Buttons Visibility
+
+Currently the Presentation Mode button and Tour Play button become white when activated, making the icons invisible.
+
+Fix this by:
+	•	Using dark icons inside light buttons OR
+	•	Using colored buttons with white icons
+
+Example design:
+
+Normal state
+Presentation button → light gray background with dark icon
+
+Active state
+Presentation button → blue background with white icon
+
+Tour play button → green background with white play icon
+
+Icons must always remain visible and high contrast.
+
+⸻
+
+3. Improve Floating UI Layout on Map
+
+The floating UI panels (example: Quick Summary) currently block too much of the map.
+
+Improve this layout by:
+	•	Reducing panel width
+	•	Making the panel slightly transparent
+	•	Adding a collapse/minimize button
+	•	Allowing the panel to auto-hide when idle
+
+Alternative improvement:
+
+When Presentation Mode is active, move the summary panel to a smaller corner layout so the map remains the main focus.
+
+Example layout idea:
+
+Top-right corner → compact statistics panel
+Bottom-left corner → legend
+
+Avoid placing large UI elements in the center of the map.
+
+⸻
+
+4. Remove Large Empty Map Areas
+
+In the current layout there is visible white space around the map container.
+
+Fix this by:
+	•	Making the map fill the entire available container width and height
+	•	Removing unnecessary margins or padding around the map
+	•	Ensuring the map dynamically resizes to the screen size
+
+The map should always appear centered and fully stretched inside the container.
+
+⸻
+
+5. Improve Map Balance for Presentation
+
+Ensure the map remains visually balanced:
+	•	Pins should remain clearly visible
+	•	Floating school labels should not overlap excessively
+	•	UI panels should stay near the edges
+	•	The map area should remain the primary visual focus
+
+⸻
+
+6. Keep Existing Features
+
+Do not remove existing functionality such as:
+	•	school pins
+	•	student count markers
+	•	floating school names
+	•	student density legend
+	•	presentation mode
+	•	tour mode
+
+Only improve the visual clarity, layout, and usability for presentation.
+
+The goal is to make the Student Mapping System clean, readable, and professional during admissions presentations and meetings.

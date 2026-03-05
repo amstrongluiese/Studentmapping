@@ -4,8 +4,9 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useSchools } from "@/hooks/use-schools";
 import { Button } from "@/components/ui/button";
-import { MapPin, Users, Edit2, Map as MapIcon, Info, History, GraduationCap } from "lucide-react";
+import { MapPin, Users, Edit2, Map as MapIcon, Info, History, GraduationCap, ChevronDown, ChevronUp } from "lucide-react";
 import type { School } from "@shared/schema";
+import { cn } from "@/lib/utils";
 
 // Laguna Province Approx Bounding Box
 const LAGUNA_BOUNDS: L.LatLngBoundsExpression = [
@@ -13,17 +14,13 @@ const LAGUNA_BOUNDS: L.LatLngBoundsExpression = [
   [14.4533, 121.5645]  // NorthEast
 ];
 
-// Pin color logic:
-// Green → 1–5 students
-// Yellow → 6–10 students
-// Red → 11+ students
 const getMarkerColor = (count: number) => {
   if (count <= 5) return "#22c55e"; // Green
   if (count <= 10) return "#eab308"; // Yellow
   return "#ef4444"; // Red
 };
 
-const createClusterIcon = (count: number, name: string, isPresentation: boolean) => {
+const createClusterIcon = (count: number, name: string) => {
   const color = getMarkerColor(count);
   return L.divIcon({
     html: `
@@ -37,7 +34,6 @@ const createClusterIcon = (count: number, name: string, isPresentation: boolean)
             ${count}
           </div>
           
-          <!-- Permanent Floating Label -->
           <div class="absolute left-full ml-2 top-1/2 -translate-y-1/2 bg-card/90 backdrop-blur-sm border border-border px-2 py-1 rounded-md shadow-sm whitespace-nowrap pointer-events-none transition-all group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary group-hover:scale-105 group-hover:shadow-md">
             <span class="text-[11px] font-bold">${name}</span>
           </div>
@@ -104,6 +100,8 @@ function TourHandler({ isTouring, schools }: { isTouring: boolean; schools: Scho
 export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = false, isTouring = false }: MapWrapperProps) {
   const { data: schools, isLoading } = useSchools();
   const [mounted, setMounted] = useState(false);
+  const [isStatsCollapsed, setIsStatsCollapsed] = useState(false);
+  const [isLegendCollapsed, setIsLegendCollapsed] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -117,7 +115,7 @@ export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = f
   </div>;
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full overflow-hidden border-0 m-0 p-0">
       <MapContainer
         center={[14.1667, 121.2500]}
         zoom={11}
@@ -132,11 +130,8 @@ export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = f
         
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url={isPresenting 
-            ? "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          }
-          className={isPresenting ? "grayscale" : "map-tiles-light"}
+          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+          className="map-tiles-light"
         />
         
         {!isPresenting && <ZoomControl position="topright" />}
@@ -146,7 +141,7 @@ export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = f
           <Marker
             key={school.id}
             position={[school.lat, school.lng]}
-            icon={createClusterIcon(school.studentCount, school.name, isPresenting)}
+            icon={createClusterIcon(school.studentCount, school.name)}
           >
             {!isPresenting && (
               <Popup className="custom-popup border-0">
@@ -187,58 +182,92 @@ export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = f
 
       {isPresenting && (
         <>
-          {/* Legend */}
-          <div className="absolute bottom-6 left-6 z-[1000] bg-white/90 backdrop-blur-md p-4 rounded-xl shadow-xl border border-border min-w-[180px]">
-            <h4 className="text-xs font-bold uppercase tracking-wider mb-3 text-muted-foreground">Student Density</h4>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-[#22c55e]" />
-                <span className="text-sm font-medium text-foreground">1–5 Students</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-[#eab308]" />
-                <span className="text-sm font-medium text-foreground">6–10 Students</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-[#ef4444]" />
-                <span className="text-sm font-medium text-foreground">11+ Students</span>
-              </div>
+          {/* Legend - Bottom Left */}
+          <div className={cn(
+            "absolute bottom-6 left-6 z-[1000] bg-white/80 backdrop-blur-md rounded-xl shadow-xl border border-border transition-all duration-300 overflow-hidden",
+            isLegendCollapsed ? "w-10 h-10 p-0" : "w-48 p-4"
+          )}>
+            <div className="flex items-center justify-between mb-3">
+              {!isLegendCollapsed && <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Density</h4>}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 absolute top-2 right-2" 
+                onClick={() => setIsLegendCollapsed(!isLegendCollapsed)}
+              >
+                {isLegendCollapsed ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+              </Button>
             </div>
+            {!isLegendCollapsed && (
+              <div className="space-y-2 mt-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
+                  <span className="text-xs font-medium">1–5 Students</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
+                  <span className="text-xs font-medium">6–10 Students</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
+                  <span className="text-xs font-medium">11+ Students</span>
+                </div>
+              </div>
+            )}
+            {isLegendCollapsed && (
+              <div className="flex items-center justify-center h-full">
+                <Info className="h-4 w-4 text-muted-foreground" />
+              </div>
+            )}
           </div>
 
-          {/* Stats Summary Panel */}
-          <div className="absolute top-6 right-6 z-[1000] bg-white/90 backdrop-blur-md p-5 rounded-xl shadow-xl border border-border min-w-[240px]">
-            <div className="flex items-center gap-2 mb-4">
-              <BarChart2 className="w-5 h-5 text-primary" />
-              <h3 className="font-bold text-lg">Quick Summary</h3>
+          {/* Stats Summary Panel - Top Right */}
+          <div className={cn(
+            "absolute top-6 right-6 z-[1000] bg-white/80 backdrop-blur-md rounded-xl shadow-xl border border-border transition-all duration-300 overflow-hidden",
+            isStatsCollapsed ? "w-10 h-10 p-0" : "w-56 p-5"
+          )}>
+            <div className="flex items-center justify-between mb-4">
+              {!isStatsCollapsed && (
+                <div className="flex items-center gap-2">
+                  <BarChart2Icon className="w-4 h-4 text-primary" />
+                  <h3 className="font-bold text-sm">Summary</h3>
+                </div>
+              )}
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 absolute top-2 right-2" 
+                onClick={() => setIsStatsCollapsed(!isStatsCollapsed)}
+              >
+                {isStatsCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+              </Button>
             </div>
-            <div className="space-y-4">
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Total Schools Mapped</p>
-                <p className="text-xl font-black text-foreground">{schools?.length || 0}</p>
+            {!isStatsCollapsed && (
+              <div className="space-y-3 mt-2">
+                <div>
+                  <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Schools</p>
+                  <p className="text-lg font-black">{schools?.length || 0}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Total Enrollees</p>
+                  <p className="text-lg font-black text-primary">{totalStudents.toLocaleString()}</p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Top Feeder</p>
+                  <p className="text-xs font-bold truncate pr-4">{topSchool?.name || "N/A"}</p>
+                </div>
               </div>
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Total Students</p>
-                <p className="text-xl font-black text-primary">{totalStudents.toLocaleString()}</p>
+            )}
+            {isStatsCollapsed && (
+              <div className="flex items-center justify-center h-full">
+                <BarChart2Icon className="h-4 w-4 text-primary" />
               </div>
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Top Source School</p>
-                <p className="text-sm font-bold text-foreground truncate">{topSchool?.name || "N/A"}</p>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Province</p>
-                <p className="text-sm font-bold text-foreground">Laguna</p>
-              </div>
-            </div>
+            )}
           </div>
         </>
       )}
     </div>
   );
-}
-
-function BarChart2({ className }: { className?: string }) {
-  return <BarChart2Icon className={className} />;
 }
 
 import { BarChart2 as BarChart2Icon } from "lucide-react";
