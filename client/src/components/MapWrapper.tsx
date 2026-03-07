@@ -97,45 +97,6 @@ function TourHandler({ isTouring, schools }: { isTouring: boolean; schools: Scho
   return null;
 }
 
-function MapControls() {
-  const map = useMap();
-  
-  useEffect(() => {
-    // Home Control - Reset to initial bounds
-    const homeControl = L.control({ position: 'bottomleft' });
-    homeControl.onAdd = function() {
-      const div = L.DomUtil.create('div', 'leaflet-control-home leaflet-bar');
-      div.innerHTML = '<a href="#" title="Go to Laguna bounds">🏠</a>';
-      div.querySelector('a')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        map.fitBounds(LAGUNA_BOUNDS, { padding: [50, 50] });
-      });
-      return div;
-    };
-    homeControl.addTo(map);
-
-    // Download Control - Export as image
-    const downloadControl = L.control({ position: 'topright' });
-    downloadControl.onAdd = function() {
-      const div = L.DomUtil.create('div', 'leaflet-control-download leaflet-bar');
-      div.innerHTML = '<a href="#" title="Download map as image">⬇️</a>';
-      div.querySelector('a')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        alert('Map download feature coming soon!');
-      });
-      return div;
-    };
-    downloadControl.addTo(map);
-
-    return () => {
-      map.removeControl(homeControl);
-      map.removeControl(downloadControl);
-    };
-  }, [map]);
-
-  return null;
-}
-
 export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = false, isTouring = false }: MapWrapperProps) {
   const { data: schools, isLoading } = useSchools();
   const [mounted, setMounted] = useState(false);
@@ -166,7 +127,6 @@ export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = f
       >
         <InvalidateMapSize />
         <TourHandler isTouring={isTouring} schools={schools} />
-        <MapControls />
         
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
