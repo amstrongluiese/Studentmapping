@@ -1,7 +1,12 @@
 import { useSchools } from "@/hooks/use-schools";
-import { Users, AlertCircle, TrendingUp, GraduationCap, MapPin } from "lucide-react";
+import { Users, AlertCircle, TrendingUp, GraduationCap, MapPin, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
-export function MapLegend() {
+interface MapLegendProps {
+  onClose?: () => void;
+}
+
+export function MapLegend({ onClose }: MapLegendProps) {
   const { data: schools } = useSchools();
   
   if (!schools || schools.length === 0) return null;
@@ -17,6 +22,11 @@ export function MapLegend() {
           <MapPinIcon />
           Analytics Summary
         </h3>
+        {onClose && (
+          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        )}
       </div>
       
       <div className="space-y-4">

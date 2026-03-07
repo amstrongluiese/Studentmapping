@@ -29,7 +29,10 @@ import {
   Info,
   Key,
   MonitorPlay,
-  Play
+  Play,
+  PanelLeftClose,
+  PanelLeftOpen,
+  LayoutDashboard
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -107,7 +110,8 @@ export default function Dashboard() {
   const [selectedCoords, setSelectedCoords] = useState<{lat: number, lng: number} | null>(null);
   const [isPresenting, setIsPresenting] = useState(false);
   const [isTouring, setIsTouring] = useState(false);
-
+  const [isSidebarHidden, setIsSidebarHidden] = useState(false);
+  const [isLegendHidden, setIsLegendHidden] = useState(false);
   const [addReferralOpen, setAddReferralOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ id: number; status: string; type: "approve" | "reject" | "delete" } | null>(null);
 
@@ -264,17 +268,19 @@ export default function Dashboard() {
           <TabsContent value="map" className="flex-1 h-full w-full m-0 p-0 overflow-hidden relative border-0 flex flex-col data-[state=inactive]:hidden">
             <div className="flex-1 flex flex-col md:flex-row h-full w-full overflow-hidden relative">
               <div className={cn(
-                "w-full md:w-[400px] flex-shrink-0 flex flex-col border-r border-border bg-card shadow-xl z-20 h-full transition-all duration-500",
-                isPresenting && "md:-ml-[400px] opacity-0 pointer-events-none"
+                "w-full md:w-[400px] flex-shrink-0 flex flex-col border-r border-border bg-card shadow-xl z-20 h-full transition-all duration-500 relative",
+                (isPresenting || isSidebarHidden) && "md:-ml-[400px] opacity-0 pointer-events-none"
               )}>
                 <div className="p-6 pb-4 border-b border-border bg-card/50 backdrop-blur-sm">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="bg-primary p-2.5 rounded-xl shadow-inner border border-primary/20">
-                      <GraduationCap className="w-6 h-6 text-primary-foreground" />
-                    </div>
-                    <div>
-                      <h1 className="text-xl font-display font-bold leading-tight truncate">Trimex Origins</h1>
-                      <p className="text-sm text-muted-foreground">Laguna Student Tracking</p>
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-primary p-2.5 rounded-xl shadow-inner border border-primary/20">
+                        <GraduationCap className="w-6 h-6 text-primary-foreground" />
+                      </div>
+                      <div>
+                        <h1 className="text-xl font-display font-bold leading-tight truncate">Trimex Origins</h1>
+                        <p className="text-sm text-muted-foreground">Laguna Student Tracking</p>
+                      </div>
                     </div>
                   </div>
                   <div className="flex gap-2">
@@ -326,6 +332,16 @@ export default function Dashboard() {
                   >
                     {isPresenting ? <Minimize2 className="w-5 h-5" /> : <MonitorPlay className="w-5 h-5" />}
                   </Button>
+                  {!isPresenting && (
+                    <Button 
+                      size="icon" 
+                      variant="secondary" 
+                      className="shadow-xl border border-border/50 bg-background/80 backdrop-blur-md hover-elevate text-foreground" 
+                      onClick={() => setIsSidebarHidden(!isSidebarHidden)}
+                    >
+                      {isSidebarHidden ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
+                    </Button>
+                  )}
                   {isPresenting && (
                     <Button 
                       size="icon" 
@@ -340,6 +356,17 @@ export default function Dashboard() {
                     </Button>
                   )}
                 </div>
+
+                {!isPresenting && isLegendHidden && (
+                   <Button 
+                    size="icon" 
+                    variant="secondary" 
+                    className="absolute bottom-6 right-6 z-[1100] shadow-xl border border-border/50 bg-background/80 backdrop-blur-md hover-elevate text-foreground" 
+                    onClick={() => setIsLegendHidden(false)}
+                  >
+                    <LayoutDashboard className="w-5 h-5" />
+                  </Button>
+                )}
                 
                 <div className="flex-1 w-full h-full relative overflow-hidden m-0 p-0 border-0">
                   <MapWrapper 
@@ -348,7 +375,7 @@ export default function Dashboard() {
                     isPresenting={isPresenting}
                     isTouring={isTouring}
                   />
-                  {!isPresenting && <MapLegend />}
+                  {!isPresenting && !isLegendHidden && <MapLegend onClose={() => setIsLegendHidden(true)} />}
                 </div>
               </div>
             </div>
