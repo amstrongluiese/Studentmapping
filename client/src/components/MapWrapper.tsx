@@ -4,7 +4,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useSchools } from "@/hooks/use-schools";
 import { Button } from "@/components/ui/button";
-import { MapPin, Users, Edit2, Map as MapIcon, Info, History, GraduationCap, ChevronDown, ChevronUp } from "lucide-react";
+import { MapPin, Users, Edit2, Map as MapIcon, ChevronDown, ChevronUp, BarChart2 } from "lucide-react";
 import type { School } from "@shared/schema";
 import { cn } from "@/lib/utils";
 
@@ -98,7 +98,7 @@ function TourHandler({ isTouring, schools }: { isTouring: boolean; schools: Scho
 }
 
 export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = false, isTouring = false }: MapWrapperProps) {
-  const { data: schools, isLoading } = useSchools();
+  const { data: schools } = useSchools();
   const [mounted, setMounted] = useState(false);
   const [isStatsCollapsed, setIsStatsCollapsed] = useState(false);
   const [isLegendCollapsed, setIsLegendCollapsed] = useState(false);
@@ -128,10 +128,10 @@ export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = f
         <InvalidateMapSize />
         <TourHandler isTouring={isTouring} schools={schools} />
         
+        {/* OpenStreetMap tiles — more detail, real roads & place names for Laguna */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          className="map-tiles-light"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         
         {!isPresenting && <ZoomControl position="topright" />}
@@ -184,84 +184,90 @@ export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = f
         <>
           {/* Legend - Bottom Left */}
           <div className={cn(
-            "absolute bottom-6 left-6 z-[1000] bg-white/80 backdrop-blur-md rounded-xl shadow-xl border border-border transition-all duration-300 overflow-hidden",
-            isLegendCollapsed ? "w-10 h-10 p-0" : "w-48 p-4"
+            "absolute bottom-6 left-6 z-[1000] bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-border transition-all duration-300 overflow-hidden",
+            isLegendCollapsed ? "w-10 h-10" : "w-48 p-4"
           )}>
-            <div className="flex items-center justify-between mb-3">
-              {!isLegendCollapsed && <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Density</h4>}
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-6 w-6 absolute top-2 right-2" 
-                onClick={() => setIsLegendCollapsed(!isLegendCollapsed)}
+            {isLegendCollapsed ? (
+              <button
+                className="w-full h-full flex items-center justify-center hover:bg-gray-100 rounded-xl transition-colors"
+                onClick={() => setIsLegendCollapsed(false)}
+                title="Expand legend"
               >
-                {isLegendCollapsed ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-              </Button>
-            </div>
-            {!isLegendCollapsed && (
-              <div className="space-y-2 mt-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
-                  <span className="text-xs font-medium">1–5 Students</span>
+                <ChevronUp className="h-4 w-4 text-gray-700" />
+              </button>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Density</h4>
+                  <button
+                    className="h-6 w-6 flex items-center justify-center hover:bg-gray-100 rounded transition-colors"
+                    onClick={() => setIsLegendCollapsed(true)}
+                    title="Collapse legend"
+                  >
+                    <ChevronDown className="h-4 w-4 text-gray-700" />
+                  </button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
-                  <span className="text-xs font-medium">6–10 Students</span>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-[#22c55e]" />
+                    <span className="text-xs font-medium">1–5 Students</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-[#eab308]" />
+                    <span className="text-xs font-medium">6–10 Students</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
+                    <span className="text-xs font-medium">11+ Students</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[#ef4444]" />
-                  <span className="text-xs font-medium">11+ Students</span>
-                </div>
-              </div>
-            )}
-            {isLegendCollapsed && (
-              <div className="flex items-center justify-center h-full">
-                <Info className="h-4 w-4 text-muted-foreground" />
-              </div>
+              </>
             )}
           </div>
 
           {/* Stats Summary Panel - Top Right */}
           <div className={cn(
-            "absolute top-6 right-6 z-[1000] bg-white/80 backdrop-blur-md rounded-xl shadow-xl border border-border transition-all duration-300 overflow-hidden",
-            isStatsCollapsed ? "w-10 h-10 p-0" : "w-56 p-5"
+            "absolute top-6 right-6 z-[1000] bg-white/90 backdrop-blur-md rounded-xl shadow-xl border border-border transition-all duration-300 overflow-hidden",
+            isStatsCollapsed ? "w-10 h-10" : "w-56 p-5"
           )}>
-            <div className="flex items-center justify-between mb-4">
-              {!isStatsCollapsed && (
-                <div className="flex items-center gap-2">
-                  <BarChart2Icon className="w-4 h-4 text-primary" />
-                  <h3 className="font-bold text-sm">Summary</h3>
-                </div>
-              )}
-              <Button 
-                variant="ghost" 
-                size="icon" 
-                className="h-6 w-6 absolute top-2 right-2" 
-                onClick={() => setIsStatsCollapsed(!isStatsCollapsed)}
+            {isStatsCollapsed ? (
+              <button
+                className="w-full h-full flex items-center justify-center hover:bg-gray-100 rounded-xl transition-colors"
+                onClick={() => setIsStatsCollapsed(false)}
+                title="Expand summary"
               >
-                {isStatsCollapsed ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
-              </Button>
-            </div>
-            {!isStatsCollapsed && (
-              <div className="space-y-3 mt-2">
-                <div>
-                  <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Schools</p>
-                  <p className="text-lg font-black">{schools?.length || 0}</p>
+                <ChevronDown className="h-4 w-4 text-gray-700" />
+              </button>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <BarChart2 className="w-4 h-4 text-primary" />
+                    <h3 className="font-bold text-sm">Summary</h3>
+                  </div>
+                  <button
+                    className="h-6 w-6 flex items-center justify-center hover:bg-gray-100 rounded transition-colors"
+                    onClick={() => setIsStatsCollapsed(true)}
+                    title="Collapse summary"
+                  >
+                    <ChevronUp className="h-4 w-4 text-gray-700" />
+                  </button>
                 </div>
-                <div>
-                  <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Total Enrollees</p>
-                  <p className="text-lg font-black text-primary">{totalStudents.toLocaleString()}</p>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Schools</p>
+                    <p className="text-lg font-black">{schools?.length || 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Total Enrollees</p>
+                    <p className="text-lg font-black text-primary">{totalStudents.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Top Feeder</p>
+                    <p className="text-xs font-bold truncate">{topSchool?.name || "N/A"}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest leading-none">Top Feeder</p>
-                  <p className="text-xs font-bold truncate pr-4">{topSchool?.name || "N/A"}</p>
-                </div>
-              </div>
-            )}
-            {isStatsCollapsed && (
-              <div className="flex items-center justify-center h-full">
-                <BarChart2Icon className="h-4 w-4 text-primary" />
-              </div>
+              </>
             )}
           </div>
         </>
@@ -269,5 +275,3 @@ export default function MapWrapper({ onAddSchool, onEditSchool, isPresenting = f
     </div>
   );
 }
-
-import { BarChart2 as BarChart2Icon } from "lucide-react";
