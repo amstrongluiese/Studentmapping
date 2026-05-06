@@ -31,6 +31,23 @@ export async function registerRoutes(
     }
   });
 
+  // Bulk import endpoint
+  app.post('/api/schools/bulk', async (req, res) => {
+    try {
+      const { schools: schoolsList } = req.body;
+      if (!Array.isArray(schoolsList)) {
+        return res.status(400).json({ message: 'schools must be an array' });
+      }
+      const bulkSchema = z.array(api.schools.create.input);
+      const parsed = bulkSchema.parse(schoolsList);
+      const created = await storage.bulkCreateSchools(parsed);
+      res.status(201).json(created);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      throw err;
+    }
+  });
+
   app.put(api.schools.update.path, async (req, res) => {
     try {
       const input = api.schools.update.input.parse(req.body);
@@ -121,9 +138,9 @@ export async function registerRoutes(
 async function seedDatabase() {
   const existingSchools = await storage.getSchools();
   if (existingSchools.length === 0) {
-    await storage.createSchool({ name: "Laguna Science National High School", lat: 14.1610, lng: 121.2335, studentCount: 150 });
-    await storage.createSchool({ name: "Los Baños National High School", lat: 14.1706, lng: 121.2216, studentCount: 300 });
-    await storage.createSchool({ name: "Pedro Guevara Memorial National High School", lat: 14.2758, lng: 121.4168, studentCount: 420 });
-    await storage.createSchool({ name: "Calamba Bayside National High School", lat: 14.2255, lng: 121.1711, studentCount: 85 });
+    await storage.createSchool({ name: "Laguna Science National High School", municipality: "Bay", institutionType: "Public High School", lat: 14.1610, lng: 121.2335, studentCount: 150, geoStatus: "verified" });
+    await storage.createSchool({ name: "Los Baños National High School", municipality: "Los Baños", institutionType: "Public High School", lat: 14.1706, lng: 121.2216, studentCount: 300, geoStatus: "verified" });
+    await storage.createSchool({ name: "Pedro Guevara Memorial National High School", municipality: "Santa Cruz", institutionType: "Public High School", lat: 14.2758, lng: 121.4168, studentCount: 420, geoStatus: "verified" });
+    await storage.createSchool({ name: "Calamba Bayside National High School", municipality: "Calamba", institutionType: "Public High School", lat: 14.2255, lng: 121.1711, studentCount: 85, geoStatus: "verified" });
   }
 }

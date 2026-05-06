@@ -5,9 +5,12 @@ import { z } from "zod";
 export const schools = pgTable("schools", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
+  municipality: text("municipality"),
+  institutionType: text("institution_type"),
   lat: doublePrecision("lat").notNull(),
   lng: doublePrecision("lng").notNull(),
   studentCount: integer("student_count").notNull().default(0),
+  geoStatus: text("geo_status").default("verified"),
 });
 
 export const students = pgTable("students", {
@@ -24,7 +27,7 @@ export const referrals = pgTable("referrals", {
   relationship: text("relationship").notNull(),
   contactNumber: text("contact_number"),
   notes: text("notes"),
-  status: text("status").notNull().default("pending"), // pending, approved, rejected
+  status: text("status").notNull().default("pending"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

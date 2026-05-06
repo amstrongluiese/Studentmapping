@@ -6,6 +6,7 @@ export interface IStorage {
   getSchools(): Promise<School[]>;
   getSchool(id: number): Promise<School | undefined>;
   createSchool(school: InsertSchool): Promise<School>;
+  bulkCreateSchools(schoolsList: InsertSchool[]): Promise<School[]>;
   updateSchool(id: number, updates: Partial<InsertSchool>): Promise<School>;
   deleteSchool(id: number): Promise<void>;
 
@@ -34,6 +35,11 @@ export class DatabaseStorage implements IStorage {
   async createSchool(school: InsertSchool): Promise<School> {
     const [newSchool] = await db.insert(schools).values(school).returning();
     return newSchool;
+  }
+
+  async bulkCreateSchools(schoolsList: InsertSchool[]): Promise<School[]> {
+    if (schoolsList.length === 0) return [];
+    return await db.insert(schools).values(schoolsList).returning();
   }
 
   async updateSchool(id: number, updates: Partial<InsertSchool>): Promise<School> {
