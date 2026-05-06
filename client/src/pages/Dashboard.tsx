@@ -23,6 +23,11 @@ import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger,
+} from "@/components/ui/sheet";
 import type { MapOverlays } from "@/components/MapWrapper";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
@@ -87,6 +92,8 @@ export default function Dashboard() {
   const [addReferralOpen, setAddReferralOpen] = useState(false);
   const [overlays, setOverlays] = useState<MapOverlays>({ showCounts: true, showLabels: true, showDrawings: true });
   const toggleOverlay = (key: keyof MapOverlays) => setOverlays(prev => ({ ...prev, [key]: !prev[key] }));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [adminTab, setAdminTab] = useState<"registry" | "import">("registry");
   const [confirmAction, setConfirmAction] = useState<{ id: number; status: string; type: "approve" | "reject" | "delete" } | null>(null);
 
   useEffect(() => {
@@ -367,13 +374,10 @@ export default function Dashboard() {
 
               {/* LEFT controls — Map Interaction Tools */}
               <div className="absolute top-4 left-4 z-[1100] flex flex-col gap-2">
-                {/* Sidebar toggle */}
+                {/* Sidebar toggle — hidden in presentation mode */}
                 {!isPresenting && (
                   <button
-                    className={cn(
-                      "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
-                      "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
-                    )}
+                    className="h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl backdrop-blur-md transition-all"
                     onClick={() => setIsSidebarHidden(!isSidebarHidden)}
                     title={isSidebarHidden ? "Show sidebar" : "Hide sidebar"}
                   >
@@ -381,21 +385,7 @@ export default function Dashboard() {
                   </button>
                 )}
 
-                {/* Drawing mode */}
-                <button
-                  className={cn(
-                    "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
-                    isDrawing
-                      ? "bg-orange-500 text-white border-orange-400 shadow-orange-200"
-                      : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
-                  )}
-                  onClick={() => setIsDrawing(!isDrawing)}
-                  title={isDrawing ? "Exit drawing mode" : "Drawing tools"}
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
-
-                {/* Auto-tour (only in present mode) */}
+                {/* Auto-tour — only visible in presentation mode */}
                 {isPresenting && (
                   <button
                     className={cn(
@@ -414,6 +404,7 @@ export default function Dashboard() {
 
               {/* RIGHT controls — System Management */}
               <div className="absolute top-4 right-4 z-[1100] flex flex-col gap-2">
+
                 {/* Presentation mode */}
                 <button
                   className={cn(
@@ -428,37 +419,140 @@ export default function Dashboard() {
                   {isPresenting ? <Minimize2 className="w-4 h-4" /> : <MonitorPlay className="w-4 h-4" />}
                 </button>
 
-                {/* Layer Visibility Popover */}
-                <Popover>
-                  <PopoverTrigger asChild>
+                {/* Settings Sheet trigger */}
+                <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+                  <SheetTrigger asChild>
                     <button
-                      className="h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl backdrop-blur-md transition-all"
-                      title="Map overlays"
+                      className={cn(
+                        "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
+                        settingsOpen
+                          ? "bg-primary text-primary-foreground border-primary/40"
+                          : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
+                      )}
+                      title="Map settings & overlays"
                     >
-                      <Layers className="w-4 h-4" />
+                      <Settings2 className="w-4 h-4" />
                     </button>
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-52 p-3 shadow-2xl rounded-2xl border border-border/60">
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2.5 px-1">Map Overlays</p>
-                    {([
-                      { key: "showCounts" as const, label: "School Counts", desc: "Count badges on pins" },
-                      { key: "showLabels" as const, label: "School Names", desc: "Name labels on pins" },
-                      { key: "showDrawings" as const, label: "Drawing Tools", desc: "Enable drawing toolbar" },
-                    ]).map(({ key, label, desc }) => (
-                      <div
-                        key={key}
-                        className="flex items-center justify-between py-2 px-1 rounded-lg hover:bg-secondary/40 transition-colors cursor-pointer"
-                        onClick={() => toggleOverlay(key)}
-                      >
-                        <div>
-                          <p className="text-xs font-semibold leading-tight">{label}</p>
-                          <p className="text-[10px] text-muted-foreground">{desc}</p>
-                        </div>
-                        <Switch checked={overlays[key]} onCheckedChange={() => toggleOverlay(key)} className="scale-75 ml-2" />
+                  </SheetTrigger>
+                  <SheetContent side="right" className="w-72 p-0 flex flex-col gap-0 overflow-hidden">
+                    <SheetHeader className="p-5 pb-3 border-b shrink-0">
+                      <SheetTitle className="flex items-center gap-2 text-sm font-bold">
+                        <Settings2 className="w-4 h-4 text-primary" /> Map Settings
+                      </SheetTitle>
+                    </SheetHeader>
+                    <div className="flex-1 overflow-y-auto">
+
+                      {/* Map Overlays */}
+                      <div className="p-4">
+                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                          <Layers className="w-3 h-3" /> Map Overlays
+                        </p>
+                        {([
+                          { key: "showCounts" as const, label: "School Counts", desc: "Count badges on map pins" },
+                          { key: "showLabels" as const, label: "School Name Labels", desc: "Name tags beside pins" },
+                        ]).map(({ key, label, desc }) => (
+                          <div key={key} className="flex items-center justify-between py-2.5">
+                            <div>
+                              <Label className="text-xs font-semibold cursor-pointer" onClick={() => toggleOverlay(key)}>{label}</Label>
+                              <p className="text-[10px] text-muted-foreground">{desc}</p>
+                            </div>
+                            <Switch checked={overlays[key]} onCheckedChange={() => toggleOverlay(key)} />
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </PopoverContent>
-                </Popover>
+
+                      <Separator />
+
+                      {/* Draw Settings */}
+                      <div className="p-4">
+                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                          <Pencil className="w-3 h-3" /> Draw Settings
+                        </p>
+                        <div className="flex items-center justify-between py-2.5">
+                          <div>
+                            <Label className="text-xs font-semibold cursor-pointer" onClick={() => toggleOverlay("showDrawings")}>Enable Drawing</Label>
+                            <p className="text-[10px] text-muted-foreground">Show drawing toolbar on map</p>
+                          </div>
+                          <Switch checked={overlays.showDrawings} onCheckedChange={() => toggleOverlay("showDrawings")} />
+                        </div>
+                        <div className="flex items-center justify-between py-2.5">
+                          <div>
+                            <Label className="text-xs font-semibold cursor-pointer" onClick={() => setIsDrawing(!isDrawing)}>Drawing Mode</Label>
+                            <p className="text-[10px] text-muted-foreground">Activate the draw toolbar</p>
+                          </div>
+                          <Switch checked={isDrawing} onCheckedChange={() => setIsDrawing(v => !v)} />
+                        </div>
+                      </div>
+
+                      <Separator />
+
+                      {/* Analytics Settings */}
+                      <div className="p-4">
+                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                          <BarChart2 className="w-3 h-3" /> Analytics
+                        </p>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Enrollment stats and school analytics are shown in the sidebar. Switch to the Analytics tab for full charts.
+                        </p>
+                      </div>
+
+                      <Separator />
+
+                      {/* Presentation Settings */}
+                      <div className="p-4">
+                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                          <MonitorPlay className="w-3 h-3" /> Presentation
+                        </p>
+                        <div className="flex items-center justify-between py-2.5">
+                          <div>
+                            <Label className="text-xs font-semibold cursor-pointer" onClick={() => { setIsPresenting(v => !v); setSettingsOpen(false); }}>Presentation Mode</Label>
+                            <p className="text-[10px] text-muted-foreground">Fullscreen immersive GIS view</p>
+                          </div>
+                          <Switch checked={isPresenting} onCheckedChange={(v) => { setIsPresenting(v); if (!v) setIsTouring(false); setSettingsOpen(false); }} />
+                        </div>
+                        <div className="flex items-center justify-between py-2.5">
+                          <div>
+                            <Label className={cn("text-xs font-semibold", !isPresenting && "text-muted-foreground/50")}>Auto-Tour</Label>
+                            <p className="text-[10px] text-muted-foreground">Fly between top feeder schools</p>
+                          </div>
+                          <Switch checked={isTouring} onCheckedChange={setIsTouring} disabled={!isPresenting} />
+                        </div>
+                      </div>
+
+                      <Separator />
+
+                      {/* System Settings */}
+                      <div className="p-4">
+                        <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                          <ShieldCheck className="w-3 h-3" /> System
+                        </p>
+                        <div className="flex items-center justify-between py-2.5">
+                          <div>
+                            <Label className="text-xs font-semibold cursor-pointer" onClick={() => setIsSidebarHidden(v => !v)}>Hide Sidebar</Label>
+                            <p className="text-[10px] text-muted-foreground">Collapse the schools panel</p>
+                          </div>
+                          <Switch checked={isSidebarHidden} onCheckedChange={setIsSidebarHidden} />
+                        </div>
+                      </div>
+
+                    </div>
+                  </SheetContent>
+                </Sheet>
+
+                {/* Draw button — activates drawing toolbar */}
+                <button
+                  className={cn(
+                    "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
+                    isDrawing
+                      ? "bg-orange-500 text-white border-orange-400 shadow-orange-200"
+                      : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
+                  )}
+                  onClick={() => setIsDrawing(!isDrawing)}
+                  title={isDrawing ? "Exit drawing mode" : "Drawing tools"}
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+
               </div>
 
               {/* Presentation mode escape hint */}
@@ -647,106 +741,230 @@ export default function Dashboard() {
         </TabsContent>
 
         {/* ── ADMIN PORTAL TAB ── */}
-        <TabsContent value="admin" className="flex-1 h-full w-full m-0 p-6 overflow-hidden flex flex-col gap-6 data-[state=inactive]:hidden">
-          <div className="flex items-center justify-between shrink-0">
-            <div>
-              <h2 className="text-xl font-bold flex items-center gap-2">
-                <ShieldCheck className="w-5 h-5 text-primary" /> Admin Portal
-              </h2>
-              <p className="text-sm text-muted-foreground">Manage the school registry and import data</p>
+        <TabsContent value="admin" className="flex-1 h-full w-full m-0 overflow-hidden flex flex-col data-[state=inactive]:hidden">
+          {/* Admin header bar */}
+          <div className="shrink-0 flex items-center justify-between px-6 py-3 border-b bg-card/80">
+            <div className="flex items-center gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-primary" />
+              <div>
+                <h2 className="text-sm font-bold leading-tight">Admin Portal</h2>
+                <p className="text-[11px] text-muted-foreground">School Registry &amp; Data Management</p>
+              </div>
+            </div>
+            {/* Compact stat pills */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 bg-primary/8 border border-primary/15 rounded-lg px-3 py-1.5">
+                <Database className="w-3 h-3 text-primary" />
+                <span className="text-xs font-bold text-primary">{schools?.length || 0}</span>
+                <span className="text-[10px] text-primary/70">Schools</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-green-500/8 border border-green-500/15 rounded-lg px-3 py-1.5">
+                <CheckCircle2 className="w-3 h-3 text-green-600" />
+                <span className="text-xs font-bold text-green-700">{schools?.filter(s => !s.geoStatus || s.geoStatus === "verified").length || 0}</span>
+                <span className="text-[10px] text-green-600/70">Verified</span>
+              </div>
+              <div className="flex items-center gap-1.5 bg-blue-500/8 border border-blue-500/15 rounded-lg px-3 py-1.5">
+                <TrendingUp className="w-3 h-3 text-blue-600" />
+                <span className="text-xs font-bold text-blue-700">{totalStudents.toLocaleString()}</span>
+                <span className="text-[10px] text-blue-600/70">Enrollees</span>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
-            <Card
-              className="cursor-pointer hover:border-primary/40 hover:bg-primary/3 transition-all group"
-              onClick={() => setImportOpen(true)}
-            >
-              <CardContent className="p-5 flex items-center gap-4">
-                <div className="bg-primary/10 rounded-xl p-3 group-hover:bg-primary/20 transition-colors">
-                  <FileSpreadsheet className="w-6 h-6 text-primary" />
-                </div>
-                <div>
-                  <p className="font-bold text-sm">Import Schools</p>
-                  <p className="text-xs text-muted-foreground">Upload xlsx, csv, or json</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-5 flex items-center gap-4">
-                <div className="bg-blue-500/10 rounded-xl p-3">
-                  <Database className="w-6 h-6 text-blue-600" />
-                </div>
-                <div>
-                  <p className="font-bold text-sm">{schools?.length || 0} Schools</p>
-                  <p className="text-xs text-muted-foreground">In registry</p>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-5 flex items-center gap-4">
-                <div className="bg-green-500/10 rounded-xl p-3">
-                  <CheckCircle2 className="w-6 h-6 text-green-600" />
-                </div>
-                <div>
-                  <p className="font-bold text-sm">{schools?.filter(s => !s.geoStatus || s.geoStatus === "verified").length || 0} Verified</p>
-                  <p className="text-xs text-muted-foreground">With confirmed coordinates</p>
-                </div>
-              </CardContent>
-            </Card>
+          {/* Admin internal tabs */}
+          <div className="flex shrink-0 border-b bg-card px-6">
+            {(["registry", "import"] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setAdminTab(tab)}
+                className={cn(
+                  "py-2.5 px-4 text-xs font-semibold border-b-2 transition-colors capitalize -mb-px",
+                  adminTab === tab
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {tab === "registry" ? "School Registry" : "Import & Upload"}
+              </button>
+            ))}
           </div>
 
-          <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <CardHeader className="flex flex-row items-center justify-between border-b py-3 px-5">
-              <CardTitle className="text-sm font-semibold">School Registry</CardTitle>
-              <div className="relative w-56">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-                <Input
-                  placeholder="Search registry..."
-                  className="pl-8 h-8 text-xs"
-                  value={adminRegistrySearch}
-                  onChange={(e) => setAdminRegistrySearch(e.target.value)}
-                />
+          {/* Registry Tab */}
+          {adminTab === "registry" && (
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-4 gap-3">
+              <div className="flex items-center justify-between gap-3 shrink-0">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <Input
+                    placeholder="Search name, municipality, type..."
+                    className="pl-8 h-8 text-xs"
+                    value={adminRegistrySearch}
+                    onChange={(e) => setAdminRegistrySearch(e.target.value)}
+                  />
+                </div>
+                <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={handleAddClick}>
+                  <Plus className="w-3.5 h-3.5" /> Add School
+                </Button>
               </div>
-            </CardHeader>
-            <CardContent className="flex-1 p-0 overflow-hidden">
-              <ScrollArea className="h-full">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>School Name</TableHead>
-                      <TableHead>Municipality</TableHead>
-                      <TableHead>Institution Type</TableHead>
-                      <TableHead className="text-right">Students</TableHead>
-                      <TableHead>Geo Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredRegistry.map((school) => (
-                      <TableRow key={school.id} className="hover:bg-secondary/30 transition-colors text-sm">
-                        <TableCell className="font-medium max-w-[200px] truncate" title={school.name}>{school.name}</TableCell>
-                        <TableCell className="text-muted-foreground">{school.municipality || "—"}</TableCell>
-                        <TableCell className="text-muted-foreground">{school.institutionType || "—"}</TableCell>
-                        <TableCell className="text-right font-bold text-primary">{school.studentCount}</TableCell>
-                        <TableCell>{geoStatusBadge(school.geoStatus ?? null)}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => handleEdit(school)}>
-                              <Edit className="w-3.5 h-3.5" />
-                            </Button>
-                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => handleDelete(school.id)}>
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
+
+              <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                <CardContent className="flex-1 p-0 overflow-hidden">
+                  <ScrollArea className="h-full">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-muted/30">
+                          <TableHead className="text-xs">School Name</TableHead>
+                          <TableHead className="text-xs">Municipality</TableHead>
+                          <TableHead className="text-xs">Type</TableHead>
+                          <TableHead className="text-xs text-right">Students</TableHead>
+                          <TableHead className="text-xs">Status</TableHead>
+                          <TableHead className="text-xs text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredRegistry.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={6} className="text-center py-10 text-muted-foreground text-sm">
+                              {adminRegistrySearch ? "No matching schools found" : "No schools in registry yet"}
+                            </TableCell>
+                          </TableRow>
+                        ) : filteredRegistry.map((school) => (
+                          <TableRow key={school.id} className="hover:bg-secondary/30 transition-colors">
+                            <TableCell className="font-medium text-xs max-w-[180px] truncate py-2.5" title={school.name}>{school.name}</TableCell>
+                            <TableCell className="text-muted-foreground text-xs py-2.5">{school.municipality || "—"}</TableCell>
+                            <TableCell className="text-muted-foreground text-xs py-2.5 max-w-[120px] truncate">{school.institutionType || "—"}</TableCell>
+                            <TableCell className="text-right font-bold text-primary text-xs py-2.5">{school.studentCount}</TableCell>
+                            <TableCell className="py-2.5">{geoStatusBadge(school.geoStatus ?? null)}</TableCell>
+                            <TableCell className="text-right py-2.5">
+                              <div className="flex justify-end gap-1">
+                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => handleEdit(school)}>
+                                  <Edit className="w-3 h-3" />
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10" onClick={() => handleDelete(school.id)}>
+                                  <Trash2 className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Import Tab */}
+          {adminTab === "import" && (
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-4 gap-4">
+              {/* Import action card */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 shrink-0">
+                <Card
+                  className="cursor-pointer hover:border-primary/40 hover:bg-primary/3 transition-all group col-span-2 md:col-span-1"
+                  onClick={() => setImportOpen(true)}
+                >
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="bg-primary/10 rounded-xl p-2.5 group-hover:bg-primary/20 transition-colors shrink-0">
+                      <FileSpreadsheet className="w-5 h-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">Bulk Import</p>
+                      <p className="text-xs text-muted-foreground">Upload .xlsx, .csv, or .json</p>
+                    </div>
+                    <Upload className="w-4 h-4 text-primary/40 ml-auto" />
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="bg-blue-500/10 rounded-xl p-2.5 shrink-0">
+                      <Database className="w-5 h-5 text-blue-600" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">{schools?.length || 0} Schools</p>
+                      <p className="text-xs text-muted-foreground">In registry</p>
+                    </div>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4 flex items-center gap-3">
+                    <div className="bg-green-500/10 rounded-xl p-2.5 shrink-0">
+                      <CheckCircle2 className="w-5 h-5 text-green-600" />
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm">{schools?.filter(s => !s.geoStatus || s.geoStatus === "verified").length || 0} Verified</p>
+                      <p className="text-xs text-muted-foreground">GPS confirmed</p>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Expected format guide */}
+              <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                <CardHeader className="py-3 px-5 border-b shrink-0">
+                  <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4 text-primary" /> Expected File Format
+                  </CardTitle>
+                  <CardDescription className="text-xs">Required columns for bulk school import</CardDescription>
+                </CardHeader>
+                <CardContent className="p-0 flex-1 overflow-hidden">
+                  <ScrollArea className="h-full">
+                    <div className="p-5 space-y-4">
+                      <div className="rounded-xl border border-border overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/40">
+                              {["School Name", "Municipality", "Institution Type", "Latitude", "Longitude", "Student Count"].map(h => (
+                                <TableHead key={h} className="text-[10px] font-bold uppercase tracking-wide py-2">{h}</TableHead>
+                              ))}
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {[
+                              ["Lumban National HS", "Lumban", "Public High School", "14.2971", "121.4590", "120"],
+                              ["Paete NHS", "Paete", "Public High School", "", "", "85"],
+                              ["Holy Cross College", "Sta. Cruz", "Private College w/ SHS", "14.2813", "121.4173", "200"],
+                            ].map((row, i) => (
+                              <TableRow key={i} className="text-xs">
+                                {row.map((cell, j) => (
+                                  <TableCell key={j} className={cn("py-2", !cell && "text-muted-foreground/40 italic")}>
+                                    {cell || "auto-detect"}
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {[
+                          { icon: <CheckCircle2 className="w-4 h-4 text-green-600" />, title: "Coordinates Provided", desc: "School is instantly pinned on the map — no API calls needed." },
+                          { icon: <MapPin className="w-4 h-4 text-blue-600" />, title: "No Coordinates", desc: "System auto-locates using Nominatim geocoding API (rate-limited)." },
+                          { icon: <AlertCircle className="w-4 h-4 text-yellow-600" />, title: "Duplicate Detection", desc: "Fuse.js fuzzy matching removes duplicates automatically." },
+                          { icon: <Database className="w-4 h-4 text-primary" />, title: "Saved Permanently", desc: "All verified coordinates are stored — never re-fetched." },
+                        ].map(({ icon, title, desc }) => (
+                          <div key={title} className="flex items-start gap-3 p-3 rounded-xl bg-secondary/30 border border-border/50">
+                            <div className="shrink-0 mt-0.5">{icon}</div>
+                            <div>
+                              <p className="text-xs font-semibold">{title}</p>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">{desc}</p>
+                            </div>
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            </CardContent>
-          </Card>
+                        ))}
+                      </div>
+
+                      <div className="flex justify-center pt-2">
+                        <Button className="gap-2" onClick={() => setImportOpen(true)}>
+                          <Upload className="w-4 h-4" /> Start Import
+                        </Button>
+                      </div>
+                    </div>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 

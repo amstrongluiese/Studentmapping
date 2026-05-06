@@ -1,0 +1,308 @@
+SYSTEM-WIDE UI/UX, DRAW TOOLBAR, SETTINGS, AND DATA INTEGRATION LAYOUT IMPROVEMENTS
+
+Analyze and improve the existing implementation instead of rebuilding unnecessarily.
+
+IMPORTANT:
+- Audit the current architecture first.
+- Reuse and improve existing systems whenever possible.
+- Preserve stable GIS, analytics, overlay, and import functionality.
+- Do NOT create duplicate controls or duplicate workflows.
+- Focus on optimization, layout refinement, responsiveness, visual hierarchy, and enterprise-level UX.
+
+DRAW BUTTON REPOSITIONING & TOOLBAR IMPROVEMENTS
+
+Move the Draw button to the TOP RIGHT CORNER of the map interface.
+
+The Draw button should:
+- align cleanly with the other system/map controls
+- maintain consistent spacing and sizing
+- use the same visual hierarchy as other floating controls
+- remain accessible during fullscreen and Presentation Mode
+
+DRAW TOOLBAR BEHAVIOR
+
+When the Draw button is opened:
+- the drawing tools should expand vertically
+- use a vertical floating toolbar layout
+- maintain compact spacing
+- prevent overlap with analytics/settings panels
+- reposition responsively on smaller screens
+
+DRAW TOOLS SHOULD INCLUDE:
+- Free Draw
+- Line
+- Arrow
+- Polygon
+- Circle
+- Highlight Area
+- Label/Annotation
+- Eraser
+- Undo
+- Redo
+- Clear All
+
+DRAW BUTTON ICON FIX
+
+Current Problem:
+When the Draw panel opens, the icon disappears or becomes visually broken.
+
+REQUIRED FIX:
+- preserve the Draw icon while expanded
+- maintain icon visibility in all states
+- ensure active/open state styling remains visible
+- improve hover and active animations
+- keep icon centered and readable
+
+The Draw button should feel:
+- polished
+- responsive
+- visually stable
+- modern enterprise GIS quality
+
+STATUS BADGE VISIBILITY CONTROL
+
+Current Problem:
+The status/summary badge at the top-center of the map creates visual clutter and cannot be removed dynamically.
+
+REQUIRED FIX:
+Make all summary/status overlays removable and controllable from the Settings system.
+
+Users should be able to:
+- show/hide summary badge
+- show/hide feeder school counts
+- show/hide enrollment totals
+- show/hide floating statistics
+- customize overlay visibility dynamically
+
+SETTINGS SYSTEM OVERHAUL
+
+Completely improve and centralize the Settings system across the entire platform.
+
+The Settings panel should become:
+- cleaner
+- more organized
+- more powerful
+- easier to navigate
+- visually modern
+- responsive
+
+SETTINGS PANEL SHOULD INCLUDE:
+
+MAP SETTINGS
+- Toggle minimalist mode
+- Toggle municipality labels
+- Toggle school labels
+- Toggle roads
+- Toggle heatmaps
+- Toggle clusters
+- Toggle overlays
+
+DRAW SETTINGS
+- Show/Hide Drawings
+- Lock Drawing Mode
+- Clear Drawings
+- Annotation Visibility
+
+ANALYTICS SETTINGS
+- Toggle Summary Badge
+- Toggle Enrollment Statistics
+- Toggle Floating Panels
+- Toggle Municipality Analytics
+- Toggle Charts/Widgets
+
+PRESENTATION SETTINGS
+- Enter Presentation Mode
+- Hide Non-Essential UI
+- Clean Fullscreen Mode
+- Marker-Only Mode
+- Drawing-Focused Mode
+
+SYSTEM SETTINGS
+- Theme controls
+- Compact mode
+- Responsive scaling
+- Animation toggles
+
+SETTINGS UI REQUIREMENTS
+
+Use:
+- grouped sections
+- collapsible categories
+- toggles/switches
+- smooth animations
+- clean spacing
+- modern icons
+- glassmorphism styling
+- responsive layouts
+
+Avoid:
+- oversized dropdowns
+- cluttered controls
+- unnecessary floating elements
+
+DATA INTEGRATION HUB — MAJOR LAYOUT REFINEMENT
+
+Completely improve the layout and space usage of the Admissions Data Integration Hub.
+
+CURRENT PROBLEMS
+
+The Integration Hub currently:
+- wastes too much space
+- has oversized empty sections
+- uses inefficient grid layouts
+- contains unnecessary UI elements
+- lacks proper workspace optimization
+
+LEFT SIDE PANEL ISSUE
+
+The left side currently feels:
+- too spacious
+- oversized
+- visually heavy
+- inefficient for operations
+
+REQUIRED FIX
+
+Maximize the left-side space intelligently.
+
+Improve:
+- panel proportions
+- spacing
+- workspace density
+- registry operation workflow
+
+The left panel should:
+- feel compact but functional
+- support efficient registry operations
+- avoid large dead spaces
+- provide faster access to tools
+
+GRID & WORKSPACE OPTIMIZATION
+
+Refactor the layout grid system.
+
+Goals:
+- maximize usable workspace
+- reduce wasted whitespace
+- improve content density
+- improve responsiveness
+- improve visual balance
+
+MAIN WORKSPACE REQUIREMENTS
+
+The main mapping/import area should:
+- occupy more usable width
+- support dynamic resizing
+- scale better on widescreen displays
+- support cleaner content flow
+
+Remove:
+- unnecessary cards
+- oversized empty containers
+- redundant placeholders
+- duplicated controls
+
+Keep only:
+- essential tools
+- mapping controls
+- import actions
+- field mapping workflow
+- validation workflow
+- preview tables
+
+ADD TABS WHERE NECESSARY
+
+If needed, restructure sections into tabs.
+
+Possible Tabs:
+- Upload Source
+- API Connection
+- Google Sheets
+- Field Mapping
+- Validation
+- GIS Preview
+- Import Logs
+- Registry Management
+
+Purpose:
+- reduce clutter
+- improve organization
+- maximize workspace
+- improve scalability
+- improve enterprise workflow clarity
+
+FIELD MAPPING WORKSPACE IMPROVEMENT
+
+Improve the field mapping experience:
+- maximize horizontal workspace
+- improve preview table sizing
+- support side-by-side mapping
+- reduce excessive padding/margins
+
+The field mapping UI should feel:
+- efficient
+- enterprise-grade
+- scalable
+- modern
+
+IMPORT WORKFLOW IMPROVEMENT
+
+The integration workflow should feel:
+- guided
+- intelligent
+- streamlined
+- visually organized
+
+Add:
+- progress indicators
+- workflow steps
+- validation summaries
+- mapping confidence indicators
+- GIS update previews
+
+RESPONSIVE DESIGN IMPROVEMENTS
+
+Ensure:
+- layouts scale properly on smaller screens
+- controls do not overlap
+- tabs collapse intelligently
+- side panels resize dynamically
+- map remains immersive and responsive
+
+VISUAL DESIGN CONSISTENCY
+
+The entire system should maintain:
+- one design language
+- one spacing system
+- one typography hierarchy
+- one overlay hierarchy
+
+Use:
+- modern enterprise GIS styling
+- glassmorphism
+- soft shadows
+- backdrop blur
+- smooth transitions
+- rounded corners
+- compact but readable layouts
+
+Avoid:
+- cluttered grids
+- oversized sections
+- inconsistent spacing
+- floating conflicts
+- unnecessary visual noise
+
+FINAL EXPECTED RESULT
+
+The final platform should:
+- feel modern and enterprise-grade
+- maximize usable workspace
+- reduce unnecessary empty space
+- improve operational efficiency
+- maintain immersive GIS presentation quality
+- provide cleaner map interactions
+- provide a centralized settings system
+- provide responsive vertical draw controls
+- provide customizable overlay visibility
+- feel polished, scalable, and production-ready

@@ -5,16 +5,13 @@ import "leaflet-draw/dist/leaflet.draw.css";
 import "leaflet-draw";
 import { cn } from "@/lib/utils";
 import {
-  Minus, Triangle, Circle, Square, MapPin,
-  Undo2, Trash2, X
+  Minus, Pentagon, Circle, Square, MapPin,
+  Undo2, Trash2, Highlighter, ArrowRight, Type
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 const LDraw = (L as any).Draw;
-
-type DrawTool = "polyline" | "polygon" | "circle" | "rectangle" | "marker" | "freehand" | null;
-
-const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#000000"];
+type DrawTool = "polyline" | "polygon" | "circle" | "rectangle" | "marker" | null;
+const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#000000", "#ffffff"];
 
 interface DrawingToolbarProps {
   onClose: () => void;
@@ -33,7 +30,6 @@ export function DrawingToolbar({ onClose }: DrawingToolbarProps) {
     const drawnItems = new L.FeatureGroup();
     drawnItemsRef.current = drawnItems;
     map.addLayer(drawnItems);
-
     const onCreated = (e: any) => {
       drawnItems.addLayer(e.layer);
       historyRef.current = [...historyRef.current, e.layer];
@@ -41,60 +37,37 @@ export function DrawingToolbar({ onClose }: DrawingToolbarProps) {
       setActiveTool(null);
       activeHandlerRef.current = null;
     };
-
     map.on(LDraw.Event.CREATED, onCreated);
-
     return () => {
       map.off(LDraw.Event.CREATED, onCreated);
       map.removeLayer(drawnItems);
-      if (activeHandlerRef.current) {
-        try { activeHandlerRef.current.disable(); } catch {}
-      }
+      if (activeHandlerRef.current) { try { activeHandlerRef.current.disable(); } catch {} }
     };
   }, [map]);
 
-  const shapeOptions = useCallback(() => ({
+  const shapeOptions = useCallback((highlight = false) => ({
     color: activeColor,
-    weight: 3,
+    weight: highlight ? 2 : 3,
     opacity: 0.9,
-    fillOpacity: 0.15,
+    fillOpacity: highlight ? 0.25 : 0.12,
+    fillColor: activeColor,
+    dashArray: highlight ? "none" : undefined,
   }), [activeColor]);
 
-  const activate = useCallback((tool: DrawTool) => {
-    if (activeHandlerRef.current) {
-      try { activeHandlerRef.current.disable(); } catch {}
-      activeHandlerRef.current = null;
-    }
-    if (activeTool === tool) {
-      setActiveTool(null);
-      return;
-    }
+  const activate = useCallback((tool: DrawTool, highlight = false) => {
+    if (activeHandlerRef.current) { try { activeHandlerRef.current.disable(); } catch {} activeHandlerRef.current = null; }
+    if (activeTool === tool) { setActiveTool(null); return; }
     setActiveTool(tool);
-    const opts = shapeOptions();
+    const opts = shapeOptions(highlight);
     let handler: any = null;
     switch (tool) {
-      case "polyline":
-        handler = new LDraw.Polyline(map, { shapeOptions: opts });
-        break;
-      case "polygon":
-        handler = new LDraw.Polygon(map, { shapeOptions: opts });
-        break;
-      case "circle":
-        handler = new LDraw.Circle(map, { shapeOptions: opts });
-        break;
-      case "rectangle":
-        handler = new LDraw.Rectangle(map, { shapeOptions: opts });
-        break;
-      case "marker":
-        handler = new LDraw.Marker(map, {});
-        break;
-      default:
-        break;
+      case "polyline":  handler = new LDraw.Polyline(map, { shapeOptions: opts }); break;
+      case "polygon":   handler = new LDraw.Polygon(map, { shapeOptions: opts }); break;
+      case "circle":    handler = new LDraw.Circle(map, { shapeOptions: opts }); break;
+      case "rectangle": handler = new LDraw.Rectangle(map, { shapeOptions: opts }); break;
+      case "marker":    handler = new LDraw.Marker(map, {}); break;
     }
-    if (handler) {
-      handler.enable();
-      activeHandlerRef.current = handler;
-    }
+    if (handler) { handler.enable(); activeHandlerRef.current = handler; }
   }, [activeTool, map, shapeOptions]);
 
   const handleUndo = () => {
@@ -106,118 +79,94 @@ export function DrawingToolbar({ onClose }: DrawingToolbarProps) {
   };
 
   const handleClear = () => {
-    if (!drawnItemsRef.current) return;
-    drawnItemsRef.current.clearLayers();
+    drawnItemsRef.current?.clearLayers();
     historyRef.current = [];
     setHistoryLength(0);
-    if (activeHandlerRef.current) {
-      try { activeHandlerRef.current.disable(); } catch {}
-      activeHandlerRef.current = null;
-    }
+    if (activeHandlerRef.current) { try { activeHandlerRef.current.disable(); } catch {} activeHandlerRef.current = null; }
     setActiveTool(null);
   };
 
-  const handleClose = () => {
-    if (activeHandlerRef.current) {
-      try { activeHandlerRef.current.disable(); } catch {}
-      activeHandlerRef.current = null;
-    }
-    setActiveTool(null);
-    onClose();
-  };
+  useEffect(() => {
+    return () => {
+      if (activeHandlerRef.current) { try { activeHandlerRef.current.disable(); } catch {} }
+    };
+  }, []);
 
-  const tools: { key: DrawTool; icon: React.ReactNode; label: string }[] = [
-    { key: "polyline", icon: <Minus className="w-4 h-4" />, label: "Line" },
-    { key: "polygon", icon: <Triangle className="w-4 h-4" />, label: "Polygon" },
-    { key: "circle", icon: <Circle className="w-4 h-4" />, label: "Circle" },
-    { key: "rectangle", icon: <Square className="w-4 h-4" />, label: "Rectangle" },
-    { key: "marker", icon: <MapPin className="w-4 h-4" />, label: "Marker" },
+  type ToolDef = { key: DrawTool; icon: React.ReactNode; label: string; highlight?: boolean };
+
+  const tools: ToolDef[] = [
+    { key: "polyline",  icon: <Minus className="w-3.5 h-3.5" />,       label: "Line" },
+    { key: "polyline",  icon: <ArrowRight className="w-3.5 h-3.5" />,   label: "Arrow / Path" },
+    { key: "polygon",   icon: <Pentagon className="w-3.5 h-3.5" />,     label: "Polygon" },
+    { key: "circle",    icon: <Circle className="w-3.5 h-3.5" />,       label: "Circle" },
+    { key: "rectangle", icon: <Highlighter className="w-3.5 h-3.5" />,  label: "Highlight Area", highlight: true },
+    { key: "rectangle", icon: <Square className="w-3.5 h-3.5" />,       label: "Rectangle" },
+    { key: "marker",    icon: <MapPin className="w-3.5 h-3.5" />,       label: "Pin / Annotation" },
+    { key: "marker",    icon: <Type className="w-3.5 h-3.5" />,         label: "Label" },
   ];
 
   return (
-    <div className="absolute right-4 top-1/2 -translate-y-1/2 z-[1100] flex flex-col gap-1.5 bg-white/95 backdrop-blur-md rounded-2xl shadow-2xl border border-border p-2 w-12 animate-in slide-in-from-right-4 fade-in duration-300">
-      <div className="flex justify-center">
-        <Button
-          size="icon"
-          variant="ghost"
-          className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-gray-100 rounded-xl"
-          onClick={handleClose}
-          title="Close drawing tools"
-        >
-          <X className="w-3.5 h-3.5" />
-        </Button>
-      </div>
+    <div className="absolute top-[148px] right-4 z-[1100] flex flex-col gap-1 bg-white/96 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/70 p-2 w-[44px] animate-in slide-in-from-top-2 fade-in duration-200">
+      {/* Divider label */}
+      <p className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest text-center py-0.5 leading-none">Tools</p>
 
-      <div className="h-px bg-border mx-1" />
-
-      {tools.map(({ key, icon, label }) => (
-        <Button
-          key={key}
-          size="icon"
-          variant="ghost"
+      {tools.map(({ key, icon, label, highlight }, i) => (
+        <button
+          key={`${key}-${i}`}
           title={label}
           className={cn(
-            "h-8 w-8 rounded-xl transition-all",
+            "h-8 w-8 flex items-center justify-center rounded-xl transition-all",
             activeTool === key
               ? "bg-primary text-primary-foreground shadow-md scale-105"
-              : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+              : "text-gray-500 hover:bg-secondary/70 hover:text-gray-900 hover:scale-105"
           )}
-          onClick={() => activate(key)}
+          onClick={() => activate(key, highlight)}
         >
           {icon}
-        </Button>
+        </button>
       ))}
 
-      <div className="h-px bg-border mx-1" />
+      <div className="h-px bg-border/50 mx-1 my-0.5" />
+      <p className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest text-center leading-none">Color</p>
 
-      <div className="flex flex-col gap-1 px-1">
-        {COLORS.map(color => (
-          <button
-            key={color}
-            title={`Color: ${color}`}
-            className={cn(
-              "w-6 h-6 rounded-full mx-auto border-2 transition-transform hover:scale-110",
-              activeColor === color ? "border-foreground scale-110 shadow-md" : "border-transparent"
-            )}
-            style={{ backgroundColor: color }}
-            onClick={() => setActiveColor(color)}
-          />
-        ))}
-      </div>
+      {COLORS.map(color => (
+        <button
+          key={color}
+          title={color}
+          className={cn(
+            "w-6 h-6 rounded-full mx-auto border-2 transition-all hover:scale-110",
+            activeColor === color ? "border-gray-700 scale-110 shadow-sm" : "border-transparent opacity-80"
+          )}
+          style={{ backgroundColor: color, boxShadow: color === "#ffffff" ? "inset 0 0 0 1px #ddd" : undefined }}
+          onClick={() => setActiveColor(color)}
+        />
+      ))}
 
-      <div className="h-px bg-border mx-1" />
+      <div className="h-px bg-border/50 mx-1 my-0.5" />
 
-      <Button
-        size="icon"
-        variant="ghost"
+      <button
         title="Undo last"
+        disabled={historyLength === 0}
         className={cn(
-          "h-8 w-8 rounded-xl transition-all",
-          historyLength === 0
-            ? "text-gray-300 cursor-not-allowed"
-            : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+          "h-8 w-8 flex items-center justify-center rounded-xl transition-all",
+          historyLength === 0 ? "text-gray-200 cursor-not-allowed" : "text-gray-500 hover:bg-secondary/70 hover:text-gray-900"
         )}
         onClick={handleUndo}
-        disabled={historyLength === 0}
       >
-        <Undo2 className="w-4 h-4" />
-      </Button>
+        <Undo2 className="w-3.5 h-3.5" />
+      </button>
 
-      <Button
-        size="icon"
-        variant="ghost"
+      <button
         title="Clear all drawings"
+        disabled={historyLength === 0}
         className={cn(
-          "h-8 w-8 rounded-xl transition-all",
-          historyLength === 0
-            ? "text-gray-300 cursor-not-allowed"
-            : "text-destructive hover:bg-destructive/10"
+          "h-8 w-8 flex items-center justify-center rounded-xl transition-all",
+          historyLength === 0 ? "text-gray-200 cursor-not-allowed" : "text-red-400 hover:bg-red-50 hover:text-red-600"
         )}
         onClick={handleClear}
-        disabled={historyLength === 0}
       >
-        <Trash2 className="w-4 h-4" />
-      </Button>
+        <Trash2 className="w-3.5 h-3.5" />
+      </button>
     </div>
   );
 }
