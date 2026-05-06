@@ -17,8 +17,13 @@ import {
   CheckCircle2, XCircle, ArrowUpDown, Key, MonitorPlay,
   Play, PanelLeftClose, PanelLeftOpen, Pencil,
   Upload, Users, ShieldCheck, Settings2, Database,
-  FileSpreadsheet, AlertCircle, TrendingUp
+  FileSpreadsheet, AlertCircle, TrendingUp, Layers
 } from "lucide-react";
+import {
+  Popover, PopoverContent, PopoverTrigger,
+} from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
+import type { MapOverlays } from "@/components/MapWrapper";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -80,6 +85,8 @@ export default function Dashboard() {
   const [isSidebarHidden, setIsSidebarHidden] = useState(false);
   const [isDrawing, setIsDrawing] = useState(false);
   const [addReferralOpen, setAddReferralOpen] = useState(false);
+  const [overlays, setOverlays] = useState<MapOverlays>({ showCounts: true, showLabels: true, showDrawings: true });
+  const toggleOverlay = (key: keyof MapOverlays) => setOverlays(prev => ({ ...prev, [key]: !prev[key] }));
   const [confirmAction, setConfirmAction] = useState<{ id: number; status: string; type: "approve" | "reject" | "delete" } | null>(null);
 
   useEffect(() => {
@@ -357,71 +364,118 @@ export default function Dashboard() {
 
             {/* Map Area */}
             <div className="flex-1 relative z-10 h-full w-full overflow-hidden">
-              {/* Floating top-left controls */}
-              <div className="absolute top-4 left-4 z-[1100] flex gap-2">
-                <Button
-                  size="icon"
-                  variant="secondary"
-                  className={cn(
-                    "h-9 w-9 shadow-lg border border-border/50 backdrop-blur-md transition-colors",
-                    isPresenting
-                      ? "bg-blue-600 hover:bg-blue-700 text-white border-blue-500"
-                      : "bg-white/90 text-gray-800 hover:bg-gray-100"
-                  )}
-                  onClick={() => { setIsPresenting(!isPresenting); setIsTouring(false); }}
-                  title={isPresenting ? "Exit presentation" : "Presentation mode"}
-                >
-                  {isPresenting ? <Minimize2 className="w-4 h-4" /> : <MonitorPlay className="w-4 h-4" />}
-                </Button>
 
+              {/* LEFT controls — Map Interaction Tools */}
+              <div className="absolute top-4 left-4 z-[1100] flex flex-col gap-2">
+                {/* Sidebar toggle */}
                 {!isPresenting && (
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className="h-9 w-9 shadow-lg border border-border/50 bg-white/90 text-gray-800 hover:bg-gray-100 backdrop-blur-md"
+                  <button
+                    className={cn(
+                      "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
+                      "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
+                    )}
                     onClick={() => setIsSidebarHidden(!isSidebarHidden)}
                     title={isSidebarHidden ? "Show sidebar" : "Hide sidebar"}
                   >
                     {isSidebarHidden ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
-                  </Button>
+                  </button>
                 )}
 
-                {isPresenting && (
-                  <Button
-                    size="icon"
-                    variant="secondary"
-                    className={cn(
-                      "h-9 w-9 shadow-lg border border-border/50 backdrop-blur-md transition-colors animate-in fade-in slide-in-from-left-2",
-                      isTouring ? "bg-green-600 hover:bg-green-700 text-white border-green-500" : "bg-white/90 text-gray-800 hover:bg-gray-100"
-                    )}
-                    onClick={() => setIsTouring(!isTouring)}
-                    title={isTouring ? "Stop tour" : "Start auto-tour"}
-                  >
-                    <Play className={cn("w-4 h-4", isTouring && "animate-pulse")} />
-                  </Button>
-                )}
-
-                <Button
-                  size="icon"
-                  variant="secondary"
+                {/* Drawing mode */}
+                <button
                   className={cn(
-                    "h-9 w-9 shadow-lg border border-border/50 backdrop-blur-md transition-colors",
-                    isDrawing ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-400" : "bg-white/90 text-gray-800 hover:bg-gray-100"
+                    "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
+                    isDrawing
+                      ? "bg-orange-500 text-white border-orange-400 shadow-orange-200"
+                      : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
                   )}
                   onClick={() => setIsDrawing(!isDrawing)}
                   title={isDrawing ? "Exit drawing mode" : "Drawing tools"}
                 >
                   <Pencil className="w-4 h-4" />
-                </Button>
+                </button>
+
+                {/* Auto-tour (only in present mode) */}
+                {isPresenting && (
+                  <button
+                    className={cn(
+                      "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all animate-in fade-in",
+                      isTouring
+                        ? "bg-green-500 text-white border-green-400 shadow-green-200"
+                        : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
+                    )}
+                    onClick={() => setIsTouring(!isTouring)}
+                    title={isTouring ? "Stop auto-tour" : "Start auto-tour"}
+                  >
+                    <Play className={cn("w-4 h-4", isTouring && "animate-pulse")} />
+                  </button>
+                )}
               </div>
+
+              {/* RIGHT controls — System Management */}
+              <div className="absolute top-4 right-4 z-[1100] flex flex-col gap-2">
+                {/* Presentation mode */}
+                <button
+                  className={cn(
+                    "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
+                    isPresenting
+                      ? "bg-blue-600 text-white border-blue-500 shadow-blue-200"
+                      : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
+                  )}
+                  onClick={() => { setIsPresenting(!isPresenting); setIsTouring(false); setIsSidebarHidden(false); }}
+                  title={isPresenting ? "Exit presentation (Esc)" : "Presentation mode"}
+                >
+                  {isPresenting ? <Minimize2 className="w-4 h-4" /> : <MonitorPlay className="w-4 h-4" />}
+                </button>
+
+                {/* Layer Visibility Popover */}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      className="h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl backdrop-blur-md transition-all"
+                      title="Map overlays"
+                    >
+                      <Layers className="w-4 h-4" />
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-52 p-3 shadow-2xl rounded-2xl border border-border/60">
+                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-2.5 px-1">Map Overlays</p>
+                    {([
+                      { key: "showCounts" as const, label: "School Counts", desc: "Count badges on pins" },
+                      { key: "showLabels" as const, label: "School Names", desc: "Name labels on pins" },
+                      { key: "showDrawings" as const, label: "Drawing Tools", desc: "Enable drawing toolbar" },
+                    ]).map(({ key, label, desc }) => (
+                      <div
+                        key={key}
+                        className="flex items-center justify-between py-2 px-1 rounded-lg hover:bg-secondary/40 transition-colors cursor-pointer"
+                        onClick={() => toggleOverlay(key)}
+                      >
+                        <div>
+                          <p className="text-xs font-semibold leading-tight">{label}</p>
+                          <p className="text-[10px] text-muted-foreground">{desc}</p>
+                        </div>
+                        <Switch checked={overlays[key]} onCheckedChange={() => toggleOverlay(key)} className="scale-75 ml-2" />
+                      </div>
+                    ))}
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Presentation mode escape hint */}
+              {isPresenting && (
+                <div className="absolute bottom-4 right-4 z-[1000] bg-black/40 backdrop-blur-md text-white/70 text-[10px] font-medium px-3 py-1.5 rounded-full border border-white/10">
+                  Press <kbd className="font-bold">Esc</kbd> to exit
+                </div>
+              )}
 
               <MapWrapper
                 onAddSchool={handleMapClick}
                 onEditSchool={handleEdit}
                 isPresenting={isPresenting}
                 isTouring={isTouring}
-                isDrawing={isDrawing}
+                isDrawing={isDrawing && overlays.showDrawings}
                 onDrawingClose={() => setIsDrawing(false)}
+                overlays={overlays}
               />
             </div>
           </div>
