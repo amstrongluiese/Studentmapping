@@ -12,12 +12,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import {
   Plus, Search, MapPin, MoreVertical, Trash2, Edit,
-  GraduationCap, Maximize2, Minimize2, BarChart2,
+  GraduationCap, Minimize2, BarChart2,
   UserPlus, Map as MapIcon, Table as TableIcon,
   CheckCircle2, XCircle, ArrowUpDown, Key, MonitorPlay,
   Play, PanelLeftClose, PanelLeftOpen, Pencil,
   Upload, Users, ShieldCheck, Settings2, Database,
-  FileSpreadsheet, AlertCircle, TrendingUp, Layers
+  FileSpreadsheet, AlertCircle, TrendingUp, Layers,
+  Loader2, Globe, Sparkles
 } from "lucide-react";
 import {
   Popover, PopoverContent, PopoverTrigger,
@@ -118,6 +119,40 @@ export default function Dashboard() {
     if (!search.trim()) return schools || [];
     return fuse.search(search).map(r => r.item);
   }, [search, fuse, schools]);
+
+  // Smart Nominatim search — fires when local Fuse.js finds nothing
+  const [nominatimResults, setNominatimResults] = useState<Array<{ display_name: string; lat: string; lon: string; type: string }>>([]);
+  const [nominatimLoading, setNominatimLoading] = useState(false);
+
+  useEffect(() => {
+    if (!search.trim() || filteredSchools.length > 0) {
+      setNominatimResults([]);
+      setNominatimLoading(false);
+      return;
+    }
+    setNominatimLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const q = encodeURIComponent(`${search} school Laguna Philippines`);
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=6&countrycodes=ph&addressdetails=0`,
+          { headers: { "Accept-Language": "en" } }
+        );
+        if (!res.ok) throw new Error("Nominatim error");
+        const data = await res.json();
+        setNominatimResults(
+          (data as any[])
+            .filter((d) => d.lat && d.lon)
+            .slice(0, 5)
+        );
+      } catch {
+        setNominatimResults([]);
+      } finally {
+        setNominatimLoading(false);
+      }
+    }, 700);
+    return () => { clearTimeout(timer); setNominatimLoading(false); };
+  }, [search, filteredSchools.length]);
 
   // Admin registry search
   const adminFuse = useMemo(() => new Fuse(schools || [], {
@@ -283,12 +318,56 @@ export default function Dashboard() {
                 <div className="relative w-full">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                   <Input
-                    placeholder="Search by name, municipality..."
+                    placeholder="Search or discover schools…"
                     className="pl-9 w-full bg-secondary/40 border-border/60 text-sm"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
                 </div>
+
+                {/* Nominatim smart search results */}
+                {search.trim() && filteredSchools.length === 0 && (
+                  <div className="mt-1.5">
+                    {nominatimLoading ? (
+                      <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+                        <Loader2 className="w-3 h-3 animate-spin" style={{ color: "hsl(164 80% 44%)" }} />
+                        <span>Searching Laguna schools…</span>
+                      </div>
+                    ) : nominatimResults.length > 0 ? (
+                      <div className="space-y-1">
+                        <p className="text-[9px] font-bold uppercase tracking-widest flex items-center gap-1 mb-1.5" style={{ color: "hsl(164 80% 44%)" }}>
+                          <Sparkles className="w-2.5 h-2.5" /> Nearby schools found — click to add
+                        </p>
+                        {nominatimResults.map((r, i) => {
+                          const parts = r.display_name.split(",");
+                          const name = parts[0].trim();
+                          const location = parts.slice(1, 3).join(",").trim();
+                          return (
+                            <button
+                              key={i}
+                              className="w-full text-left px-3 py-2 rounded-xl transition-all hover:scale-[1.01]"
+                              style={{ background: "rgba(16,217,160,0.06)", border: "1px solid rgba(16,217,160,0.15)" }}
+                              onClick={() => {
+                                handleMapClick(parseFloat(r.lat), parseFloat(r.lon));
+                                setSearch("");
+                              }}
+                            >
+                              <div className="flex items-start gap-2">
+                                <Globe className="w-3 h-3 mt-0.5 shrink-0" style={{ color: "hsl(164 80% 44%)" }} />
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold truncate text-foreground">{name}</p>
+                                  <p className="text-[10px] text-muted-foreground truncate">{location}</p>
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : !nominatimLoading && (
+                      <p className="text-xs text-muted-foreground py-1">No schools found in Laguna</p>
+                    )}
+                  </div>
+                )}
 
                 {/* Inline Analytics Mini-Cards */}
                 <div className="grid grid-cols-2 gap-2 mt-3">
@@ -324,13 +403,14 @@ export default function Dashboard() {
                         >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
                             <div
-                              className="flex items-center justify-center w-9 h-9 rounded-full font-bold text-xs border-2 shrink-0 text-white"
+                              className="flex items-center justify-center w-9 h-9 rounded-full font-bold text-xs border-2 shrink-0"
                               style={{
-                                backgroundColor: school.studentCount <= 5 ? "#22c55e" : school.studentCount <= 10 ? "#eab308" : "#ef4444",
-                                borderColor: school.studentCount <= 5 ? "#16a34a" : school.studentCount <= 10 ? "#ca8a04" : "#dc2626",
+                                backgroundColor: school.studentCount <= 50 ? "#10d9a0" : school.studentCount <= 200 ? "#fbbf24" : "#f87171",
+                                borderColor: school.studentCount <= 50 ? "#0bbf8a" : school.studentCount <= 200 ? "#d97706" : "#ef4444",
+                                color: school.studentCount <= 50 ? "#0c1220" : "#fff",
                               }}
                             >
-                              {school.studentCount}
+                              {school.studentCount > 999 ? "999+" : school.studentCount}
                             </div>
                             <div className="min-w-0 flex-1">
                               <h4 className="font-semibold text-sm text-foreground truncate group-hover:text-primary transition-colors">
@@ -377,7 +457,7 @@ export default function Dashboard() {
                 {/* Sidebar toggle — hidden in presentation mode */}
                 {!isPresenting && (
                   <button
-                    className="h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl backdrop-blur-md transition-all"
+                    className="map-btn"
                     onClick={() => setIsSidebarHidden(!isSidebarHidden)}
                     title={isSidebarHidden ? "Show sidebar" : "Hide sidebar"}
                   >
@@ -388,12 +468,7 @@ export default function Dashboard() {
                 {/* Auto-tour — only visible in presentation mode */}
                 {isPresenting && (
                   <button
-                    className={cn(
-                      "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all animate-in fade-in",
-                      isTouring
-                        ? "bg-green-500 text-white border-green-400 shadow-green-200"
-                        : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
-                    )}
+                    className={cn("map-btn animate-in fade-in", isTouring && "active-green")}
                     onClick={() => setIsTouring(!isTouring)}
                     title={isTouring ? "Stop auto-tour" : "Start auto-tour"}
                   >
@@ -407,12 +482,7 @@ export default function Dashboard() {
 
                 {/* Presentation mode */}
                 <button
-                  className={cn(
-                    "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
-                    isPresenting
-                      ? "bg-blue-600 text-white border-blue-500 shadow-blue-200"
-                      : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
-                  )}
+                  className={cn("map-btn", isPresenting && "active-blue")}
                   onClick={() => { setIsPresenting(!isPresenting); setIsTouring(false); setIsSidebarHidden(false); }}
                   title={isPresenting ? "Exit presentation (Esc)" : "Presentation mode"}
                 >
@@ -423,12 +493,7 @@ export default function Dashboard() {
                 <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
                   <SheetTrigger asChild>
                     <button
-                      className={cn(
-                        "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
-                        settingsOpen
-                          ? "bg-primary text-primary-foreground border-primary/40"
-                          : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
-                      )}
+                      className={cn("map-btn", settingsOpen && "active-teal")}
                       title="Map settings & overlays"
                     >
                       <Settings2 className="w-4 h-4" />
@@ -541,12 +606,7 @@ export default function Dashboard() {
 
                 {/* Draw button — activates drawing toolbar */}
                 <button
-                  className={cn(
-                    "h-9 w-9 flex items-center justify-center rounded-xl shadow-lg border backdrop-blur-md transition-all",
-                    isDrawing
-                      ? "bg-orange-500 text-white border-orange-400 shadow-orange-200"
-                      : "bg-white/95 text-gray-700 hover:bg-white border-white/60 hover:shadow-xl"
-                  )}
+                  className={cn("map-btn", isDrawing && "active-orange")}
                   onClick={() => setIsDrawing(!isDrawing)}
                   title={isDrawing ? "Exit drawing mode" : "Drawing tools"}
                 >
