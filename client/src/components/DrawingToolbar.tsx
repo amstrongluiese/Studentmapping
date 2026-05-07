@@ -4,21 +4,14 @@ import L from "leaflet";
 import "leaflet-draw/dist/leaflet.draw.css";
 import "leaflet-draw";
 import { cn } from "@/lib/utils";
-import {
-  Minus, Hexagon, Circle, Square, MapPin,
-  Undo2, Trash2, Highlighter, PenLine,
-} from "lucide-react";
+import { Minus, Hexagon, Circle, Square, MapPin, Undo2, Trash2, Highlighter, PenLine } from "lucide-react";
 
-// Fix leaflet-draw strict-mode bug: "type is not defined" in readableArea
+// Fix leaflet-draw strict-mode bug
 (function patchLeafletDraw() {
   const G = (L as any).GeometryUtil;
   if (!G) return;
   G.readableArea = function (area: number, isMetric: boolean) {
-    if (isMetric) {
-      return area >= 1000000
-        ? (area / 1000000).toFixed(2) + " km²"
-        : area.toFixed(2) + " m²";
-    }
+    if (isMetric) return area >= 1000000 ? (area / 1000000).toFixed(2) + " km²" : area.toFixed(2) + " m²";
     const acres = area / 4047;
     return acres >= 640 ? (acres / 640).toFixed(2) + " mi²" : acres.toFixed(2) + " ac";
   };
@@ -39,23 +32,19 @@ const COLORS = [
 ];
 
 const TOOLS: { id: ToolId; icon: React.ReactNode; label: string }[] = [
-  { id: "freehand",  icon: <PenLine className="w-3.5 h-3.5" />,     label: "Freehand Draw" },
-  { id: "line",      icon: <Minus className="w-3.5 h-3.5" />,        label: "Line" },
-  { id: "polygon",   icon: <Hexagon className="w-3.5 h-3.5" />,      label: "Polygon" },
-  { id: "circle",    icon: <Circle className="w-3.5 h-3.5" />,       label: "Circle" },
-  { id: "highlight", icon: <Highlighter className="w-3.5 h-3.5" />,  label: "Highlight Area" },
-  { id: "rectangle", icon: <Square className="w-3.5 h-3.5" />,       label: "Rectangle" },
-  { id: "marker",    icon: <MapPin className="w-3.5 h-3.5" />,       label: "Pin / Marker" },
+  { id: "freehand",  icon: <PenLine className="w-3.5 h-3.5" />,    label: "Freehand Draw" },
+  { id: "line",      icon: <Minus className="w-3.5 h-3.5" />,       label: "Line" },
+  { id: "polygon",   icon: <Hexagon className="w-3.5 h-3.5" />,     label: "Polygon" },
+  { id: "circle",    icon: <Circle className="w-3.5 h-3.5" />,      label: "Circle" },
+  { id: "highlight", icon: <Highlighter className="w-3.5 h-3.5" />, label: "Highlight" },
+  { id: "rectangle", icon: <Square className="w-3.5 h-3.5" />,      label: "Rectangle" },
+  { id: "marker",    icon: <MapPin className="w-3.5 h-3.5" />,      label: "Pin / Marker" },
 ];
 
-interface DrawingToolbarProps {
-  onClose: () => void;
-}
+interface DrawingToolbarProps { onClose: () => void; }
 
 export function DrawingToolbar({ onClose }: DrawingToolbarProps) {
   const map = useMap();
-
-  // Use refs for all mutable drawing state to avoid stale closures
   const drawnItemsRef = useRef<L.FeatureGroup | null>(null);
   const handlerRef = useRef<{ disable: () => void } | null>(null);
   const historyRef = useRef<L.Layer[]>([]);
@@ -66,20 +55,16 @@ export function DrawingToolbar({ onClose }: DrawingToolbarProps) {
   const [activeColor, setActiveColor] = useState(COLORS[0].hex);
   const [historyLen, setHistoryLen] = useState(0);
 
-  // Initialize feature group
   useEffect(() => {
     const group = new L.FeatureGroup();
     drawnItemsRef.current = group;
     map.addLayer(group);
-
     const onCreated = (e: any) => {
       group.addLayer(e.layer);
       historyRef.current.push(e.layer);
       setHistoryLen(h => h + 1);
     };
-
     map.on(LDraw.Event.CREATED, onCreated);
-
     return () => {
       map.off(LDraw.Event.CREATED, onCreated);
       disableCurrentHandler();
@@ -99,8 +84,10 @@ export function DrawingToolbar({ onClose }: DrawingToolbarProps) {
     color: colorRef.current,
     weight: highlight ? 2 : 3,
     opacity: 0.95,
-    fillOpacity: highlight ? 0.30 : 0.12,
+    fillOpacity: highlight ? 0.28 : 0.10,
     fillColor: colorRef.current,
+    lineCap: "round" as const,
+    lineJoin: "round" as const,
   });
 
   const enableFreehand = () => {
@@ -111,78 +98,41 @@ export function DrawingToolbar({ onClose }: DrawingToolbarProps) {
     const onDown = (e: L.LeafletMouseEvent) => {
       drawing = true;
       pts = [e.latlng];
-      currentLine = L.polyline(pts, {
-        color: colorRef.current,
-        weight: 3,
-        opacity: 0.95,
-        lineCap: "round",
-        lineJoin: "round",
-      }).addTo(drawnItemsRef.current!);
+      currentLine = L.polyline(pts, { color: colorRef.current, weight: 3, opacity: 0.95, lineCap: "round", lineJoin: "round" }).addTo(drawnItemsRef.current!);
       map.dragging.disable();
     };
-
     const onMove = (e: L.LeafletMouseEvent) => {
       if (!drawing || !currentLine) return;
       pts.push(e.latlng);
       currentLine.setLatLngs(pts);
     };
-
     const onUp = () => {
       if (!drawing) return;
       drawing = false;
-      if (currentLine && pts.length > 1) {
-        historyRef.current.push(currentLine);
-        setHistoryLen(h => h + 1);
-      } else if (currentLine) {
-        drawnItemsRef.current?.removeLayer(currentLine);
-      }
-      currentLine = null;
-      pts = [];
+      if (currentLine && pts.length > 1) { historyRef.current.push(currentLine); setHistoryLen(h => h + 1); }
+      else if (currentLine) drawnItemsRef.current?.removeLayer(currentLine);
+      currentLine = null; pts = [];
     };
 
     map.on("mousedown", onDown as any);
     map.on("mousemove", onMove as any);
     map.on("mouseup", onUp);
 
-    // Touch support
-    map.on("touchstart", (e: any) => onDown(e.originalEvent?.touches?.[0] ? e : e));
-    map.on("touchmove", (e: any) => { e.originalEvent?.preventDefault(); onMove(e); });
-    map.on("touchend", onUp);
-
     return {
       disable: () => {
         map.off("mousedown", onDown as any);
         map.off("mousemove", onMove as any);
         map.off("mouseup", onUp);
-        map.off("touchstart");
-        map.off("touchmove");
-        map.off("touchend", onUp);
         map.dragging.enable();
         drawing = false;
       },
     };
   };
 
-  const activateTool = (id: ToolId) => {
+  const restartCurrentTool = (id: ToolId) => {
     disableCurrentHandler();
-
-    // Toggle off
-    if (activeIdRef.current === id) {
-      activeIdRef.current = null;
-      setActiveId(null);
-      return;
-    }
-
-    activeIdRef.current = id;
-    setActiveId(id);
-
     const opts = shapeOpts(id === "highlight");
-
-    if (id === "freehand") {
-      handlerRef.current = enableFreehand();
-      return;
-    }
-
+    if (id === "freehand") { handlerRef.current = enableFreehand(); return; }
     let handler: any = null;
     switch (id) {
       case "line":      handler = new LDraw.Polyline(map, { shapeOptions: opts, showLength: false }); break;
@@ -192,44 +142,26 @@ export function DrawingToolbar({ onClose }: DrawingToolbarProps) {
       case "rectangle": handler = new LDraw.Rectangle(map, { shapeOptions: opts }); break;
       case "marker":    handler = new LDraw.Marker(map, {}); break;
     }
+    if (handler) { handler.enable(); handlerRef.current = handler; }
+  };
 
-    if (handler) {
-      handler.enable();
-      handlerRef.current = handler;
-    }
+  const activateTool = (id: ToolId) => {
+    disableCurrentHandler();
+    if (activeIdRef.current === id) { activeIdRef.current = null; setActiveId(null); return; }
+    activeIdRef.current = id;
+    setActiveId(id);
+    restartCurrentTool(id);
   };
 
   const changeColor = (hex: string) => {
     colorRef.current = hex;
     setActiveColor(hex);
-    // Restart current tool with new color
-    const current = activeIdRef.current;
-    if (current) {
-      disableCurrentHandler();
-      activeIdRef.current = current;
-      setActiveId(current);
-      const opts = shapeOpts(current === "highlight");
-      if (current === "freehand") {
-        handlerRef.current = enableFreehand();
-      } else {
-        let handler: any = null;
-        switch (current) {
-          case "line":      handler = new LDraw.Polyline(map, { shapeOptions: opts, showLength: false }); break;
-          case "polygon":   handler = new LDraw.Polygon(map, { shapeOptions: opts, showArea: false }); break;
-          case "circle":    handler = new LDraw.Circle(map, { shapeOptions: opts, showRadius: false }); break;
-          case "highlight":
-          case "rectangle": handler = new LDraw.Rectangle(map, { shapeOptions: opts }); break;
-          case "marker":    handler = new LDraw.Marker(map, {}); break;
-        }
-        if (handler) { handler.enable(); handlerRef.current = handler; }
-      }
-    }
+    if (activeIdRef.current) restartCurrentTool(activeIdRef.current);
   };
 
   const undo = () => {
     if (!drawnItemsRef.current || historyRef.current.length === 0) return;
-    const last = historyRef.current.pop()!;
-    drawnItemsRef.current.removeLayer(last);
+    drawnItemsRef.current.removeLayer(historyRef.current.pop()!);
     setHistoryLen(h => Math.max(0, h - 1));
   };
 
@@ -243,61 +175,77 @@ export function DrawingToolbar({ onClose }: DrawingToolbarProps) {
   };
 
   return (
-    <div className="absolute top-[156px] right-4 z-[1100] draw-panel rounded-2xl p-2 w-[44px] flex flex-col gap-1 animate-in slide-in-from-right-2 fade-in duration-200">
-      <p className="text-[7px] font-bold text-center tracking-widest uppercase" style={{ color: "hsl(215 14% 45%)" }}>Tools</p>
+    <div
+      className="absolute right-4 z-[1100] draw-panel rounded-2xl w-[44px] flex flex-col animate-in slide-in-from-right-2 fade-in duration-200"
+      style={{ top: "156px", maxHeight: "calc(100vh - 180px)" }}
+    >
+      {/* Fixed header */}
+      <div className="px-1.5 pt-2 pb-1 flex-shrink-0">
+        <p className="text-[7px] font-bold text-center tracking-widest uppercase" style={{ color: "hsl(215 14% 42%)" }}>Tools</p>
+      </div>
 
-      {TOOLS.map(({ id, icon, label }) => (
+      {/* Scrollable middle — tools + colors */}
+      <div
+        className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1 px-1.5"
+        style={{ scrollbarWidth: "none", msOverflowStyle: "none", overscrollBehavior: "contain" }}
+      >
+        <style>{`.draw-scroll::-webkit-scrollbar { display: none; }`}</style>
+
+        {TOOLS.map(({ id, icon, label }) => (
+          <button
+            key={id}
+            title={label}
+            className={cn("draw-tool-btn flex-shrink-0", activeId === id && "active")}
+            onClick={() => activateTool(id)}
+          >
+            {icon}
+          </button>
+        ))}
+
+        <div className="h-px my-0.5 flex-shrink-0" style={{ background: "rgba(255,255,255,0.07)" }} />
+        <p className="text-[7px] font-bold text-center tracking-widest uppercase flex-shrink-0" style={{ color: "hsl(215 14% 42%)" }}>Color</p>
+
+        {COLORS.map(({ hex, label }) => (
+          <button
+            key={hex}
+            title={label}
+            className="w-5 h-5 rounded-full mx-auto border-2 transition-all hover:scale-110 flex-shrink-0"
+            style={{
+              backgroundColor: hex,
+              borderColor: activeColor === hex ? "#fff" : "transparent",
+              transform: activeColor === hex ? "scale(1.15)" : undefined,
+              boxShadow: activeColor === hex ? `0 0 8px ${hex}90` : undefined,
+              outline: hex === "#ffffff" ? "1px solid rgba(255,255,255,0.15)" : undefined,
+              opacity: activeColor === hex ? 1 : 0.65,
+            }}
+            onClick={() => changeColor(hex)}
+          />
+        ))}
+
+        <div className="h-2 flex-shrink-0" />
+      </div>
+
+      {/* Fixed footer — undo + clear */}
+      <div className="px-1.5 pb-2 pt-1 flex flex-col gap-1 flex-shrink-0" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
         <button
-          key={id}
-          title={label}
-          className={cn("draw-tool-btn", activeId === id && "active")}
-          onClick={() => activateTool(id)}
+          title="Undo last"
+          disabled={historyLen === 0}
+          className="draw-tool-btn"
+          style={{ opacity: historyLen === 0 ? 0.18 : 0.75, color: "#d6e4f8" }}
+          onClick={undo}
         >
-          {icon}
+          <Undo2 className="w-3.5 h-3.5" />
         </button>
-      ))}
-
-      <div className="h-px my-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
-      <p className="text-[7px] font-bold text-center tracking-widest uppercase" style={{ color: "hsl(215 14% 45%)" }}>Color</p>
-
-      {COLORS.map(({ hex, label }) => (
         <button
-          key={hex}
-          title={label}
-          className={cn(
-            "w-5 h-5 rounded-full mx-auto border-2 transition-all hover:scale-110 flex-shrink-0",
-            activeColor === hex ? "border-white scale-110 shadow-md" : "border-transparent opacity-70"
-          )}
-          style={{
-            backgroundColor: hex,
-            boxShadow: activeColor === hex ? `0 0 8px ${hex}80` : undefined,
-            outline: hex === "#ffffff" ? "1px solid rgba(255,255,255,0.2)" : undefined,
-          }}
-          onClick={() => changeColor(hex)}
-        />
-      ))}
-
-      <div className="h-px my-0.5" style={{ background: "rgba(255,255,255,0.08)" }} />
-
-      <button
-        title="Undo"
-        disabled={historyLen === 0}
-        className="draw-tool-btn"
-        style={{ opacity: historyLen === 0 ? 0.2 : 1 }}
-        onClick={undo}
-      >
-        <Undo2 className="w-3.5 h-3.5" />
-      </button>
-
-      <button
-        title="Clear all"
-        disabled={historyLen === 0}
-        className="draw-tool-btn"
-        style={{ color: historyLen === 0 ? "rgba(255,255,255,0.15)" : "#f87171" }}
-        onClick={clear}
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
+          title="Clear all drawings"
+          disabled={historyLen === 0}
+          className="draw-tool-btn"
+          style={{ opacity: historyLen === 0 ? 0.18 : 0.85, color: historyLen > 0 ? "#f87171" : "rgba(255,255,255,0.3)" }}
+          onClick={clear}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
   );
 }

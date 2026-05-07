@@ -31,9 +31,25 @@ export const referrals = pgTable("referrals", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Admissions table — stores incoming student data from external API/upload
+export const admissions = pgTable("admissions", {
+  id: serial("id").primaryKey(),
+  studentName: text("student_name").notNull(),
+  studentNumber: text("student_number"),
+  lastSchoolAttended: text("last_school_attended"),
+  seniorHighSchool: text("senior_high_school"),
+  collegeLastAttended: text("college_last_attended"),
+  studentType: text("student_type"), // "New Student" | "Transferee"
+  matchedSchoolId: integer("matched_school_id").references(() => schools.id),
+  matchedSchoolName: text("matched_school_name"),
+  matchConfidence: doublePrecision("match_confidence"),
+  syncedAt: timestamp("synced_at").defaultNow(),
+});
+
 export const insertSchoolSchema = createInsertSchema(schools).omit({ id: true });
 export const insertStudentSchema = createInsertSchema(students).omit({ id: true });
 export const insertReferralSchema = createInsertSchema(referrals).omit({ id: true, createdAt: true });
+export const insertAdmissionSchema = createInsertSchema(admissions).omit({ id: true, syncedAt: true });
 
 export type InsertSchool = z.infer<typeof insertSchoolSchema>;
 export type School = typeof schools.$inferSelect;
@@ -43,3 +59,6 @@ export type Student = typeof students.$inferSelect;
 
 export type InsertReferral = z.infer<typeof insertReferralSchema>;
 export type Referral = typeof referrals.$inferSelect;
+
+export type InsertAdmission = z.infer<typeof insertAdmissionSchema>;
+export type Admission = typeof admissions.$inferSelect;

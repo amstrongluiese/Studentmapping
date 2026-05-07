@@ -1,5 +1,11 @@
 import { db } from "./db";
-import { schools, referrals, students, type InsertSchool, type School, type InsertReferral, type Referral, type InsertStudent, type Student } from "@shared/schema";
+import {
+  schools, referrals, students, admissions,
+  type InsertSchool, type School,
+  type InsertReferral, type Referral,
+  type InsertStudent, type Student,
+  type InsertAdmission, type Admission,
+} from "@shared/schema";
 import { eq } from "drizzle-orm";
 
 export interface IStorage {
@@ -20,6 +26,11 @@ export interface IStorage {
   createReferral(referral: InsertReferral): Promise<Referral>;
   updateReferral(id: number, updates: Partial<InsertReferral>): Promise<Referral>;
   deleteReferral(id: number): Promise<void>;
+
+  getAdmissions(): Promise<Admission[]>;
+  createAdmission(admission: InsertAdmission): Promise<Admission>;
+  bulkCreateAdmissions(admissionsList: InsertAdmission[]): Promise<Admission[]>;
+  clearAdmissions(): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -96,6 +107,24 @@ export class DatabaseStorage implements IStorage {
 
   async deleteReferral(id: number): Promise<void> {
     await db.delete(referrals).where(eq(referrals.id, id));
+  }
+
+  async getAdmissions(): Promise<Admission[]> {
+    return await db.select().from(admissions);
+  }
+
+  async createAdmission(admission: InsertAdmission): Promise<Admission> {
+    const [newAdmission] = await db.insert(admissions).values(admission).returning();
+    return newAdmission;
+  }
+
+  async bulkCreateAdmissions(admissionsList: InsertAdmission[]): Promise<Admission[]> {
+    if (admissionsList.length === 0) return [];
+    return await db.insert(admissions).values(admissionsList).returning();
+  }
+
+  async clearAdmissions(): Promise<void> {
+    await db.delete(admissions);
   }
 }
 

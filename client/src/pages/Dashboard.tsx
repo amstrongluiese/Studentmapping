@@ -18,7 +18,7 @@ import {
   Play, PanelLeftClose, PanelLeftOpen, Pencil,
   Upload, Users, ShieldCheck, Settings2, Database,
   FileSpreadsheet, AlertCircle, TrendingUp, Layers,
-  Loader2, Globe, Sparkles
+  Loader2, Globe, Sparkles, RefreshCw, Link2, Zap
 } from "lucide-react";
 import {
   Popover, PopoverContent, PopoverTrigger,
@@ -63,6 +63,225 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Textarea } from "@/components/ui/textarea";
 import { buildUrl, api } from "@shared/routes";
 import { useToast } from "@/hooks/use-toast";
+import { queryClient } from "@/lib/queryClient";
+import type { Admission } from "@shared/schema";
+
+// ── Admissions Sync Tab ────────────────────────────────────────────────────────
+const EXAMPLE_JSON = JSON.stringify([
+  { "student_name": "Juan Dela Cruz", "student_no": "2025-001", "last_school_attended": "Lumban NHS", "student_type": "Transferee" },
+  { "student_name": "Maria Santos",   "student_no": "2025-002", "senior_high_school": "Los Baños National High School", "student_type": "New Student" },
+  { "student_name": "Jose Reyes",     "student_no": "2025-003", "last_school_attended": "Pedro Guevara Memorial NHS", "college_last_attended": "DLSU-D", "student_type": "Transferee" },
+], null, 2);
+
+interface SyncResult { synced: number; matched: number; unmatched: number; schoolsUpdated: number; records: Admission[]; }
+
+function AdmissionsSyncTab({ syncJson, setSyncJson, syncLoading, setSyncLoading, syncResults, setSyncResults, onSynced }: {
+  syncJson: string; setSyncJson: (v: string) => void;
+  syncLoading: boolean; setSyncLoading: (v: boolean) => void;
+  syncResults: SyncResult | null; setSyncResults: (v: SyncResult | null) => void;
+  onSynced: () => void;
+}) {
+  const { toast } = useToast();
+
+  const handleSync = async () => {
+    let parsed: any[];
+    try {
+      const raw = JSON.parse(syncJson.trim());
+      parsed = Array.isArray(raw) ? raw : [raw];
+    } catch {
+      toast({ variant: "destructive", title: "Invalid JSON", description: "Paste valid JSON — an array of student records." });
+      return;
+    }
+    setSyncLoading(true);
+    try {
+      const res = await fetch("/api/admissions/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ records: parsed }),
+      });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.message || "Sync failed"); }
+      const result: SyncResult = await res.json();
+      setSyncResults(result);
+      onSynced();
+      toast({ title: `✓ ${result.synced} records synced`, description: `${result.matched} matched to feeder schools, ${result.unmatched} unmatched.` });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Sync error", description: err.message });
+    } finally {
+      setSyncLoading(false);
+    }
+  };
+
+  const confidenceColor = (v: number | null) => {
+    if (!v) return "text-muted-foreground";
+    if (v >= 0.85) return "text-green-600 font-bold";
+    if (v >= 0.65) return "text-yellow-600 font-semibold";
+    return "text-red-500 font-medium";
+  };
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-4 gap-4">
+      {/* Summary cards (after sync) */}
+      {syncResults && (
+        <div className="grid grid-cols-4 gap-3 shrink-0">
+          {[
+            { label: "Records Synced", value: syncResults.synced, icon: <RefreshCw className="w-4 h-4" />, color: "text-primary" },
+            { label: "Matched Schools", value: syncResults.matched, icon: <Link2 className="w-4 h-4" />, color: "text-green-600" },
+            { label: "Unmatched",       value: syncResults.unmatched, icon: <AlertCircle className="w-4 h-4" />, color: "text-yellow-600" },
+            { label: "Maps Updated",   value: syncResults.schoolsUpdated, icon: <MapPin className="w-4 h-4" />, color: "text-blue-600" },
+          ].map(({ label, value, icon, color }) => (
+            <Card key={label}>
+              <CardContent className="p-3 flex items-center gap-2.5">
+                <div className={cn("opacity-80", color)}>{icon}</div>
+                <div>
+                  <p className={cn("text-lg font-black leading-none", color)}>{value}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <div className="flex-1 flex gap-4 min-h-0">
+        {/* Input pane */}
+        <div className="flex flex-col gap-3 shrink-0 w-72">
+          <Card className="flex flex-col flex-1">
+            <CardHeader className="py-3 px-4 border-b shrink-0">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <Zap className="w-4 h-4 text-primary" /> Paste Admissions JSON
+              </CardTitle>
+              <CardDescription className="text-[11px]">Array of student records from your admissions API</CardDescription>
+            </CardHeader>
+            <CardContent className="flex-1 flex flex-col p-3 gap-3">
+              <Textarea
+                placeholder={EXAMPLE_JSON}
+                className="flex-1 font-mono text-[11px] resize-none min-h-[160px]"
+                value={syncJson}
+                onChange={e => setSyncJson(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="text-xs h-8 flex-1" onClick={() => setSyncJson(EXAMPLE_JSON)}>
+                  Load Example
+                </Button>
+                <Button size="sm" variant="outline" className="text-xs h-8 px-2" onClick={() => { setSyncJson(""); setSyncResults(null); }} disabled={!syncJson && !syncResults}>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+              <Button
+                className="w-full h-9 gap-2 text-sm font-semibold"
+                onClick={handleSync}
+                disabled={syncLoading || !syncJson.trim()}
+              >
+                {syncLoading ? <><Loader2 className="w-4 h-4 animate-spin" /> Processing…</> : <><Zap className="w-4 h-4" /> Process & Match</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Field map legend */}
+          <Card className="shrink-0">
+            <CardHeader className="py-2.5 px-4 border-b">
+              <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Accepted Fields</CardTitle>
+            </CardHeader>
+            <CardContent className="p-3 space-y-1.5">
+              {[
+                ["student_name / studentName", "Student full name"],
+                ["student_no / studentNumber", "Student ID"],
+                ["last_school_attended", "Feeder school → matched"],
+                ["senior_high_school", "SHS source → matched"],
+                ["college_last_attended", "Previous college"],
+                ["student_type", "New Student / Transferee"],
+              ].map(([field, desc]) => (
+                <div key={field} className="flex gap-2 items-start">
+                  <code className="text-[9px] font-mono text-primary bg-primary/8 px-1.5 py-0.5 rounded shrink-0">{field}</code>
+                  <span className="text-[10px] text-muted-foreground leading-tight">{desc}</span>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Results table */}
+        <Card className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <CardHeader className="py-3 px-5 border-b shrink-0">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Database className="w-4 h-4 text-primary" />
+              {syncResults ? `Sync Results — ${syncResults.synced} Records` : "Sync Results"}
+            </CardTitle>
+            <CardDescription className="text-[11px]">
+              {syncResults ? `${syncResults.matched} matched to feeder schools · ${syncResults.schoolsUpdated} school maps updated` : "Paste JSON and click Process & Match to see results here"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex-1 p-0 overflow-hidden">
+            {!syncResults ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
+                <div className="w-12 h-12 rounded-2xl bg-primary/8 flex items-center justify-center">
+                  <Sparkles className="w-6 h-6 text-primary/50" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-muted-foreground">Smart Matching Ready</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">
+                    Paste student records from your admissions system. The engine will automatically match feeder schools and update GIS markers.
+                  </p>
+                </div>
+                <div className="text-[10px] text-muted-foreground/50">Supports camelCase and snake_case field names</div>
+              </div>
+            ) : (
+              <ScrollArea className="h-full">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/30">
+                      <TableHead className="text-xs">Student Name</TableHead>
+                      <TableHead className="text-xs">ID / No.</TableHead>
+                      <TableHead className="text-xs">Last School</TableHead>
+                      <TableHead className="text-xs">Matched School</TableHead>
+                      <TableHead className="text-xs text-center">Confidence</TableHead>
+                      <TableHead className="text-xs">Type</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {syncResults.records.map((r, i) => (
+                      <TableRow key={r.id ?? i} className="hover:bg-secondary/30 transition-colors">
+                        <TableCell className="text-xs font-medium py-2 max-w-[140px] truncate">{r.studentName}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground py-2">{r.studentNumber || "—"}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground py-2 max-w-[140px] truncate" title={r.lastSchoolAttended || r.seniorHighSchool || ""}>
+                          {r.lastSchoolAttended || r.seniorHighSchool || "—"}
+                        </TableCell>
+                        <TableCell className="py-2">
+                          {r.matchedSchoolName ? (
+                            <span className="text-xs font-semibold text-primary flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 shrink-0" />
+                              <span className="truncate max-w-[140px]" title={r.matchedSchoolName}>{r.matchedSchoolName}</span>
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground flex items-center gap-1">
+                              <XCircle className="w-3 h-3" /> No match
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center py-2">
+                          <span className={cn("text-xs tabular-nums", confidenceColor(r.matchConfidence))}>
+                            {r.matchConfidence ? `${Math.round(r.matchConfidence * 100)}%` : "—"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="py-2">
+                          {r.studentType ? (
+                            <Badge variant="outline" className={cn("text-[10px]", r.studentType === "Transferee" ? "border-orange-500/30 text-orange-600" : "border-green-500/30 text-green-600")}>
+                              {r.studentType}
+                            </Badge>
+                          ) : "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { toast } = useToast();
@@ -94,7 +313,10 @@ export default function Dashboard() {
   const [overlays, setOverlays] = useState<MapOverlays>({ showCounts: true, showLabels: true, showDrawings: true });
   const toggleOverlay = (key: keyof MapOverlays) => setOverlays(prev => ({ ...prev, [key]: !prev[key] }));
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [adminTab, setAdminTab] = useState<"registry" | "import">("registry");
+  const [adminTab, setAdminTab] = useState<"registry" | "import" | "sync">("registry");
+  const [syncJson, setSyncJson] = useState("");
+  const [syncResults, setSyncResults] = useState<{ synced: number; matched: number; unmatched: number; schoolsUpdated: number; records: Admission[] } | null>(null);
+  const [syncLoading, setSyncLoading] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ id: number; status: string; type: "approve" | "reject" | "delete" } | null>(null);
 
   useEffect(() => {
@@ -833,7 +1055,7 @@ export default function Dashboard() {
 
           {/* Admin internal tabs */}
           <div className="flex shrink-0 border-b bg-card px-6">
-            {(["registry", "import"] as const).map(tab => (
+            {(["registry", "import", "sync"] as const).map(tab => (
               <button
                 key={tab}
                 onClick={() => setAdminTab(tab)}
@@ -844,7 +1066,9 @@ export default function Dashboard() {
                     : "border-transparent text-muted-foreground hover:text-foreground"
                 )}
               >
-                {tab === "registry" ? "School Registry" : "Import & Upload"}
+                {tab === "registry" ? "School Registry" : tab === "import" ? "Import & Upload" : (
+                  <span className="flex items-center gap-1.5"><Zap className="w-3 h-3" />Admissions Sync</span>
+                )}
               </button>
             ))}
           </div>
@@ -916,6 +1140,19 @@ export default function Dashboard() {
           )}
 
           {/* Import Tab */}
+          {/* Admissions Sync Tab */}
+          {adminTab === "sync" && (
+            <AdmissionsSyncTab
+              syncJson={syncJson}
+              setSyncJson={setSyncJson}
+              syncLoading={syncLoading}
+              setSyncLoading={setSyncLoading}
+              syncResults={syncResults}
+              setSyncResults={setSyncResults}
+              onSynced={() => queryClient.invalidateQueries({ queryKey: ['/api/schools'] })}
+            />
+          )}
+
           {adminTab === "import" && (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden p-4 gap-4">
               {/* Import action card */}
