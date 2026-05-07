@@ -9,6 +9,24 @@ import {
   Undo2, Trash2, Highlighter, ArrowRight, Type
 } from "lucide-react";
 
+// Fix leaflet-draw strict-mode bug: "type is not defined" in readableArea
+(function patchLeafletDraw() {
+  const G = (L as any).GeometryUtil;
+  if (!G) return;
+  G.readableArea = function (area: number, isMetric: boolean) {
+    const areaType = isMetric ? "metric" : "imperial";
+    if (areaType === "metric") {
+      return area >= 1000000
+        ? (area / 1000000).toFixed(2) + " km²"
+        : area.toFixed(2) + " m²";
+    }
+    const acres = area / 4047;
+    return acres >= 640
+      ? (acres / 640).toFixed(2) + " mi²"
+      : acres.toFixed(2) + " ac";
+  };
+})();
+
 const LDraw = (L as any).Draw;
 type DrawTool = "polyline" | "polygon" | "circle" | "rectangle" | "marker" | null;
 const COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b", "#8b5cf6", "#000000", "#ffffff"];
