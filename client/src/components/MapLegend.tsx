@@ -7,8 +7,10 @@ interface MapLegendProps {
 }
 
 export function MapLegend({ onClose }: MapLegendProps) {
-  const { data: schools } = useSchools();
-  
+  const schoolsQuery = useSchools();
+  const schools = schoolsQuery.data || [];
+  const lastUpdatedMs = schoolsQuery.dataUpdatedAt || 0;
+
   if (!schools || schools.length === 0) return null;
 
   const totalStudents = schools.reduce((sum, s) => sum + s.studentCount, 0);
@@ -65,6 +67,10 @@ export function MapLegend({ onClose }: MapLegendProps) {
         <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1 border-t border-border/50">
           <AlertCircle className="w-3 h-3 flex-shrink-0" />
           <p>Real-time data from {schools.length} origin schools.</p>
+        </div>
+
+        <div className="pt-3 text-xs text-muted-foreground border-t border-border/50">
+          <p>Last updated: {lastUpdatedMs ? new Date(lastUpdatedMs).toLocaleString() : "—"}</p>
         </div>
       </div>
     </div>

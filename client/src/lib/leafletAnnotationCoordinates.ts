@@ -14,47 +14,20 @@ type LeafletMapWithContainerPoint = L.Map & {
 };
 
 /**
- * Map container pixel coordinates from a DOM pointer/mouse event using Leaflet’s
+ * Map container pixel coordinates from a DOM pointer event using Leaflet's
  * internal mapping (pan, zoom, CRS, padding). Prefer this over raw clientX/clientY math.
  */
-export function domMouseEventToMapContainerPoint(map: L.Map, ev: MouseEvent): L.Point | null {
+export function domPointerEventToMapContainerPoint(map: L.Map, ev: PointerEvent): L.Point | null {
   try {
     const m = map as LeafletMapWithContainerPoint;
     if (typeof m.mouseEventToContainerPoint === "function") {
       return m.mouseEventToContainerPoint(ev);
     }
-    const ll = map.mouseEventToLatLng(ev);
-    return map.latLngToContainerPoint(ll);
+
+    return map.latLngToContainerPoint(map.mouseEventToLatLng(ev));
   } catch {
     return null;
   }
-}
-
-/** Normalize touch events to a MouseEvent-like target Leaflet accepts. */
-export function touchToMouseLike(ev: TouchEvent, touch: Touch, type: "down" | "move" | "up" = "move"): MouseEvent {
-  return new MouseEvent(
-    type === "down" ? "mousedown" : type === "up" ? "mouseup" : "mousemove",
-    {
-      clientX: touch.clientX,
-      clientY: touch.clientY,
-      bubbles: true,
-      cancelable: true,
-      view: ev.view ?? window,
-    },
-  );
-}
-
-export function domPointerEventToMapContainerPoint(
-  map: L.Map,
-  ev: PointerEvent | MouseEvent | TouchEvent,
-): L.Point | null {
-  if (ev instanceof TouchEvent) {
-    const t = ev.touches[0] ?? ev.changedTouches[0];
-    if (!t) return null;
-    const kind = ev.type === "touchstart" ? "down" : ev.type === "touchend" || ev.type === "touchcancel" ? "up" : "move";
-    return domMouseEventToMapContainerPoint(map, touchToMouseLike(ev, t, kind));
-  }
-  return domMouseEventToMapContainerPoint(map, ev);
 }
 
 /**
@@ -82,26 +55,42 @@ export function containerPointToDrawingPoint(
   const { insetX, insetY, width, height } = layout;
   if (width <= 0 || height <= 0) return null;
 
+  // Convert to overlay-local coordinates WITHOUT clamping to preserve exact pointer position
   const lx = containerPoint.x - insetX;
   const ly = containerPoint.y - insetY;
-  const x = Math.max(0, Math.min(lx, width));
-  const y = Math.max(0, Math.min(ly, height));
 
-  const mapContainerPoint = L.point(x + insetX, y + insetY);
-  const latLng = map.containerPointToLatLng(mapContainerPoint);
+  // For map coordinate conversion, use the exact container point (not clamped)
+  // This ensures first drawn point is exactly where pointer is
+  const latLng = map.containerPointToLatLng(containerPoint);
 
   return {
-    x,
-    y,
+    x: lx,
+    y: ly,
     timestamp: Date.now(),
     latLng: { lat: latLng.lat, lng: latLng.lng },
+  };
+}
+
+/**
+ * Clamp overlay-local point to drawable bounds for rendering/hit-test purposes.
+ * Use this AFTER coordinate conversion if you need bounds checking.
+ */
+export function clampPointToBounds(
+  point: DrawingPoint,
+  layout: DrawingLayoutMetrics,
+): DrawingPoint {
+  const { width, height } = layout;
+  return {
+    ...point,
+    x: Math.max(0, Math.min(point.x, width)),
+    y: Math.max(0, Math.min(point.y, height)),
   };
 }
 
 export function domEventToDrawingPoint(
   map: L.Map,
   layout: DrawingLayoutMetrics,
-  ev: PointerEvent | MouseEvent | TouchEvent,
+  ev: PointerEvent,
 ): DrawingPoint | null {
   const cp = domPointerEventToMapContainerPoint(map, ev);
   if (!cp) return null;
@@ -109,20 +98,9 @@ export function domEventToDrawingPoint(
 }
 
 /** Geographic position under the pointer (no overlay clamping). */
-export function domEventToMapLatLng(map: L.Map, ev: PointerEvent | MouseEvent | TouchEvent): L.LatLng | null {
+export function domEventToMapLatLng(map: L.Map, ev: PointerEvent): L.LatLng | null {
   try {
-    const mouse =
-      ev instanceof TouchEvent
-        ? (() => {
-            const t = ev.touches[0] ?? ev.changedTouches[0];
-            if (!t) return null;
-            const kind =
-              ev.type === "touchstart" ? "down" : ev.type === "touchend" || ev.type === "touchcancel" ? "up" : "move";
-            return touchToMouseLike(ev, t, kind);
-          })()
-        : ev;
-    if (!mouse) return null;
-    return map.mouseEventToLatLng(mouse);
+    return map.mouseEventToLatLng(ev);
   } catch {
     return null;
   }

@@ -139,3 +139,41 @@ export function useDeleteSchool() {
     }
   });
 }
+
+export function useImportSchools() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (schools: SchoolInput[]) => {
+      const validated = api.schools.import.input.parse({ schools });
+      const res = await fetch(api.schools.import.path, {
+        method: api.schools.import.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(validated),
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to import school registry');
+      }
+
+      return api.schools.import.responses[200].parse(await res.json());
+    },
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: [api.schools.list.path] });
+      toast({
+        title: "Import complete",
+        description: `${result.created} created, ${result.updated} updated, ${result.skipped} skipped.`,
+      });
+    },
+    onError: (err) => {
+      toast({
+        title: "Import failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    }
+  });
+}

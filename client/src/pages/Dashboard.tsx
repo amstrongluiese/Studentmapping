@@ -1,59 +1,74 @@
-import { useState, useMemo, useEffect } from "react";
-import { useSchools, useDeleteSchool } from "@/hooks/use-schools";
-import { useReferrals, useCreateReferral, useUpdateReferral, useDeleteReferral } from "@/hooks/use-referrals";
-import { useQuery } from "@tanstack/react-query";
-import { SchoolFormDialog } from "@/components/SchoolFormDialog";
-import MapWrapper from "@/components/MapWrapper";
-import { MapLegend } from "@/components/MapLegend";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { 
-  Plus, 
-  Search, 
-  MapPin, 
-  MoreVertical, 
-  Trash2, 
-  Edit,
-  GraduationCap,
-  Maximize2,
-  Minimize2,
-  BarChart2,
-  UserPlus,
-  Map as MapIcon,
-  Table as TableIcon,
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
   CheckCircle2,
-  XCircle,
-  ArrowUpDown,
-  History,
-  Info,
-  Key,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Copy,
+  Database,
+  Edit,
+  ExternalLink,
+  GraduationCap,
+  KeyRound,
+  Layers,
+  Map as MapIcon,
   MonitorPlay,
-  Play,
-  PanelLeftClose,
-  PanelLeftOpen,
-  LayoutDashboard
+  Palette,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings2,
+  Trash2,
+  UserPlus,
+  XCircle,
 } from "lucide-react";
+import { api } from "@shared/routes";
+import type { Referral, ReferralInput, School, Student } from "@shared/schema";
+import { getSchoolStatus, hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  ALL_PROGRAM_FILTER,
+  buildProgramAnalytics,
+  buildProgramSchools,
+  getProgramOptions,
+  programFilterIsActive,
+  type ProgramAnalytics,
+  type ProgramFilters,
+  type ProgramSchool,
+} from "@shared/programIntelligence";
+import { AdminPortalWorkspace, type AdminPortalSection } from "@/components/AdminPortalWorkspace";
+import { AdmissionsIntegrationHub } from "@/components/AdmissionsIntegrationHub";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { useTheme, type ThemePreference } from "@/components/theme-provider";
+import MapWrapper, {
+  DEFAULT_MAP_DISPLAY_SETTINGS,
+  type AnalyticsVisibility,
+  type DrawDisplaySettings,
+  type MapDisplaySettings,
+} from "@/components/MapWrapper";
+import { SchoolFormDialog } from "@/components/SchoolFormDialog";
+import { useDeleteSchool, useSchools, useUpdateSchool } from "@/hooks/use-schools";
+import { useGisOverview, useImportLogs, useProcessedStudents } from "@/hooks/use-gis-admin";
+import { useCreateReferral, useDeleteReferral, useReferrals, useUpdateReferral } from "@/hooks/use-referrals";
+import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+import { exitFullscreenSafe, getFullscreenElement, requestFullscreenOnElement } from "@/lib/presentationFullscreen";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { TableToolbar } from "@/components/ui/table-toolbar";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription
-} from "@/components/ui/card";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -62,570 +77,1428 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { insertReferralSchema, insertStudentSchema, type School, type ReferralInput, type Referral, type Student } from "@shared/schema";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { buildUrl, api } from "@shared/routes";
-import { useToast } from "@/hooks/use-toast";
+
+const STORAGE_PREFIX = "trimex-gis-core";
+
+const defaultAnalyticsVisibility: AnalyticsVisibility = {
+  densityLegend: true,
+  schoolStats: false,
+  municipalitySummary: false,
+  enrollmentOverlay: false,
+  heatmap: false,
+  charts: false,
+  summaryBadge: true,
+  summaryFeederCount: true,
+  summaryEnrollmentTotal: true,
+  floatingPanels: true,
+};
+
+const defaultMapSettings: MapDisplaySettings = DEFAULT_MAP_DISPLAY_SETTINGS;
+
+const defaultDrawSettings: DrawDisplaySettings = {
+  showDrawings: true,
+  lockDrawingMode: false,
+  annotationVisibility: true,
+};
+
+const defaultPresentationSettings = {
+  cleanFullscreen: true,
+  markerOnly: false,
+};
+
+const defaultImportSettings = {
+  autoGeocode: true,
+  saveDataset: true,
+  skipDuplicates: true,
+};
+
+const defaultSystemSettings = {
+  theme: "light" as "light" | "dark",
+  compactMode: false,
+};
+
+type MainTab = "map" | "admin" | "referrals";
 
 export default function Dashboard() {
   const { toast } = useToast();
-  const { data: schools, isLoading: schoolsLoading } = useSchools();
-  const { data: referrals, isLoading: referralsLoading } = useReferrals();
-  const { data: students } = useQuery<Student[]>({ queryKey: [api.students.list.path] });
-  
-  const deleteMutation = useDeleteSchool();
-  const createReferralMutation = useCreateReferral();
-  const updateReferralMutation = useUpdateReferral();
-  const deleteReferralMutation = useDeleteReferral();
-  
-  const [search, setSearch] = useState("");
-  const [referralSearch, setReferralSearch] = useState("");
-  const [referralSort, setReferralSort] = useState<"name" | "status" | "date">("date");
-  const [referralStatusFilter, setReferralStatusFilter] = useState("all");
-  
+  const { theme, setTheme } = useTheme();
+  const schoolsQuery = useSchools();
+  const schools = schoolsQuery.data || [];
+  const isLoading = schoolsQuery.isLoading;
+  const lastUpdatedMs = schoolsQuery.dataUpdatedAt || 0;
+  const { data: referrals = [] } = useReferrals();
+  const { data: students = [] } = useQuery<Student[]>({ queryKey: [api.students.list.path] });
+  const { data: processedStudents = [] } = useProcessedStudents();
+  const { data: gisOverview } = useGisOverview();
+  const { data: importLogs = [] } = useImportLogs();
+  const updateSchool = useUpdateSchool();
+  const deleteSchool = useDeleteSchool();
+  const createReferral = useCreateReferral();
+  const updateReferral = useUpdateReferral();
+  const deleteReferral = useDeleteReferral();
+  const [mainTab, setMainTab] = usePersistentState<MainTab>(`${STORAGE_PREFIX}:main-tab`, "map");
+  const [adminTab, setAdminTab] = usePersistentState<AdminPortalSection>(`${STORAGE_PREFIX}:admin-portal-v1`, "overview");
+  const [mapSettings, setMapSettings] = usePersistentState<MapDisplaySettings>(`${STORAGE_PREFIX}:map`, defaultMapSettings);
+  const [drawSettings, setDrawSettings] = usePersistentState<DrawDisplaySettings>(`${STORAGE_PREFIX}:draw`, defaultDrawSettings);
+  const [analyticsVisibility, setAnalyticsVisibility] = usePersistentState<AnalyticsVisibility>(`${STORAGE_PREFIX}:analytics`, defaultAnalyticsVisibility);
+  const [presentationSettings, setPresentationSettings] = usePersistentState(`${STORAGE_PREFIX}:presentation`, defaultPresentationSettings);
+  const [importSettings, setImportSettings] = usePersistentState(`${STORAGE_PREFIX}:import`, defaultImportSettings);
+  const [systemSettings, setSystemSettings] = usePersistentState(`${STORAGE_PREFIX}:system`, defaultSystemSettings);
+  const [isPresenting, setIsPresenting] = usePersistentState(`${STORAGE_PREFIX}:presenting`, false);
+  const [isTouring, setIsTouring] = usePersistentState(`${STORAGE_PREFIX}:touring`, false);
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(`${STORAGE_PREFIX}:sidebar-collapsed`, false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
-  const [selectedCoords, setSelectedCoords] = useState<{lat: number, lng: number} | null>(null);
-  const [isPresenting, setIsPresenting] = useState(false);
-  const [isTouring, setIsTouring] = useState(false);
-  const [isSidebarHidden, setIsSidebarHidden] = useState(false);
-  const [isLegendHidden, setIsLegendHidden] = useState(false);
-  const [addReferralOpen, setAddReferralOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<{ id: number; status: string; type: "approve" | "reject" | "delete" } | null>(null);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isPresenting) {
-        setIsPresenting(false);
-        setIsTouring(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isPresenting]);
-
-  const filteredSchools = schools?.filter(s => 
-    s.name.toLowerCase().includes(search.toLowerCase())
-  ) || [];
-
-  // Referral Stats
-  const stats = useMemo(() => {
-    const refs = referrals || [];
-    return {
-      total: refs.length,
-      pending: refs.filter(r => r.status === "pending").length,
-      approved: refs.filter(r => r.status === "approved").length,
-      rejected: refs.filter(r => r.status === "rejected").length,
-    };
-  }, [referrals]);
-
-  // Enhanced search for student name, student number, or referral code
-  const matchedStudent = useMemo(() => {
-    if (!referralSearch || !students) return null;
-    const s = referralSearch.toLowerCase();
-    return students.find(student => 
-      student.name.toLowerCase().includes(s) || 
-      student.studentNumber.toLowerCase().includes(s) || 
-      student.referralCode.toLowerCase().includes(s)
-    );
-  }, [referralSearch, students]);
-
-  const studentReferrals = useMemo(() => {
-    if (!matchedStudent || !referrals) return [];
-    return referrals.filter(r => r.referrerId === matchedStudent.id);
-  }, [matchedStudent, referrals]);
-
-  const sortedReferrals = [...(referrals || [])]
-    .filter(r => {
-      const matchesSearch = r.referredName.toLowerCase().includes(referralSearch.toLowerCase());
-      const matchesStatus = referralStatusFilter === "all" || r.status === referralStatusFilter;
-      const isMatchedViaReferrer = matchedStudent && r.referrerId === matchedStudent.id;
-      return (matchesSearch || isMatchedViaReferrer) && matchesStatus;
-    })
-    .sort((a, b) => {
-      if (referralSort === "name") return a.referredName.localeCompare(b.referredName);
-      if (referralSort === "status") return a.status.localeCompare(b.status);
-      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
-    });
-
-  const handleAddClick = () => {
-    setEditingSchool(null);
-    setSelectedCoords(null);
-    setDialogOpen(true);
-  };
-
-  const handleMapClick = (lat: number, lng: number) => {
-    setEditingSchool(null);
-    setSelectedCoords({ lat, lng });
-    setDialogOpen(true);
-  };
-
-  const handleEdit = (school: School) => {
-    setSelectedCoords(null);
-    setEditingSchool(school);
-    setDialogOpen(true);
-  };
-
-  const handleDelete = (id: number) => {
-    if (confirm("Are you sure you want to delete this school mapping?")) {
-      deleteMutation.mutate(id);
-    }
-  };
-
-  const executeReferralAction = () => {
-    if (!confirmAction) return;
-    if (confirmAction.type === "delete") {
-      deleteReferralMutation.mutate(confirmAction.id);
-    } else {
-      const targetStatus = confirmAction.status === "approved" ? "approved" : "rejected";
-      updateReferralMutation.mutate({ id: confirmAction.id, updates: { status: targetStatus } });
-    }
-    setConfirmAction(null);
-  };
-
-  const referralForm = useForm<ReferralInput & { referralCode?: string }>({
-    resolver: zodResolver(insertReferralSchema.extend({ referralCode: insertStudentSchema.shape.referralCode.optional() })),
-    defaultValues: {
-      referrerId: undefined,
-      referralCode: "",
-      referredName: "",
-      relationship: "",
-      contactNumber: "",
-      notes: "",
-      status: "pending"
-    }
+  const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [registrySearch, setRegistrySearch] = useState("");
+  const [clearDrawSignal, setClearDrawSignal] = useState(0);
+  const [programFilters, setProgramFilters] = usePersistentState<ProgramFilters>(`${STORAGE_PREFIX}:program-filters`, {
+    college: ALL_PROGRAM_FILTER,
+    program: ALL_PROGRAM_FILTER,
+    track: ALL_PROGRAM_FILTER,
   });
+  const [programSort, setProgramSort] = usePersistentState(`${STORAGE_PREFIX}:program-sort`, "filtered-desc");
 
-  const onReferralSubmit = async (data: ReferralInput & { referralCode?: string }) => {
-    let referrerId = data.referrerId;
-    
-    // Logic: If referralCode is entered, find the student account
-    if (data.referralCode) {
-      try {
-        const res = await fetch(buildUrl(api.students.getByCode.path, { referralCode: data.referralCode }));
-        if (res.ok) {
-          const student = await res.json();
-          referrerId = student.id;
-        } else {
-          toast({ variant: "destructive", title: "Invalid Code", description: "Referral code not found." });
-          return;
-        }
-      } catch (e) {
-        toast({ variant: "destructive", title: "Error", description: "Could not validate referral code." });
+  const presentationStageRef = useRef<HTMLDivElement>(null);
+  const presentationBrowserFullscreenRef = useRef(false);
+  const isPresentingRef = useRef(isPresenting);
+  isPresentingRef.current = isPresenting;
+  const mainTabRef = useRef(mainTab);
+  mainTabRef.current = mainTab;
+  const cleanFullscreenRef = useRef(presentationSettings.cleanFullscreen);
+  cleanFullscreenRef.current = presentationSettings.cleanFullscreen;
+
+  const applyPresentation = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        presentationBrowserFullscreenRef.current = false;
+        void exitFullscreenSafe();
+        setIsPresenting(false);
         return;
       }
-    }
+      setIsPresenting(true);
+    },
+    [setIsPresenting],
+  );
 
-    const { referralCode, ...submitData } = data;
-    createReferralMutation.mutate({ ...submitData, referrerId }, {
-      onSuccess: () => {
-        referralForm.reset();
-        setAddReferralOpen(false);
-      }
+  useEffect(() => {
+    if (!isPresenting || !presentationSettings.cleanFullscreen || mainTab !== "map") return;
+    const stage = presentationStageRef.current;
+    if (!stage || getFullscreenElement() === stage) return;
+    let cancelled = false;
+    queueMicrotask(() => {
+      void (async () => {
+        const ok = await requestFullscreenOnElement(stage);
+        if (!cancelled && ok) presentationBrowserFullscreenRef.current = true;
+      })();
     });
+    return () => {
+      cancelled = true;
+    };
+  }, [isPresenting, mainTab, presentationSettings.cleanFullscreen]);
+
+  useEffect(() => {
+    if (!presentationSettings.cleanFullscreen) {
+      presentationBrowserFullscreenRef.current = false;
+      void exitFullscreenSafe();
+    }
+  }, [presentationSettings.cleanFullscreen]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (!cleanFullscreenRef.current || !isPresentingRef.current || mainTabRef.current !== "map") return;
+      if (getFullscreenElement() != null) return;
+      if (!presentationBrowserFullscreenRef.current) return;
+      presentationBrowserFullscreenRef.current = false;
+      setIsPresenting(false);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", onFullscreenChange as EventListener);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", onFullscreenChange as EventListener);
+    };
+  }, [setIsPresenting]);
+
+  useEffect(() => {
+    if (mainTab !== "map") {
+      presentationBrowserFullscreenRef.current = false;
+      void exitFullscreenSafe();
+    }
+  }, [mainTab]);
+
+  const programOptions = useMemo(() => getProgramOptions(processedStudents), [processedStudents]);
+  const programSchools = useMemo(
+    () => buildProgramSchools(schools, processedStudents, programFilters),
+    [processedStudents, programFilters, schools],
+  );
+  const programAnalytics = useMemo(() => buildProgramAnalytics(programSchools, programFilters), [programFilters, programSchools]);
+  const mappedSchools = useMemo(() => programSchools.filter(hasCoordinates), [programSchools]);
+  const totalStudents = programAnalytics.totalStudents;
+  const legendOffsetPx = isPresenting || sidebarCollapsed ? 16 : 336;
+  const municipalityCount = useMemo(
+    () => new Set(programSchools.map((school) => (school.municipality || "").trim()).filter(Boolean)).size,
+    [programSchools],
+  );
+  const sortedProgramSchools = useMemo(() => sortProgramSchools(programSchools, programSort), [programSchools, programSort]);
+  const duplicateIds = useMemo(() => findDuplicateSchoolIds(schools), [schools]);
+  const filteredSchools = useMemo(() => {
+    const query = registrySearch.trim().toLowerCase();
+    if (!query) return schools;
+    return schools.filter((school) =>
+      [school.name, school.municipality, school.institutionType, school.status]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [registrySearch, schools]);
+
+  const openAddSchool = useCallback((coords?: { lat: number; lng: number }) => {
+    setEditingSchool(null);
+    setSelectedCoords(coords || null);
+    setDialogOpen(true);
+  }, []);
+
+  const openEditSchool = useCallback((school: School) => {
+    setEditingSchool(school);
+    setSelectedCoords(null);
+    setDialogOpen(true);
+  }, []);
+
+  const geolocateSchool = async (school: School) => {
+    try {
+      const { requestGeocodeSchoolOrThrow } = await import("@/lib/geocodeSchoolApi");
+      const municipality = school.municipality?.trim() || undefined;
+      const result = await requestGeocodeSchoolOrThrow({
+        name: school.name,
+        municipality,
+      });
+      await updateSchool.mutateAsync({
+        id: school.id,
+        lat: result.lat,
+        lng: result.lng,
+        verified: true,
+        status: "Auto-Located",
+        source: result.source === "Google Maps" ? "Google Geocoding Manual Assist" : "Geocoding Manual Assist",
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unable to geolocate school.";
+      toast({ title: "Geolocation failed", description: message, variant: "destructive" });
+    }
+  };
+
+  const removeDuplicate = async (school: School) => {
+    if (!duplicateIds.has(school.id)) return;
+    if (!confirm(`Remove duplicate registry record for ${school.name}?`)) return;
+    await deleteSchool.mutateAsync(school.id);
+  };
+
+  const updateMapSetting = <K extends keyof MapDisplaySettings>(key: K, value: MapDisplaySettings[K]) => {
+    setMapSettings((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateDrawSetting = (key: keyof DrawDisplaySettings, checked: boolean) => {
+    setDrawSettings((current) => ({ ...current, [key]: checked }));
+  };
+
+  const updateAnalyticsVisibility = (key: keyof AnalyticsVisibility, checked: boolean) => {
+    setAnalyticsVisibility((current) => ({ ...current, [key]: checked }));
   };
 
   return (
-    <div className="flex flex-col h-full w-full bg-background overflow-hidden relative border-0 m-0 p-0">
-      <Tabs defaultValue="map" className="flex-1 flex flex-col h-full w-full overflow-hidden m-0 p-0">
-        <div className={cn("border-b bg-card z-30 transition-all duration-500 flex-shrink-0", isPresenting && "h-0 overflow-hidden border-0 p-0")}>
-          <div className="flex items-center justify-between px-6 py-2">
-            <div className="flex items-center gap-2">
-              <GraduationCap className="w-5 h-5 text-primary" />
-              <h1 className="text-lg font-bold">Trimex Student Mapping</h1>
+    <div
+      className={cn(
+        "gis-app-shell flex h-full w-full min-h-0 flex-col overflow-hidden bg-background",
+        systemSettings.compactMode && "text-sm",
+        isPresenting && mainTab === "map" && "dashboard-presentation-root",
+      )}
+    >
+      <header
+        className={cn("pointer-events-none fixed inset-x-0 top-0 z-30", isPresenting && "hidden")}
+        data-gis-draw-occlude="top"
+      >
+        <div className="pointer-events-none">
+          <div
+            className={cn(
+              "pointer-events-auto flex h-[60px] w-full shrink-0 items-center justify-between gap-3 border-b border-border/70",
+              "bg-surface/82 px-3 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.55)] backdrop-blur-md",
+            )}
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <div
+                className="grid h-8 w-8 shrink-0 place-items-center text-slate-800"
+                aria-hidden
+              >
+                <MapIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
+              </div>
             </div>
-            <TabsList className="bg-secondary/50">
-              <TabsTrigger value="map" className="gap-2"><MapIcon className="w-4 h-4" /> Map View</TabsTrigger>
-              <TabsTrigger value="stats" className="gap-2"><BarChart2 className="w-4 h-4" /> Stats & List</TabsTrigger>
-              <TabsTrigger value="referral" className="gap-2"><UserPlus className="w-4 h-4" /> Referral System</TabsTrigger>
-            </TabsList>
+            <Tabs value={mainTab} onValueChange={(value) => setMainTab(value as MainTab)} className="flex shrink-0 items-center">
+              <TabsList
+                aria-label="Primary navigation"
+                className="inline-flex h-9 items-center gap-1 rounded-full border border-border/80 bg-surface-soft/70 p-1 text-muted-foreground shadow-[0_18px_48px_-34px_rgba(15,23,42,0.55)] backdrop-blur-md"
+              >
+                <TabsTrigger
+                  value="map"
+                  className="group h-7 gap-1.5 rounded-full border border-transparent px-2.5 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-surface hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_10px_28px_-18px_rgba(123,17,19,0.95)]"
+                >
+                  <MapIcon className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
+                  Map
+                </TabsTrigger>
+                <TabsTrigger
+                  value="admin"
+                  className="group h-7 gap-1.5 rounded-full border border-transparent px-2.5 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-surface hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_10px_28px_-18px_rgba(123,17,19,0.95)]"
+                >
+                  <Database className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
+                  Admin
+                </TabsTrigger>
+                <TabsTrigger
+                  value="referrals"
+                  className="group h-7 gap-1.5 rounded-full border border-transparent px-2.5 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-surface hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_10px_28px_-18px_rgba(123,17,19,0.95)]"
+                >
+                  <UserPlus className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
+                  Referrals
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <div className="flex min-w-0 flex-1 justify-end">
+              <ThemeToggle />
+            </div>
           </div>
         </div>
+      </header>
 
-        <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative border-0 m-0 p-0">
-          <TabsContent value="map" className="flex-1 h-full w-full m-0 p-0 overflow-hidden relative border-0 flex flex-col data-[state=inactive]:hidden">
-            <div className="flex-1 flex flex-col md:flex-row h-full w-full overflow-hidden relative">
-              <div className={cn(
-                "w-full md:w-[400px] flex-shrink-0 flex flex-col border-r border-border bg-card shadow-xl z-20 h-full transition-all duration-500 relative",
-                (isPresenting || isSidebarHidden) && "md:-ml-[400px] opacity-0 pointer-events-none"
-              )}>
-                <div className="p-6 pb-4 border-b border-border bg-card/50 backdrop-blur-sm">
-                  <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-primary p-2.5 rounded-xl shadow-inner border border-primary/20">
-                        <GraduationCap className="w-6 h-6 text-primary-foreground" />
-                      </div>
-                      <div>
-                        <h1 className="text-xl font-display font-bold leading-tight truncate">Trimex Origins</h1>
-                        <p className="text-sm text-muted-foreground">Laguna Student Tracking</p>
-                      </div>
-                    </div>
+      <Tabs value={mainTab} onValueChange={(value) => setMainTab(value as MainTab)} className="flex min-h-0 flex-1 flex-col">
+        <TabsContent
+          value="map"
+          className={cn(
+            "m-0 flex min-h-0 flex-1 flex-col p-0 data-[state=inactive]:hidden",
+            "transition-[padding] duration-300 ease-out motion-reduce:transition-none",
+            isPresenting ? "min-h-0 pt-0" : "pt-[60px]",
+          )}
+        >
+            <div
+              ref={presentationStageRef}
+              className={cn(
+                "presentation-stage relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-100",
+                "transition-opacity duration-300 ease-out motion-reduce:transition-none",
+                isPresenting && "min-h-[100dvh]",
+              )}
+            >
+            {!isPresenting && (
+              <Button
+                variant="secondary"
+                size="icon"
+                className="absolute left-3 top-3 z-[1140] h-9 w-9 rounded-full border border-slate-200 bg-white text-slate-700 shadow-md hover:bg-slate-50 lg:hidden"
+                onClick={() => setMobileSidebarOpen(true)}
+                title="Open sidebar"
+                aria-label="Open sidebar"
+              >
+                <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.5} />
+              </Button>
+            )}
+
+            {!isPresenting && mobileSidebarOpen && (
+              <aside
+                className="absolute left-0 top-0 z-[1160] flex h-full w-[min(320px,calc(100vw-1rem))] flex-col overflow-y-auto border-r border-slate-200 bg-slate-50 p-3 shadow-xl lg:hidden"
+                data-gis-draw-occlude="left"
+              >
+                <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600">GIS Stats</h3>
                   </div>
-                  <div className="flex gap-2">
-                    <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input placeholder="Search schools..." className="pl-9 bg-secondary/50" value={search} onChange={(e) => setSearch(e.target.value)} />
-                    </div>
-                    <Button size="icon" onClick={handleAddClick}><Plus className="w-4 h-4" /></Button>
-                  </div>
-                </div>
-                <ScrollArea className="flex-1 p-4">
-                  <div className="space-y-3">
-                    {schoolsLoading ? Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />) : 
-                      filteredSchools.map((school) => (
-                        <div key={school.id} className="group flex items-center justify-between p-4 rounded-xl border border-border/60 bg-card hover:bg-secondary/30 transition-all cursor-pointer" onClick={() => handleEdit(school)}>
-                          <div className="flex items-center gap-4 flex-1 min-w-0 pr-2">
-                            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-primary/10 text-primary font-bold text-sm border border-primary/20 shrink-0">{school.studentCount}</div>
-                            <div className="min-w-0 flex-1">
-                              <h4 className="font-semibold text-foreground truncate group-hover:text-primary transition-colors">{school.name}</h4>
-                              <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5"><MapPin className="w-3 h-3" /> Laguna</p>
-                            </div>
-                          </div>
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="shrink-0 h-8 w-8" onClick={(e) => e.stopPropagation()}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => handleEdit(school)}><Edit className="w-4 h-4 mr-2" /> Edit</DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleDelete(school.id)} className="text-destructive"><Trash2 className="w-4 h-4 mr-2" /> Remove</DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      ))}
-                  </div>
-                </ScrollArea>
-              </div>
-              <div className="flex-1 relative z-10 h-full w-full bg-background overflow-hidden flex flex-col m-0 p-0 border-0">
-                <div className="absolute top-6 left-6 z-[1100] flex gap-2">
-                  <Button 
-                    size="icon" 
-                    variant="secondary" 
-                    className={cn(
-                      "shadow-xl border border-border/50 backdrop-blur-md hover-elevate transition-colors",
-                      isPresenting ? "bg-blue-600 hover:bg-blue-700 text-white border-blue-500" : "bg-background/80 text-foreground"
-                    )} 
-                    onClick={() => {
-                      setIsPresenting(!isPresenting);
-                      setIsTouring(false);
-                    }}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
+                    onClick={() => setMobileSidebarOpen(false)}
+                    title="Close sidebar"
                   >
-                    {isPresenting ? <Minimize2 className="w-5 h-5" /> : <MonitorPlay className="w-5 h-5" />}
+                    <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                   </Button>
-                  {!isPresenting && (
-                    <Button 
-                      size="icon" 
-                      variant="secondary" 
-                      className="shadow-xl border border-border/50 bg-background/80 backdrop-blur-md hover-elevate text-foreground" 
-                      onClick={() => setIsSidebarHidden(!isSidebarHidden)}
-                    >
-                      {isSidebarHidden ? <PanelLeftOpen className="w-5 h-5" /> : <PanelLeftClose className="w-5 h-5" />}
-                    </Button>
-                  )}
-                  {isPresenting && (
-                    <Button 
-                      size="icon" 
-                      variant="secondary" 
-                      className={cn(
-                        "shadow-xl border border-border/50 backdrop-blur-md animate-in fade-in slide-in-from-left-4 transition-colors",
-                        isTouring ? "bg-green-600 hover:bg-green-700 text-white border-green-500" : "bg-background/80 text-foreground"
-                      )} 
-                      onClick={() => setIsTouring(!isTouring)}
-                    >
-                      <Play className={cn("w-5 h-5", isTouring && "animate-pulse")} />
-                    </Button>
-                  )}
                 </div>
 
-                {!isPresenting && isLegendHidden && (
-                   <Button 
-                    size="icon" 
-                    variant="secondary" 
-                    className="absolute bottom-6 right-6 z-[1100] shadow-xl border border-border/50 bg-background/80 backdrop-blur-md hover-elevate text-foreground" 
-                    onClick={() => setIsLegendHidden(false)}
-                  >
-                    <LayoutDashboard className="w-5 h-5" />
-                  </Button>
-                )}
-                
-                <div className="flex-1 w-full h-full relative overflow-hidden m-0 p-0 border-0">
-                  <MapWrapper 
-                    onAddSchool={handleMapClick} 
-                    onEditSchool={handleEdit} 
-                    isPresenting={isPresenting}
-                    isTouring={isTouring}
+                <div className="space-y-2.5">
+                  <Metric label="Mapped Schools" value={mappedSchools.length} />
+                  <Metric label="Enrollees" value={totalStudents} />
+                  <Metric label="Municipalities" value={municipalityCount} />
+                  <AnalyticsInsightPanel analytics={programAnalytics} />
+                  <div className="rounded-xl border-b-2 border-b-slate-300/80 bg-white px-4 py-3 shadow-[0_10px_28px_-16px_rgba(15,23,42,0.22)] backdrop-blur-[18px]">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-700/85">Last Updated</p>
+                    <p className="mt-1 truncate font-mono text-xs text-slate-900">{lastUpdatedMs ? new Date(lastUpdatedMs).toLocaleString() : "-"}</p>
+                  </div>
+                  <ProgramFiltersPanel
+                    filters={programFilters}
+                    options={programOptions}
+                    sort={programSort}
+                    onFiltersChange={setProgramFilters}
+                    onSortChange={setProgramSort}
                   />
-                  {!isPresenting && !isLegendHidden && <MapLegend onClose={() => setIsLegendHidden(true)} />}
+                  <ProgramSchoolList schools={sortedProgramSchools} />
                 </div>
-              </div>
-            </div>
-          </TabsContent>
+              </aside>
+            )}
 
-          <TabsContent value="stats" className="flex-1 h-full w-full m-0 p-6 overflow-hidden flex flex-col gap-6 data-[state=inactive]:hidden">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 shrink-0">
-              <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground uppercase">Total Mapped Schools</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold">{schools?.length || 0}</div></CardContent></Card>
-              <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground uppercase">Total Enrollees</CardTitle></CardHeader><CardContent><div className="text-3xl font-bold text-primary">{schools?.reduce((sum, s) => sum + s.studentCount, 0).toLocaleString() || 0}</div></CardContent></Card>
-              <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground uppercase">Top Feeder</CardTitle></CardHeader><CardContent><div className="text-xl font-bold truncate">{[...(schools || [])].sort((a,b) => b.studentCount - a.studentCount)[0]?.name || "None"}</div></CardContent></Card>
-            </div>
-            <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-6 min-h-0 overflow-hidden">
-              <Card className="flex flex-col min-h-0 overflow-hidden">
-                <CardHeader><CardTitle className="flex items-center gap-2"><BarChart2 className="w-5 h-5 text-primary" /> Enrollment Distribution</CardTitle><CardDescription>Top 10 Schools by Student Volume</CardDescription></CardHeader>
-                <CardContent className="flex-1 min-h-0 p-0 pb-6 overflow-hidden">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={[...(schools || [])].sort((a,b) => b.studentCount - a.studentCount).slice(0, 10)}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                      <XAxis dataKey="name" hide /><YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                      <Tooltip contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))', borderRadius: '12px' }} />
-                      <Bar dataKey="studentCount" radius={[4, 4, 0, 0]}>
-                        {(schools || []).map((_, index) => <Cell key={`cell-${index}`} fill={index === 0 ? 'hsl(var(--primary))' : 'hsl(var(--primary) / 0.6)'} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </CardContent>
-              </Card>
-              <Card className="flex flex-col min-h-0 overflow-hidden">
-                <CardHeader className="flex flex-row items-center justify-between"><div><CardTitle className="flex items-center gap-2"><TableIcon className="w-5 h-5 text-primary" /> Origin Schools List</CardTitle><CardDescription>Detailed breakdown of enrollment numbers</CardDescription></div></CardHeader>
-                <CardContent className="flex-1 p-0 overflow-hidden">
-                  <ScrollArea className="h-full px-6">
-                    <Table>
-                      <TableHeader><TableRow><TableHead>School Name</TableHead><TableHead className="text-right">Enrollees</TableHead></TableRow></TableHeader>
-                      <TableBody>
-                        {[...(schools || [])].sort((a,b) => b.studentCount - a.studentCount).map((school) => (
-                          <TableRow key={school.id} className="hover:bg-secondary/30 transition-colors"><TableCell className="font-medium">{school.name}</TableCell><TableCell className="text-right font-bold text-primary">{school.studentCount}</TableCell></TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="referral" className="flex-1 h-full w-full m-0 p-6 overflow-hidden flex flex-col gap-6 data-[state=inactive]:hidden">
-            {/* Summary Statistics */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
-              <Card className="bg-primary/5 border-primary/10">
-                <CardHeader className="p-4 pb-2"><CardTitle className="text-xs font-bold text-primary uppercase">Total Referrals</CardTitle></CardHeader>
-                <CardContent className="p-4 pt-0"><div className="text-2xl font-black">{stats.total}</div></CardContent>
-              </Card>
-              <Card className="bg-muted border-muted">
-                <CardHeader className="p-4 pb-2"><CardTitle className="text-xs font-bold text-muted-foreground uppercase">Pending</CardTitle></CardHeader>
-                <CardContent className="p-4 pt-0"><div className="text-2xl font-black">{stats.pending}</div></CardContent>
-              </Card>
-              <Card className="bg-green-500/5 border-green-500/10">
-                <CardHeader className="p-4 pb-2"><CardTitle className="text-xs font-bold text-green-600 uppercase">Approved</CardTitle></CardHeader>
-                <CardContent className="p-4 pt-0"><div className="text-2xl font-black text-green-600">{stats.approved}</div></CardContent>
-              </Card>
-              <Card className="bg-destructive/5 border-destructive/10">
-                <CardHeader className="p-4 pb-2"><CardTitle className="text-xs font-bold text-destructive uppercase">Rejected</CardTitle></CardHeader>
-                <CardContent className="p-4 pt-0"><div className="text-2xl font-black text-destructive">{stats.rejected}</div></CardContent>
-              </Card>
-            </div>
-
-            <div className="flex flex-col md:flex-row items-center justify-between gap-4 shrink-0">
-              <div className="flex-1 w-full max-w-sm relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="Search name, number or code..." className="pl-9" value={referralSearch} onChange={(e) => setReferralSearch(e.target.value)} />
-              </div>
-              <div className="flex items-center gap-4 w-full md:w-auto">
-                <Tabs value={referralStatusFilter} onValueChange={setReferralStatusFilter} className="w-full md:w-auto">
-                  <TabsList>
-                    <TabsTrigger value="all">All</TabsTrigger>
-                    <TabsTrigger value="pending">Pending</TabsTrigger>
-                    <TabsTrigger value="approved">Approved</TabsTrigger>
-                    <TabsTrigger value="rejected">Rejected</TabsTrigger>
-                  </TabsList>
-                </Tabs>
-                <Button className="shrink-0 gap-2" onClick={() => setAddReferralOpen(true)}><Plus className="w-4 h-4" /> Add Referral</Button>
-              </div>
-            </div>
-
-            <Card className="flex-1 flex flex-col min-h-0 hover-elevate transition-all overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between border-b bg-muted/30">
-                <div>
-                  <CardTitle className="flex items-center gap-2 text-xl"><UserPlus className="w-5 h-5 text-primary" /> Referral Management</CardTitle>
-                  <CardDescription>Manage and track all student referrals</CardDescription>
+            {!isPresenting && !sidebarCollapsed && (
+              <aside
+                className="absolute left-0 top-0 z-[45] hidden h-full w-[320px] flex-col overflow-y-auto border-r border-slate-200 bg-slate-50 p-3 shadow-sm lg:flex"
+                data-gis-draw-occlude="left"
+              >
+              <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+                <div className="flex items-center gap-3">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600">GIS Stats</h3>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => setReferralSort("name")} className={cn(referralSort === "name" && "bg-primary/10")}><ArrowUpDown className="w-3 h-3 mr-1" /> Name</Button>
-                  <Button variant="ghost" size="sm" onClick={() => setReferralSort("date")} className={cn(referralSort === "date" && "bg-primary/10")}><ArrowUpDown className="w-3 h-3 mr-1" /> Date</Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
+                  onClick={() => setSidebarCollapsed(true)}
+                  title="Collapse sidebar"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
+                </Button>
+              </div>
+
+              <div className="space-y-2.5">
+                <Metric label="Mapped Schools" value={mappedSchools.length} />
+                <Metric label="Enrollees" value={totalStudents} />
+                <Metric label="Municipalities" value={municipalityCount} />
+                <AnalyticsInsightPanel analytics={programAnalytics} />
+                <div className="rounded-xl border-b-2 border-b-slate-300/80 bg-white px-4 py-3 shadow-[0_10px_28px_-16px_rgba(15,23,42,0.22)] backdrop-blur-[18px]">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-700/85">Last Updated</p>
+                  <p className="mt-1 truncate font-mono text-xs text-slate-900">{lastUpdatedMs ? new Date(lastUpdatedMs).toLocaleString() : "—"}</p>
                 </div>
-              </CardHeader>
-              <CardContent className="flex-1 p-0 overflow-hidden">
-                {matchedStudent && (
-                  <div className="p-6 bg-primary/5 border-b border-primary/10">
-                    <div className="flex items-start gap-4">
-                      <div className="bg-primary/10 p-3 rounded-full"><Info className="w-6 h-6 text-primary" /></div>
-                      <div className="flex-1">
-                        <h3 className="font-bold text-lg">Referrer Information</h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-2">
-                          <div><p className="text-[10px] font-bold text-muted-foreground uppercase">Student Name</p><p className="font-semibold">{matchedStudent.name}</p></div>
-                          <div><p className="text-[10px] font-bold text-muted-foreground uppercase">Student ID</p><p className="font-mono text-sm">{matchedStudent.studentNumber}</p></div>
-                          <div><p className="text-[10px] font-bold text-muted-foreground uppercase">Referral Code</p><p className="font-mono text-sm text-primary font-bold">{matchedStudent.referralCode}</p></div>
-                        </div>
-                        <div className="mt-4 pt-4 border-t border-primary/10">
-                          <h4 className="font-bold text-sm flex items-center gap-2 mb-3"><History className="w-4 h-4" /> Referrals by {matchedStudent.name}</h4>
-                          <div className="space-y-2">
-                            {studentReferrals.length === 0 ? <p className="text-xs text-muted-foreground italic">No candidates referred yet.</p> : 
-                              studentReferrals.map(r => (
-                                <div key={r.id} className="flex items-center justify-between text-sm p-2 bg-card rounded-lg border border-border/50">
-                                  <div><span className="font-bold">{r.referredName}</span> <span className="text-muted-foreground mx-2">•</span> <span className="text-xs text-muted-foreground">{r.relationship}</span></div>
-                                  <div className="flex items-center gap-3">
-                                    <span className={cn("text-[10px] font-bold uppercase px-2 py-0.5 rounded-full", r.status === "approved" ? "bg-green-500/10 text-green-600" : r.status === "rejected" ? "bg-red-500/10 text-red-600" : "bg-muted text-muted-foreground")}>{r.status}</span>
-                                    <span className="text-[10px] text-muted-foreground">{new Date(r.createdAt || "").toLocaleDateString()}</span>
-                                  </div>
-                                </div>
-                              ))
-                            }
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <ScrollArea className="h-full">
-                  <Table>
-                    <TableHeader className="bg-muted/20">
-                      <TableRow>
-                        <TableHead>Candidate</TableHead>
-                        <TableHead>Relationship</TableHead>
-                        <TableHead>Contact</TableHead>
-                        <TableHead>Referrer</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {referralsLoading ? Array.from({ length: 5 }).map((_, i) => <TableRow key={i}><TableCell colSpan={6}><Skeleton className="h-12 w-full" /></TableCell></TableRow>) : 
-                        sortedReferrals.length === 0 ? <TableRow><TableCell colSpan={6} className="h-32 text-center text-muted-foreground italic">No referrals found matching the criteria.</TableCell></TableRow> :
-                        sortedReferrals.map((ref) => {
-                          const referrer = students?.find(s => s.id === ref.referrerId);
-                          return (
-                            <TableRow key={ref.id} className="hover:bg-secondary/30 transition-colors">
-                              <TableCell className="font-bold">{ref.referredName}</TableCell>
-                              <TableCell>{ref.relationship}</TableCell>
-                              <TableCell>{ref.contactNumber}</TableCell>
-                              <TableCell>
-                                {referrer ? (
-                                  <div className="text-xs">
-                                    <p className="font-semibold">{referrer.name}</p>
-                                    <p className="text-muted-foreground font-mono">{referrer.referralCode}</p>
-                                  </div>
-                                ) : "System"}
-                              </TableCell>
-                              <TableCell>
-                                <span className={cn(
-                                  "px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                                  ref.status === 'approved' ? "bg-green-500/10 text-green-600" : 
-                                  ref.status === 'rejected' ? "bg-red-500/10 text-red-600" :
-                                  "bg-muted text-muted-foreground"
-                                )}>
-                                  {ref.status}
-                                </span>
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex items-center justify-end gap-2">
-                                  {ref.status === 'pending' && (
-                                    <>
-                                      <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600 hover:bg-green-500/10" onClick={() => setConfirmAction({ id: ref.id, status: 'approved', type: 'approve' })} title="Approve"><CheckCircle2 className="h-4 w-4" /></Button>
-                                      <Button size="icon" variant="ghost" className="h-8 w-8 text-red-600 hover:bg-red-500/10" onClick={() => setConfirmAction({ id: ref.id, status: 'rejected', type: 'reject' })} title="Reject"><XCircle className="h-4 w-4" /></Button>
-                                    </>
-                                  )}
-                                  <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10" onClick={() => setConfirmAction({ id: ref.id, status: '', type: 'delete' })} title="Delete"><Trash2 className="h-4 w-4" /></Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </div>
+                <ProgramFiltersPanel
+                  filters={programFilters}
+                  options={programOptions}
+                  sort={programSort}
+                  onFiltersChange={setProgramFilters}
+                  onSortChange={setProgramSort}
+                />
+                <ProgramSchoolList schools={sortedProgramSchools} />
+              </div>
+            </aside>
+            )}
+
+            <main className="relative flex h-full min-h-0 flex-1 flex-col">
+              {!isPresenting && sidebarCollapsed && (
+                <Button
+                  variant="secondary"
+                  size="icon"
+                  className="absolute left-3 top-3 z-[1140] hidden h-9 w-9 rounded-full border border-slate-200 bg-white text-slate-700 shadow-md hover:bg-slate-50 lg:inline-flex"
+                  onClick={() => setSidebarCollapsed(false)}
+                  title="Expand sidebar"
+                  aria-label="Expand sidebar"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.5} />
+                </Button>
+              )}
+              <MapWrapper
+                onEditSchool={openEditSchool}
+                isPresenting={isPresenting}
+                isTouring={isTouring}
+                layoutKey={mainTab}
+                analyticsVisibility={analyticsVisibility}
+                mapSettings={mapSettings}
+                drawSettings={drawSettings}
+                clearDrawSignal={clearDrawSignal}
+                onAnalyticsVisibilityChange={updateAnalyticsVisibility}
+                onMapSettingChange={updateMapSetting}
+                onDrawSettingChange={updateDrawSetting}
+                onPresentationChange={applyPresentation}
+                onTouringChange={setIsTouring}
+                onOpenSettings={() => {
+                  setMainTab("admin");
+                  setAdminTab("settings");
+                }}
+                schools={programSchools}
+                programFilters={programFilters}
+                programAnalytics={programAnalytics}
+                legendOffsetPx={legendOffsetPx}
+              />
+            </main>
+          </div>
+        </TabsContent>
+
+        <TabsContent
+          value="admin"
+          className={cn(
+            "m-0 h-full min-h-0 overflow-hidden p-0 data-[state=inactive]:hidden",
+            "transition-[padding] duration-300 ease-out motion-reduce:transition-none",
+            isPresenting ? "pt-3" : "pt-[calc(0.5rem+60px+0.25rem)]",
+          )}
+        >
+          <AdminPortalWorkspace
+            duplicateIds={duplicateIds}
+            onAddSchool={() => openAddSchool()}
+            onDeleteSchool={(school) => deleteSchool.mutate(school.id)}
+            onEditSchool={openEditSchool}
+            onGeolocateSchool={geolocateSchool}
+            onRemoveDuplicate={removeDuplicate}
+            onSectionChange={setAdminTab}
+            renderGisWorkspaceSettings={() => (
+              <div className="mx-auto grid max-w-5xl gap-3 sm:grid-cols-2">
+                <SettingsCard icon={<Layers className="h-4 w-4" />} title="Overlays & labels" description="Map readability while operating GIS.">
+                  <SettingSwitch label="GIS overlays" checked={mapSettings.overlays} onChange={(checked) => updateMapSetting("overlays", checked)} />
+                  <SettingSwitch label="School info labels" checked={mapSettings.schoolLabels} onChange={(checked) => updateMapSetting("schoolLabels", checked)} />
+                  <SettingSwitch label="School name labels" checked={mapSettings.schoolNameLabels ?? defaultMapSettings.schoolNameLabels} onChange={(checked) => updateMapSetting("schoolNameLabels", checked)} />
+                  <SettingSwitch label="Barangay area labels" checked={mapSettings.barangayLabels} onChange={(checked) => updateMapSetting("barangayLabels", checked)} />
+                  <SettingSwitch label="City / municipality labels" checked={mapSettings.cityLabels} onChange={(checked) => updateMapSetting("cityLabels", checked)} />
+                  <SettingSwitch label="Basemap place names" checked={mapSettings.basemapPlaceNames} onChange={(checked) => updateMapSetting("basemapPlaceNames", checked)} />
+                  <SettingSwitch label="Roads on basemap" checked={mapSettings.roads} onChange={(checked) => updateMapSetting("roads", checked)} />
+                  <SettingSwitch label="Minimal basemap" checked={mapSettings.minimalistMode} onChange={(checked) => updateMapSetting("minimalistMode", checked)} />
+                  <SettingSwitch label="Dark basemap theme" checked={mapSettings.mapTheme === "dark"} onChange={(checked) => updateMapSetting("mapTheme", checked ? "dark" : "light")} />
+                  <SettingSwitch label="Marker clustering" checked={mapSettings.clusters} onChange={(checked) => updateMapSetting("clusters", checked)} />
+                  <SettingSwitch label="Program legend" checked={mapSettings.programLegend ?? defaultMapSettings.programLegend} onChange={(checked) => updateMapSetting("programLegend", checked)} />
+                </SettingsCard>
+
+                <SettingsCard icon={<MonitorPlay className="h-4 w-4" />} title="Presentation" description="Fullscreen and tour defaults.">
+                  <SettingSwitch label="Presentation mode" checked={isPresenting} onChange={applyPresentation} />
+                  <SettingSwitch label="Clean fullscreen" checked={presentationSettings.cleanFullscreen} onChange={(checked) => setPresentationSettings((current) => ({ ...current, cleanFullscreen: checked }))} />
+                  <SettingSwitch
+                    label="Marker-only mode"
+                    checked={presentationSettings.markerOnly}
+                    onChange={(checked) => {
+                      setPresentationSettings((current) => ({ ...current, markerOnly: checked }));
+                      updateMapSetting("overlays", !checked);
+                    }}
+                  />
+                  <SettingSwitch label="Guided feeder tour" checked={isTouring} onChange={setIsTouring} />
+                </SettingsCard>
+
+                <SettingsCard icon={<Database className="h-4 w-4" />} title="Import behavior" description="Applied when processing admissions rows.">
+                  <SettingSwitch label="Auto-geolocate missing schools" checked={importSettings.autoGeocode} onChange={(checked) => setImportSettings((current) => ({ ...current, autoGeocode: checked }))} />
+                  <SettingSwitch label="Save local registry dataset" checked={importSettings.saveDataset} onChange={(checked) => setImportSettings((current) => ({ ...current, saveDataset: checked }))} />
+                  <SettingSwitch label="Skip duplicate admissions rows" checked={importSettings.skipDuplicates} onChange={(checked) => setImportSettings((current) => ({ ...current, skipDuplicates: checked }))} />
+                </SettingsCard>
+
+                <SettingsCard icon={<Palette className="h-4 w-4" />} title="Theme & drawings" description="Workspace density and annotation layer.">
+                  <Select
+                    name="gisWorkspaceTheme"
+                    value={theme}
+                    onValueChange={(value) => setTheme(value as ThemePreference)}
+                  >
+                    <SelectTrigger id="gis-workspace-theme" className="h-9 bg-surface-soft text-sm" aria-label="Theme">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="system">System</SelectItem>
+                      <SelectItem value="light">Light</SelectItem>
+                      <SelectItem value="dark">Dark</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <SettingSwitch label="Compact mode" checked={systemSettings.compactMode} onChange={(checked) => setSystemSettings((current) => ({ ...current, compactMode: checked }))} />
+                  <SettingSwitch label="Show drawings" checked={drawSettings.showDrawings} onChange={(checked) => updateDrawSetting("showDrawings", checked)} />
+                  <SettingSwitch label="Drawing annotations" checked={drawSettings.annotationVisibility} onChange={(checked) => updateDrawSetting("annotationVisibility", checked)} />
+                  <Button variant="outline" className="h-9 w-full gap-2 bg-white text-sm" onClick={() => setClearDrawSignal((signal) => signal + 1)}>
+                    <Trash2 className="h-4 w-4" />
+                    Clear drawings
+                  </Button>
+                </SettingsCard>
+              </div>
+            )}
+            renderIntegrationControls={() => <AdmissionsIntegrationHub existingSchools={schools} />}
+            renderSchoolRegistry={() => (
+              <SchoolRegistry
+                compact
+                duplicateIds={duplicateIds}
+                filteredSchools={filteredSchools}
+                isLoading={isLoading}
+                registrySearch={registrySearch}
+                onAdd={() => openAddSchool()}
+                onDelete={(school) => deleteSchool.mutate(school.id)}
+                onEdit={openEditSchool}
+                onGeolocate={geolocateSchool}
+                onRemoveDuplicate={removeDuplicate}
+                onSearchChange={setRegistrySearch}
+              />
+            )}
+            gisOverview={gisOverview}
+            importLogs={importLogs}
+            processedStudents={processedStudents}
+            schools={schools}
+            schoolsLoading={isLoading}
+            schoolsUpdatedAt={lastUpdatedMs}
+            section={adminTab}
+          />
+        </TabsContent>
+
+        <TabsContent
+          value="referrals"
+          className={cn(
+            "m-0 h-full min-h-0 overflow-auto bg-slate-50 p-4 data-[state=inactive]:hidden",
+            "transition-[padding] duration-300 ease-out motion-reduce:transition-none",
+            isPresenting ? "pt-3" : "pt-[calc(0.5rem+60px+0.75rem)]",
+          )}
+        >
+          <ReferralProgramWorkspace
+            createReferral={(input) => createReferral.mutateAsync(input)}
+            deleteReferral={(id) => deleteReferral.mutateAsync(id)}
+            referrals={referrals}
+            students={students}
+            updateReferral={(id, updates) => updateReferral.mutateAsync({ id, updates })}
+          />
+        </TabsContent>
       </Tabs>
 
-      {/* Referral Add Modal */}
-      <Dialog open={addReferralOpen} onOpenChange={setAddReferralOpen}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader><DialogTitle>Add New Referral</DialogTitle><DialogDescription>Directly register a new student candidate.</DialogDescription></DialogHeader>
-          <Form {...referralForm}>
-            <form onSubmit={referralForm.handleSubmit(onReferralSubmit)} className="space-y-4 pt-4">
-              <FormField control={referralForm.control} name="referredName" render={({ field }) => (
-                <FormItem><FormLabel>Candidate Name</FormLabel><FormControl><Input placeholder="Full Name" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
-              <FormField control={referralForm.control} name="relationship" render={({ field }) => (
-                <FormItem><FormLabel>Relationship</FormLabel><FormControl><Input placeholder="e.g. Friend, Cousin" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
-              <FormField control={referralForm.control} name="contactNumber" render={({ field }) => (
-                <FormItem><FormLabel>Contact Number</FormLabel><FormControl><Input placeholder="09XX XXX XXXX" {...field} /></FormControl><FormMessage /></FormItem>
-              )} />
-              <FormField control={referralForm.control} name="referralCode" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Referral Code (Optional)</FormLabel>
-                  <FormControl>
-                    <div className="relative">
-                      <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                      <Input placeholder="TRX-XXXXXX" className="pl-9" {...field} />
-                    </div>
-                  </FormControl>
-                  <FormDescription>Link this referral to an existing student</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={referralForm.control} name="notes" render={({ field }) => (
-                <FormItem><FormLabel>Notes (Optional)</FormLabel><FormControl><Textarea placeholder="Any additional information..." className="resize-none" {...field} value={field.value || ""} /></FormControl><FormMessage /></FormItem>
-              )} />
-              <DialogFooter className="pt-4"><Button type="submit" className="w-full" disabled={createReferralMutation.isPending}>Submit Referral</Button></DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Confirmation Modal */}
-      <Dialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
-        <DialogContent className="sm:max-w-[400px]">
-          <DialogHeader>
-            <DialogTitle>
-              {confirmAction?.type === "approve" ? "Confirm Approval" : confirmAction?.type === "reject" ? "Confirm Rejection" : "Confirm Deletion"}
-            </DialogTitle>
-            <DialogDescription className="pt-2">
-              {confirmAction?.type === "approve" ? "Are you sure you want to approve this referral?" : 
-               confirmAction?.type === "reject" ? "Are you sure you want to reject this referral?" : 
-               "This will permanently delete the referral. Continue?"}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="ghost" onClick={() => setConfirmAction(null)}>Cancel</Button>
-            <Button variant={confirmAction?.type === "delete" ? "destructive" : "default"} onClick={executeReferralAction}>
-              {confirmAction?.type === "approve" ? "Approve" : confirmAction?.type === "reject" ? "Reject" : "Delete"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <SchoolFormDialog open={dialogOpen} onOpenChange={setDialogOpen} initialData={editingSchool} defaultCoordinates={selectedCoords} />
+      <SchoolFormDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        initialData={editingSchool}
+        defaultCoordinates={selectedCoords}
+      />
     </div>
   );
+}
+
+function SchoolRegistry({
+  compact = false,
+  duplicateIds,
+  filteredSchools,
+  isLoading,
+  registrySearch,
+  onAdd,
+  onDelete,
+  onEdit,
+  onGeolocate,
+  onRemoveDuplicate,
+  onSearchChange,
+}: {
+  compact?: boolean;
+  duplicateIds: Set<number>;
+  filteredSchools: School[];
+  isLoading: boolean;
+  registrySearch: string;
+  onAdd: () => void;
+  onDelete: (school: School) => void;
+  onEdit: (school: School) => void;
+  onGeolocate: (school: School) => void;
+  onRemoveDuplicate: (school: School) => void;
+  onSearchChange: (value: string) => void;
+}) {
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+  const { toast } = useToast();
+
+  const handleBulkDelete = async () => {
+    try {
+      setIsDeleting(true);
+      const res = await apiRequest("POST", "/api/schools/batch-delete", { ids: Array.from(selectedIds) });
+      const data = await res.json();
+      if (data.success) {
+        toast({ title: "Success", description: data.message });
+        setSelectedIds(new Set());
+        void queryClient.invalidateQueries({ queryKey: ["/api/gis/overview"] });
+        void queryClient.invalidateQueries({ queryKey: ["/api/schools"] });
+        void queryClient.invalidateQueries({ queryKey: ["/api/mapping/queue"] });
+      } else {
+        toast({ title: "Delete Error", description: data.message, variant: "destructive" });
+      }
+    } catch (e) {
+      toast({ title: "Delete Failed", description: String(e), variant: "destructive" });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <div className={cn("mx-auto space-y-3", compact ? "max-w-full" : "max-w-7xl space-y-4")}>
+      <TableToolbar
+        searchQuery={registrySearch}
+        onSearchChange={onSearchChange}
+        searchPlaceholder="Search schools, municipalities, type, or status..."
+        selectedCount={selectedIds.size}
+        onClearSelection={() => setSelectedIds(new Set())}
+        onDelete={handleBulkDelete}
+        isDeleting={isDeleting}
+        deleteItemName="schools"
+      />
+      
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className={cn("font-semibold text-slate-900", compact ? "text-sm" : "text-xl font-black")}>School registry</h3>
+          <p className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-sm")}>
+            One GIS entity per school — coordinates, municipality, verification.
+          </p>
+        </div>
+        <Button className={cn("gap-2", compact ? "h-8 px-3 text-xs" : "h-10")} onClick={onAdd}>
+          <Plus className="h-3.5 w-3.5" />
+          Add school
+        </Button>
+      </div>
+
+      <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
+        <div className={cn(compact && "overflow-x-auto")}>
+        <Table className={cn(compact && "min-w-[960px] text-xs")}>
+          <TableHeader>
+            <TableRow className={cn(compact && "hover:bg-transparent")}>
+              <TableHead className="w-10 px-4">
+                <Checkbox 
+                  checked={filteredSchools.length > 0 && selectedIds.size === filteredSchools.length}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setSelectedIds(new Set(filteredSchools.map(s => s.id)));
+                    } else {
+                      setSelectedIds(new Set());
+                    }
+                  }}
+                  aria-label="Select all schools"
+                />
+              </TableHead>
+              {compact ? (
+                <>
+                  <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">School</TableHead>
+                  <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Normalized</TableHead>
+                  <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Lat / Lng</TableHead>
+                  <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Municipality</TableHead>
+                  <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Province</TableHead>
+                  <TableHead className="whitespace-nowrap text-right text-[10px] font-semibold uppercase tracking-wide">Students</TableHead>
+                  <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Frosh / Xfer</TableHead>
+                  <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Verification</TableHead>
+                  <TableHead className="whitespace-nowrap text-right text-[10px] font-semibold uppercase tracking-wide">Actions</TableHead>
+                </>
+              ) : (
+                <>
+                  <TableHead>School</TableHead>
+                  <TableHead>Coordinates</TableHead>
+                  <TableHead>Municipality</TableHead>
+                  <TableHead>School Type</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow><TableCell colSpan={compact ? 10 : 7} className="h-24 text-center text-muted-foreground">Loading registry...</TableCell></TableRow>
+            ) : filteredSchools.length === 0 ? (
+              <TableRow><TableCell colSpan={compact ? 10 : 7} className="h-24 text-center text-muted-foreground">No schools found.</TableCell></TableRow>
+            ) : filteredSchools.map((school) => {
+              const registryStatus = duplicateIds.has(school.id) ? "Duplicate Entry" : getSchoolStatus(school);
+              const actionBtn = compact ? "h-7 w-7" : "h-8 w-8";
+              const actionIcon = compact ? "h-3.5 w-3.5" : "h-4 w-4";
+
+              return (
+              <TableRow key={school.id} className={cn(compact && "text-[11px]")} data-state={selectedIds.has(school.id) ? "selected" : undefined}>
+                <TableCell className="px-4">
+                  <Checkbox 
+                    checked={selectedIds.has(school.id)}
+                    onCheckedChange={(checked) => {
+                      const next = new Set(selectedIds);
+                      if (checked) next.add(school.id);
+                      else next.delete(school.id);
+                      setSelectedIds(next);
+                    }}
+                    aria-label={`Select school ${school.name}`}
+                  />
+                </TableCell>
+                <TableCell className={cn(compact && "max-w-[180px]")}>
+                  <p className={cn("font-semibold", compact && "truncate")}>{school.name}</p>
+                  {!compact ? (
+                    <p className="text-xs text-muted-foreground">{school.studentCount.toLocaleString()} students</p>
+                  ) : (
+                    <p className="truncate text-[10px] text-muted-foreground">{school.institutionType}</p>
+                  )}
+                </TableCell>
+                {compact ? (
+                  <>
+                    <TableCell className="max-w-[140px]">
+                      <span className="block truncate font-mono text-[10px] text-slate-600">
+                        {school.normalizedName || "—"}
+                      </span>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {hasCoordinates(school) ? (
+                        <span className="font-mono text-[10px]">{school.lat!.toFixed(5)}, {school.lng!.toFixed(5)}</span>
+                      ) : (
+                        <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-700">Missing</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{school.municipality}</TableCell>
+                    <TableCell className="whitespace-nowrap text-slate-500">Laguna</TableCell>
+                    <TableCell className="text-right tabular-nums">{school.studentCount.toLocaleString()}</TableCell>
+                    <TableCell className="whitespace-nowrap text-slate-400">— / —</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={cn("text-[10px]", statusTone(school))}>
+                        {school.verified ? "Verified" : registryStatus}
+                      </Badge>
+                    </TableCell>
+                  </>
+                ) : (
+                  <>
+                    <TableCell>
+                      {hasCoordinates(school) ? (
+                        <span className="font-mono text-xs">{school.lat!.toFixed(5)}, {school.lng!.toFixed(5)}</span>
+                      ) : (
+                        <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">Missing</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>{school.municipality}</TableCell>
+                    <TableCell>{school.institutionType}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={statusTone(school)}>{registryStatus}</Badge>
+                    </TableCell>
+                  </>
+                )}
+                <TableCell>
+                  <div className="flex justify-end gap-0.5">
+                    <Button variant="ghost" size="icon" className={actionBtn} onClick={() => onEdit(school)} title="Edit school">
+                      <Edit className={actionIcon} />
+                    </Button>
+                    <Button variant="ghost" size="icon" className={actionBtn} onClick={() => onGeolocate(school)} title="Re-geolocate school">
+                      <RefreshCw className={actionIcon} />
+                    </Button>
+                    {duplicateIds.has(school.id) && (
+                      <Button variant="ghost" size="icon" className={cn(actionBtn, "text-amber-700")} onClick={() => onRemoveDuplicate(school)} title="Remove duplicate">
+                        <Trash2 className={actionIcon} />
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="icon" className={cn(actionBtn, "text-rose-600")} onClick={() => onDelete(school)} title="Delete school">
+                      <Trash2 className={actionIcon} />
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+            })}
+          </TableBody>
+        </Table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function ProgramFiltersPanel({
+  filters,
+  options,
+  sort,
+  onFiltersChange,
+  onSortChange,
+}: {
+  filters: ProgramFilters;
+  options: ReturnType<typeof getProgramOptions>;
+  sort: string;
+  onFiltersChange: (next: ProgramFilters | ((current: ProgramFilters) => ProgramFilters)) => void;
+  onSortChange: (next: string) => void;
+}) {
+  const active = programFilterIsActive(filters);
+  const updateFilter = (key: keyof ProgramFilters, value: string) => {
+    onFiltersChange((current) => ({
+      ...current,
+      [key]: value,
+      ...(key === "college" ? { program: ALL_PROGRAM_FILTER, track: ALL_PROGRAM_FILTER } : {}),
+      ...(key === "program" ? { track: ALL_PROGRAM_FILTER } : {}),
+    }));
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Program Intelligence</p>
+          <p className="text-xs font-semibold text-slate-900">{active ? "Filtered map view" : "All programs"}</p>
+        </div>
+        {active && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-7 px-2 text-[11px]"
+            onClick={() => onFiltersChange({ college: ALL_PROGRAM_FILTER, program: ALL_PROGRAM_FILTER, track: ALL_PROGRAM_FILTER })}
+          >
+            Reset
+          </Button>
+        )}
+      </div>
+      <div className="space-y-2">
+        <SidebarSelect
+          label="College"
+          value={filters.college}
+          onValueChange={(value) => updateFilter("college", value)}
+          items={options.colleges}
+          allLabel="All Colleges"
+        />
+        <SidebarSelect
+          label="Program"
+          value={filters.program}
+          onValueChange={(value) => updateFilter("program", value)}
+          items={options.programs}
+          allLabel="All Programs"
+        />
+        <SidebarSelect
+          label="Track"
+          value={filters.track}
+          onValueChange={(value) => updateFilter("track", value)}
+          items={options.tracks}
+          allLabel="All Tracks"
+        />
+        <SidebarSelect
+          label="Sort"
+          value={sort}
+          onValueChange={onSortChange}
+          items={[
+            { value: "filtered-desc", label: "Filtered count" },
+            { value: "total-desc", label: "Total count" },
+            { value: "name-asc", label: "School A-Z" },
+            { value: "municipality-asc", label: "Municipality" },
+            { value: "college-asc", label: "College / Department" },
+          ]}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SidebarSelect({
+  allLabel,
+  items,
+  label,
+  onValueChange,
+  value,
+}: {
+  allLabel?: string;
+  items: Array<{ value: string; label: string }>;
+  label: string;
+  onValueChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</Label>
+      <Select value={value} onValueChange={onValueChange}>
+        <SelectTrigger className="h-8 rounded-md bg-slate-50 text-xs">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {allLabel && <SelectItem value={ALL_PROGRAM_FILTER}>{allLabel}</SelectItem>}
+          {items.map((item) => (
+            <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function ProgramSchoolList({ schools }: { schools: ProgramSchool[] }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+      <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">Schools</p>
+      <div className="max-h-[310px] space-y-1.5 overflow-y-auto pr-1">
+        {schools.length === 0 ? (
+          <p className="rounded-md bg-slate-50 px-2 py-3 text-center text-xs text-slate-500">No schools match the active filters.</p>
+        ) : (
+          schools.slice(0, 80).map((school) => (
+            <div key={school.id} className="flex items-center gap-2 rounded-md border border-slate-100 bg-slate-50 px-2 py-2">
+              <span
+                className="h-3 w-3 shrink-0 rounded-full"
+                style={{ backgroundColor: school.dominantProgram?.color || "#cbd5e1" }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-bold text-slate-900">{school.name}</p>
+                <p className="truncate text-[10px] text-slate-500">{school.municipality || "Laguna"} · {school.dominantProgram?.code || "Unknown"}</p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-xs font-black text-slate-900">{school.filteredStudentCount.toLocaleString()}</p>
+                <p className="text-[10px] text-slate-500">of {school.totalStudentCount.toLocaleString()}</p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReferralProgramWorkspace({
+  createReferral,
+  deleteReferral,
+  referrals,
+  students,
+  updateReferral,
+}: {
+  createReferral: (input: ReferralInput) => Promise<unknown>;
+  deleteReferral: (id: number) => Promise<unknown>;
+  referrals: Referral[];
+  students: Student[];
+  updateReferral: (id: number, updates: Partial<ReferralInput>) => Promise<unknown>;
+}) {
+  const { toast } = useToast();
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedReferrerId, setSelectedReferrerId] = useState("");
+  const [candidateName, setCandidateName] = useState("");
+  const [relationship, setRelationship] = useState("");
+  const [contactNumber, setContactNumber] = useState("");
+  const [notes, setNotes] = useState("");
+  const studentsById = useMemo(() => new Map(students.map((student) => [student.id, student])), [students]);
+  const publicReferralUrl = `${window.location.origin}${window.location.pathname}#/referral`;
+
+  const stats = useMemo(() => ({
+    total: referrals.length,
+    pending: referrals.filter((referral) => referral.status === "pending").length,
+    approved: referrals.filter((referral) => referral.status === "approved").length,
+    rejected: referrals.filter((referral) => referral.status === "rejected").length,
+  }), [referrals]);
+
+  const filteredReferrals = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return referrals
+      .filter((referral) => statusFilter === "all" || referral.status === statusFilter)
+      .filter((referral) => {
+        if (!query) return true;
+        const referrer = referral.referrerId ? studentsById.get(referral.referrerId) : undefined;
+        return [
+          referral.referredName,
+          referral.relationship,
+          referral.contactNumber || "",
+          referral.notes || "",
+          referral.status,
+          referrer?.name || "",
+          referrer?.studentNumber || "",
+          referrer?.referralCode || "",
+        ].some((value) => value.toLowerCase().includes(query));
+      })
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [referrals, search, statusFilter, studentsById]);
+
+  const resetForm = () => {
+    setSelectedReferrerId("");
+    setCandidateName("");
+    setRelationship("");
+    setContactNumber("");
+    setNotes("");
+  };
+
+  const submitInternalReferral = async () => {
+    if (!candidateName.trim() || !relationship.trim()) {
+      toast({
+        title: "Missing referral details",
+        description: "Add the candidate name and relationship before saving.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    await createReferral({
+      referrerId: selectedReferrerId ? Number(selectedReferrerId) : undefined,
+      referredName: candidateName.trim(),
+      relationship: relationship.trim(),
+      contactNumber: contactNumber.trim() || null,
+      notes: notes.trim() || null,
+      status: "pending",
+    });
+    resetForm();
+  };
+
+  const copyPublicLink = async () => {
+    await navigator.clipboard.writeText(publicReferralUrl);
+    toast({ title: "Referral link copied", description: "Students can register and submit referrals from this public portal." });
+  };
+
+  return (
+    <div className="mx-auto max-w-7xl space-y-4">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">Admissions Support</Badge>
+            <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">Public portal: /referral</Badge>
+          </div>
+          <h2 className="mt-2 text-xl font-black">Referral Program System</h2>
+          <p className="text-sm text-muted-foreground">
+            Register student referrers, collect candidate leads, review submissions, and approve only qualified referrals.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" className="h-10 gap-2 bg-white" onClick={copyPublicLink}>
+            <Copy className="h-4 w-4" />
+            Copy Portal Link
+          </Button>
+          <Button className="h-10 gap-2" onClick={() => window.open(publicReferralUrl, "_blank")}>
+            <ExternalLink className="h-4 w-4" />
+            Open Student Portal
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <ReferralMetric icon={<UserPlus className="h-4 w-4" />} label="Total Referrals" value={stats.total} />
+        <ReferralMetric icon={<Clock3 className="h-4 w-4" />} label="Pending Review" value={stats.pending} tone="amber" />
+        <ReferralMetric icon={<CheckCircle2 className="h-4 w-4" />} label="Approved" value={stats.approved} tone="emerald" />
+        <ReferralMetric icon={<XCircle className="h-4 w-4" />} label="Rejected" value={stats.rejected} tone="rose" />
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[390px_minmax(0,1fr)]">
+        <Card className="rounded-lg border-slate-200 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <UserPlus className="h-4 w-4 text-primary" />
+              Add Referral Lead
+            </CardTitle>
+            <CardDescription>
+              Use this when admissions receives a referral by walk-in, message, or staff entry.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Select value={selectedReferrerId || "none"} onValueChange={(value) => setSelectedReferrerId(value === "none" ? "" : value)}>
+              <SelectTrigger className="h-10 bg-slate-50">
+                <SelectValue placeholder="Optional referrer" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No linked referrer</SelectItem>
+                {students.map((student) => (
+                  <SelectItem key={student.id} value={String(student.id)}>
+                    {student.name} - {student.referralCode}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              name="candidateFullName"
+              className="h-10 bg-slate-50"
+              placeholder="Candidate full name"
+              value={candidateName}
+              onChange={(event) => setCandidateName(event.target.value)}
+            />
+            <Input
+              name="candidateRelationship"
+              className="h-10 bg-slate-50"
+              placeholder="Relationship to referrer"
+              value={relationship}
+              onChange={(event) => setRelationship(event.target.value)}
+            />
+            <Input
+              name="candidateContactNumber"
+              className="h-10 bg-slate-50"
+              placeholder="Contact number"
+              value={contactNumber}
+              onChange={(event) => setContactNumber(event.target.value)}
+            />
+            <Textarea
+              name="admissionsNotes"
+              className="min-h-24 bg-slate-50"
+              placeholder="Notes for admissions follow-up"
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            />
+            <Button className="h-10 w-full gap-2" onClick={() => void submitInternalReferral()}>
+              <UserPlus className="h-4 w-4" />
+              Save as Pending
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
+          <CardHeader className="border-b border-slate-200 bg-white pb-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <CardTitle className="text-base">Referral Review Queue</CardTitle>
+                <CardDescription>Pending leads should be contacted, verified, then approved or rejected.</CardDescription>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    name="referralSearch"
+                    className="h-10 w-full bg-slate-50 pl-9 sm:w-72"
+                    placeholder="Search referrals..."
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="h-10 bg-slate-50 sm:w-40"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="approved">Approved</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </CardHeader>
+          <div className="max-h-[620px] overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Candidate</TableHead>
+                  <TableHead>Referrer</TableHead>
+                  <TableHead>Contact</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredReferrals.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                      No referral records found.
+                    </TableCell>
+                  </TableRow>
+                ) : filteredReferrals.map((referral) => {
+                  const referrer = referral.referrerId ? studentsById.get(referral.referrerId) : undefined;
+                  return (
+                    <TableRow key={referral.id}>
+                      <TableCell>
+                        <p className="font-semibold">{referral.referredName}</p>
+                        <p className="text-xs text-muted-foreground">{referral.relationship}</p>
+                        {referral.notes ? <p className="mt-1 max-w-xs truncate text-xs text-muted-foreground">{referral.notes}</p> : null}
+                      </TableCell>
+                      <TableCell>
+                        {referrer ? (
+                          <div>
+                            <p className="font-medium">{referrer.name}</p>
+                            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                              <KeyRound className="h-3 w-3" />
+                              {referrer.referralCode}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">Unlinked lead</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm">{referral.contactNumber || "No contact"}</span>
+                      </TableCell>
+                      <TableCell>
+                        <ReferralStatusBadge status={referral.status} />
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-emerald-700"
+                            disabled={referral.status === "approved"}
+                            onClick={() => updateReferral(referral.id, { status: "approved" })}
+                            title="Approve referral"
+                          >
+                            <CheckCircle2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-rose-700"
+                            disabled={referral.status === "rejected"}
+                            onClick={() => updateReferral(referral.id, { status: "rejected" })}
+                            title="Reject referral"
+                          >
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-slate-600"
+                            disabled={referral.status === "pending"}
+                            onClick={() => updateReferral(referral.id, { status: "pending" })}
+                            title="Return to pending"
+                          >
+                            <Clock3 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-rose-600"
+                            onClick={() => {
+                              if (confirm(`Delete referral for ${referral.referredName}?`)) {
+                                void deleteReferral(referral.id);
+                              }
+                            }}
+                            title="Delete referral"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function ReferralMetric({
+  icon,
+  label,
+  value,
+  tone = "primary",
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+  tone?: "primary" | "amber" | "emerald" | "rose";
+}) {
+  const toneClass = {
+    primary: "border-primary/15 bg-primary/5 text-primary",
+    amber: "border-amber-200 bg-amber-50 text-amber-700",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    rose: "border-rose-200 bg-rose-50 text-rose-700",
+  }[tone];
+
+  return (
+    <Card className={cn("rounded-lg shadow-sm", toneClass)}>
+      <CardContent className="flex items-center justify-between gap-3 p-4">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wide opacity-75">{label}</p>
+          <p className="mt-1 text-2xl font-black text-slate-950">{value.toLocaleString()}</p>
+        </div>
+        <div className="grid h-9 w-9 place-items-center rounded-lg bg-white/70">{icon}</div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReferralStatusBadge({ status }: { status: string }) {
+  const tone = status === "approved"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    : status === "rejected"
+      ? "border-rose-200 bg-rose-50 text-rose-700"
+      : "border-amber-200 bg-amber-50 text-amber-700";
+
+  const label = status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "Pending";
+
+  return <Badge variant="outline" className={tone}>{label}</Badge>;
+}
+
+function Metric({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-xl border-b-2 border-b-slate-300/70 bg-white/85 px-3.5 py-3 shadow-[0_10px_26px_-16px_rgba(15,23,42,0.2)] backdrop-blur-md">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-700/85">{label}</p>
+      <p className="mt-1 text-2xl font-black text-slate-950">{value.toLocaleString()}</p>
+    </div>
+  );
+}
+
+function AnalyticsInsightPanel({ analytics }: { analytics: ProgramAnalytics }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Analytics</p>
+      <div className="mt-2 space-y-1.5 text-xs">
+        <div className="flex items-start justify-between gap-2">
+          <span className="shrink-0 text-slate-500">Top Feeder</span>
+          <strong className="min-w-0 truncate text-right text-slate-900">{analytics.topFeederSchool?.name || "None"}</strong>
+        </div>
+        <div className="flex items-start justify-between gap-2">
+          <span className="shrink-0 text-slate-500">Top Municipality</span>
+          <strong className="min-w-0 truncate text-right text-slate-900">{analytics.topMunicipality?.name || "None"}</strong>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsCard({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <Card className="rounded-lg border-slate-200 shadow-sm">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">{icon}</span>
+          {title}
+        </CardTitle>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">{children}</CardContent>
+    </Card>
+  );
+}
+
+function SettingSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+      <span className="text-sm font-semibold">{label}</span>
+      <Switch checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
+}
+
+function statusTone(school: School) {
+  const status = getSchoolStatus(school);
+  if (status === "Verified") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (status === "Auto-Located") return "border-sky-200 bg-sky-50 text-sky-700";
+  if (status === "Duplicate Entry") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (status === "Missing Coordinates") return "border-rose-200 bg-rose-50 text-rose-700";
+  return "border-slate-200 bg-slate-50 text-slate-600";
+}
+
+function findDuplicateSchoolIds(schools: School[]) {
+  const byName = new Map<string, School[]>();
+  schools.forEach((school) => {
+    const key = normalizeSchoolName(school.normalizedName || school.name);
+    byName.set(key, [...(byName.get(key) || []), school]);
+  });
+
+  const duplicates = new Set<number>();
+  byName.forEach((group) => {
+    group
+      .sort((a, b) => {
+        if (hasCoordinates(a) && !hasCoordinates(b)) return -1;
+        if (!hasCoordinates(a) && hasCoordinates(b)) return 1;
+        return b.studentCount - a.studentCount;
+      })
+      .slice(1)
+      .forEach((school) => duplicates.add(school.id));
+  });
+  return duplicates;
+}
+
+function sortProgramSchools(schools: ProgramSchool[], sort: string) {
+  return schools.slice().sort((a, b) => {
+    if (sort === "total-desc") return b.totalStudentCount - a.totalStudentCount;
+    if (sort === "name-asc") return a.name.localeCompare(b.name);
+    if (sort === "municipality-asc") return (a.municipality || "").localeCompare(b.municipality || "") || a.name.localeCompare(b.name);
+    if (sort === "college-asc") {
+      return (a.dominantProgram?.collegeName || "Unknown").localeCompare(b.dominantProgram?.collegeName || "Unknown") || a.name.localeCompare(b.name);
+    }
+    return b.filteredStudentCount - a.filteredStudentCount;
+  });
+}
+
+function usePersistentState<T>(key: string, defaultValue: T) {
+  const [value, setValue] = useState<T>(() => {
+    if (typeof window === "undefined") return defaultValue;
+
+    try {
+      const stored = window.localStorage.getItem(key);
+      if (!stored) return defaultValue;
+      const parsed = JSON.parse(stored) as T;
+      if (
+        defaultValue &&
+        parsed &&
+        typeof defaultValue === "object" &&
+        typeof parsed === "object" &&
+        !Array.isArray(defaultValue) &&
+        !Array.isArray(parsed)
+      ) {
+        return { ...defaultValue, ...parsed } as T;
+      }
+      return parsed;
+    } catch {
+      return defaultValue;
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
+
+  return [value, setValue] as const;
 }

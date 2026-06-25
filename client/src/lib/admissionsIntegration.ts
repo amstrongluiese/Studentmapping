@@ -109,6 +109,7 @@ export const SYSTEM_FIELDS: AdmissionsSystemField[] = [
       "senior_high_school_last_attended",
       "last school",
       "last_school",
+      "last school name",
       "previous school",
       "previous_school",
       "school name",
@@ -165,7 +166,7 @@ export const SYSTEM_FIELDS: AdmissionsSystemField[] = [
   {
     key: "program",
     label: "Program",
-    aliases: ["program", "course", "preferred program", "college program", "program choice"],
+    aliases: ["program", "course", "preferred program", "college program", "program choice", "program/course"],
   },
   {
     key: "municipality",
@@ -386,6 +387,7 @@ export function buildAdmissionsImportPlan(
       name: school?.name || first.feederSchool,
       normalizedName: normalizeSchoolName(school?.normalizedName || school?.name || first.feederSchool),
       municipality: first.municipality || school?.municipality || "Laguna",
+      province: school?.province || "Laguna",
       institutionType: school?.institutionType || "Feeder Institution",
       lat,
       lng,

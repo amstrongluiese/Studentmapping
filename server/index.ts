@@ -7,6 +7,12 @@ import { testDatabaseConnection, initializeDatabase } from "./db";
 
 dotenv.config();
 
+if (!process.env.GOOGLE_MAPS_API_KEY?.trim()) {
+  console.warn(
+    "[startup] GOOGLE_MAPS_API_KEY is not configured. Google Places autocomplete and geocoding will be limited or fallback to local data.",
+  );
+}
+
 const app = express();
 const httpServer = createServer(app);
 

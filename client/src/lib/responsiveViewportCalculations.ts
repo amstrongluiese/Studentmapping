@@ -9,6 +9,7 @@
 
 /** Elements that cover the map and must not receive strokes (space-separated sides). */
 export const GIS_MAP_DRAW_OCCLUDE_SELECTOR = "[data-gis-draw-occlude]";
+const EDGE_OCCLUDER_TOLERANCE_PX = 32;
 
 /** Shared options for map drawing viewport (Dashboard + MapWrapper). */
 export const DEFAULT_MAP_DRAW_VIEWPORT_OPTIONS = {
@@ -33,6 +34,22 @@ export interface ViewportBounds {
   height: number;
   /** Timestamp when bounds were calculated */
   calculatedAt: number;
+}
+
+export interface ProtectedOverlayRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+export interface OverlayCollisionRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 function isLayoutVisible(el: HTMLElement): boolean {
@@ -77,16 +94,16 @@ function applyDataOccludersToMapRect(mapRect: DOMRect, root: ParentNode = docume
     const overlapsVert = o.bottom > mapRect.top + 0.5 && o.top < mapRect.bottom - 0.5;
     if (!overlapsHoriz || !overlapsVert) return;
 
-    if (sides.has("left") && o.right > left && o.left <= left + 1) {
+    if (sides.has("left") && o.right > left && o.left <= mapRect.left + EDGE_OCCLUDER_TOLERANCE_PX) {
       left = Math.max(left, o.right);
     }
-    if (sides.has("right") && o.left < right && o.right >= right - 1) {
+    if (sides.has("right") && o.left < right && o.right >= mapRect.right - EDGE_OCCLUDER_TOLERANCE_PX) {
       right = Math.min(right, o.left);
     }
-    if (sides.has("top") && o.bottom > top && o.top <= top + 1) {
+    if (sides.has("top") && o.bottom > top && o.top <= mapRect.top + EDGE_OCCLUDER_TOLERANCE_PX) {
       top = Math.max(top, o.bottom);
     }
-    if (sides.has("bottom") && o.top < bottom && o.bottom >= bottom - 1) {
+    if (sides.has("bottom") && o.top < bottom && o.bottom >= mapRect.bottom - EDGE_OCCLUDER_TOLERANCE_PX) {
       bottom = Math.min(bottom, o.top);
     }
   });
@@ -108,32 +125,6 @@ export function getViewportInsetInMapContainer(viewport: ViewportBounds, mapCont
   };
 }
 
-/**
- * Convert a client point to overlay-local coordinates using the overlay’s
- * live bounding rect (avoids stale viewport math when layout lags refs).
- */
-export function clientPointToOverlayLocal(
-  clientX: number,
-  clientY: number,
-  overlayRect: DOMRect,
-  viewportFallback: ViewportBounds | null,
-): { x: number; y: number } {
-  const o = overlayRect;
-  if (o.width > 0 && o.height > 0) {
-    return {
-      x: clientX - o.left,
-      y: clientY - o.top,
-    };
-  }
-  if (viewportFallback) {
-    return {
-      x: clientX - viewportFallback.left,
-      y: clientY - viewportFallback.top,
-    };
-  }
-  return { x: 0, y: 0 };
-}
-
 export interface ContainerMetrics {
   /** Bounding rect of the map container */
   containerRect: DOMRect;
@@ -143,6 +134,115 @@ export interface ContainerMetrics {
   navbarRect?: DOMRect;
   /** Device pixel ratio for HiDPI support */
   devicePixelRatio: number;
+}
+
+export function calculateFullMapViewportBounds(mapContainer: HTMLElement | null): ViewportBounds | null {
+  if (!mapContainer) return null;
+  const containerRect = mapContainer.getBoundingClientRect();
+  return {
+    left: containerRect.left,
+    top: containerRect.top,
+    right: containerRect.right,
+    bottom: containerRect.bottom,
+    width: containerRect.width,
+    height: containerRect.height,
+    calculatedAt: Date.now(),
+  };
+}
+
+export function getProtectedMapOverlayRects(
+  mapContainer: HTMLElement | null,
+  options: {
+    selector?: string;
+    padding?: number;
+    queryRoot?: ParentNode;
+  } = {},
+): ProtectedOverlayRect[] {
+  if (!mapContainer || typeof document === "undefined") return [];
+  const mapRect = mapContainer.getBoundingClientRect();
+  const root = options.queryRoot ?? document;
+  const selector = options.selector ?? GIS_MAP_DRAW_OCCLUDE_SELECTOR;
+  const padding = options.padding ?? 8;
+
+  return Array.from(root.querySelectorAll<HTMLElement>(selector))
+    .filter(isLayoutVisible)
+    .map((el) => el.getBoundingClientRect())
+    .filter((rect) =>
+      rect.right > mapRect.left &&
+      rect.left < mapRect.right &&
+      rect.bottom > mapRect.top &&
+      rect.top < mapRect.bottom,
+    )
+    .map((rect) => {
+      const left = Math.max(0, rect.left - mapRect.left - padding);
+      const top = Math.max(0, rect.top - mapRect.top - padding);
+      const right = Math.min(mapRect.width, rect.right - mapRect.left + padding);
+      const bottom = Math.min(mapRect.height, rect.bottom - mapRect.top + padding);
+      return {
+        left,
+        top,
+        right,
+        bottom,
+        width: Math.max(0, right - left),
+        height: Math.max(0, bottom - top),
+      };
+    })
+    .filter((rect) => rect.width > 1 && rect.height > 1);
+}
+
+function rectsIntersect(a: OverlayCollisionRect, b: ProtectedOverlayRect): boolean {
+  return a.x < b.right && a.x + a.width > b.left && a.y < b.bottom && a.y + a.height > b.top;
+}
+
+function clampRectToBounds(rect: OverlayCollisionRect, bounds: { width: number; height: number }): OverlayCollisionRect {
+  return {
+    ...rect,
+    x: Math.max(0, Math.min(rect.x, Math.max(0, bounds.width - rect.width))),
+    y: Math.max(0, Math.min(rect.y, Math.max(0, bounds.height - rect.height))),
+  };
+}
+
+export function resolveRectAgainstProtectedOverlays(
+  rect: OverlayCollisionRect,
+  protectedRects: ProtectedOverlayRect[],
+  bounds: { width: number; height: number },
+): OverlayCollisionRect {
+  let next = clampRectToBounds(rect, bounds);
+
+  for (let pass = 0; pass < 3; pass += 1) {
+    let changed = false;
+
+    for (const protectedRect of protectedRects) {
+      if (!rectsIntersect(next, protectedRect)) continue;
+
+      const candidates = [
+        { ...next, x: protectedRect.left - next.width },
+        { ...next, x: protectedRect.right },
+        { ...next, y: protectedRect.top - next.height },
+        { ...next, y: protectedRect.bottom },
+      ]
+        .map((candidate) => clampRectToBounds(candidate, bounds))
+        .map((candidate) => ({
+          rect: candidate,
+          distance: Math.hypot(candidate.x - next.x, candidate.y - next.y),
+          stillIntersects: rectsIntersect(candidate, protectedRect),
+        }))
+        .sort((a, b) => {
+          if (a.stillIntersects !== b.stillIntersects) return a.stillIntersects ? 1 : -1;
+          return a.distance - b.distance;
+        });
+
+      const best = candidates[0]?.rect;
+      if (best && (best.x !== next.x || best.y !== next.y)) {
+        next = best;
+        changed = true;
+      }
+    }
+
+    if (!changed) break;
+  }
+
+  return clampRectToBounds(next, bounds);
 }
 
 /**
@@ -232,23 +332,6 @@ export function calculateVisibleMapViewportBounds(
     console.error("[Viewport] Failed to calculate bounds:", error);
     return null;
   }
-}
-
-/**
- * Get the offset from client coordinates to container-relative coordinates,
- * accounting for the visible viewport bounds.
- */
-export function getContainerRelativeCoordinates(
-  clientX: number,
-  clientY: number,
-  viewportBounds: ViewportBounds | null,
-): { x: number; y: number } | null {
-  if (!viewportBounds) return null;
-
-  return {
-    x: clientX - viewportBounds.left,
-    y: clientY - viewportBounds.top,
-  };
 }
 
 /**

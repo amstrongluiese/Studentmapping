@@ -1,0 +1,75 @@
+{
+  "updatedAt": "2026-06-08T05:35:10.512Z",
+  "schools": [
+    {
+      "id": 4,
+      "name": "Calamba Bayside National High School",
+      "normalizedName": "calamba bayside national high school",
+      "latitude": 14.2255,
+      "longitude": 121.1711,
+      "municipality": "Calamba",
+      "province": "Laguna",
+      "schoolType": "Public High School",
+      "verified": true,
+      "status": "Verified",
+      "studentCount": 85,
+      "source": "Seed Registry"
+    },
+    {
+      "id": 1,
+      "name": "Laguna Science National High School",
+      "normalizedName": "laguna science national high school",
+      "latitude": 14.161,
+      "longitude": 121.2335,
+      "municipality": "Santa Cruz",
+      "province": "Laguna",
+      "schoolType": "Public High School",
+      "verified": true,
+      "status": "Verified",
+      "studentCount": 150,
+      "source": "Seed Registry"
+    },
+    {
+      "id": 2,
+      "name": "Los Banos National High School",
+      "normalizedName": "los banos national high school",
+      "latitude": 14.1706,
+      "longitude": 121.2216,
+      "municipality": "Los Banos",
+      "province": "Laguna",
+      "schoolType": "Public High School",
+      "verified": true,
+      "status": "Verified",
+      "studentCount": 300,
+      "source": "Seed Registry"
+    },
+    {
+      "id": 3,
+      "name": "Pedro Guevara Memorial National High School",
+      "normalizedName": "pedro guevara memorial national high school",
+      "latitude": 14.2758,
+      "longitude": 121.4168,
+      "municipality": "Santa Cruz",
+      "province": "Laguna",
+      "schoolType": "Public High School",
+      "verified": true,
+      "status": "Verified",
+      "studentCount": 420,
+      "source": "Seed Registry"
+    },
+    {
+      "id": 5,
+      "name": "Trimex Colleges",
+      "normalizedName": "trimex colleges",
+      "latitude": 14.339063,
+      "longitude": 121.0853509,
+      "municipality": "Laguna",
+      "province": "Laguna",
+      "schoolType": "Feeder Institution",
+      "verified": true,
+      "status": "Auto-Located",
+      "studentCount": 500,
+      "source": "Geocoding Manual Assist"
+    }
+  ]
+}

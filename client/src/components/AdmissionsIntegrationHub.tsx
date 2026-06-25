@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ChangeEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from "react";
 import {
   CheckCircle2,
   CloudCog,
@@ -9,9 +9,13 @@ import {
   RefreshCw,
   Sheet,
   UploadCloud,
+  Activity,
+  GitMerge,
+  X,
 } from "lucide-react";
 import type { School } from "@shared/schema";
 import { api, type IntegrationPreviewInput, type SchoolInput } from "@shared/routes";
+import { requestGeocodeSchool } from "@/lib/geocodeSchoolApi";
 import { hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
 import {
   SYSTEM_FIELDS,
@@ -33,8 +37,17 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -107,13 +120,35 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
   const [apiKeyHeader, setApiKeyHeader] = useState("X-API-Key");
   const [apiBody, setApiBody] = useState("");
   const [sheetUrl, setSheetUrl] = useState("");
-  const [liveSync, setLiveSync] = useState(false);
-  const [autoApply, setAutoApply] = useState(false);
+  const [showMapping, setShowMapping] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [lastSource, setLastSource] = useState("No source connected");
   const [events, setEvents] = useState<ImportEvent[]>([]);
+  const [autoSyncApi, setAutoSyncApi] = useState(false);
+  const [autoSyncSheets, setAutoSyncSheets] = useState(false);
+  const [autoSyncFile, setAutoSyncFile] = useState(false);
   const [importedFingerprints, setImportedFingerprints] = useState<Set<string>>(() => loadImportedAdmissionFingerprints());
+
+  console.log("[DEBUG] Render state:", { 
+    recordsLength: records.length, 
+    fieldsLength: fields.length,
+    mappingKeys: Object.keys(fieldMapping).length,
+    sourceMode 
+  });
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (sourceMode === "api" && autoSyncApi) {
+      interval = setInterval(() => void loadRemoteSource("api", true), 30000);
+    } else if (sourceMode === "googleSheets" && autoSyncSheets) {
+      interval = setInterval(() => void loadRemoteSource("googleSheets", true), 30000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [sourceMode, autoSyncApi, autoSyncSheets]);
 
   const preview = useMemo(
     () => buildAdmissionsPreview(records, fieldMapping, existingSchools, importedFingerprints),
@@ -146,13 +181,20 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
     setEvents((current) => [{ id: crypto.randomUUID(), tone, message }, ...current].slice(0, 6));
   }, []);
 
-  const hydrateSource = useCallback((nextRecords: SourceRecord[], nextFields: string[], label: string) => {
+  const hydrateSource = useCallback((nextRecords: SourceRecord[], nextFields: string[], label: string, silent = false) => {
+    console.log("[DEBUG] hydrateSource called with", { nextRecordsLength: nextRecords.length, nextFields, label, silent });
     const suggestions = suggestFieldMappings(nextFields);
     setRecords(nextRecords);
     setFields(nextFields);
-    setFieldMapping(suggestions.mapping);
+    setFieldMapping((current) => {
+       if (silent || Object.keys(current).length > 0) return current;
+       return suggestions.mapping;
+    });
     setLastSource(label);
-    addEvent("success", `${label}: ${nextRecords.length.toLocaleString()} admissions records detected.`);
+    if (!silent) {
+      addEvent("success", `${label}: ${nextRecords.length.toLocaleString()} admissions records detected.`);
+      setShowMapping(true);
+    }
   }, [addEvent]);
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -174,10 +216,10 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
     }
   };
 
-  const loadRemoteSource = useCallback(async (mode: Exclude<SourceMode, "file">) => {
+  const loadRemoteSource = useCallback(async (mode: Exclude<SourceMode, "file">, silent = false) => {
     const url = mode === "api" ? apiUrl.trim() : sheetUrl.trim();
     if (!url) {
-      toast({
+      if (!silent) toast({
         title: mode === "api" ? "API URL required" : "Google Sheets URL required",
         description: "Connect a source before processing admissions data.",
         variant: "destructive",
@@ -185,7 +227,7 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
       return;
     }
 
-    setIsLoading(true);
+    if (!silent) setIsLoading(true);
     try {
       const payload: IntegrationPreviewInput = {
         sourceType: mode === "api" ? "api" : "googleSheets",
@@ -204,19 +246,27 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
         credentials: "include",
       });
 
+      console.log("[DEBUG] Fetch response status:", response.status);
+
       if (!response.ok) {
         const error = await response.json().catch(() => ({ message: "Unable to connect to source." }));
         throw new Error(error.message);
       }
 
-      const source = api.integrations.preview.responses[200].parse(await response.json());
-      hydrateSource(source.records, source.fields.length ? source.fields : collectFields(source.records), source.sourceLabel);
+      const rawData = await response.json();
+      console.log("[DEBUG] Fetch JSON parsed:", rawData);
+
+      const source = api.integrations.preview.responses[200].parse(rawData);
+      console.log("[DEBUG] Zod parsed successfully, records:", source.records?.length);
+      hydrateSource(source.records, source.fields.length ? source.fields : collectFields(source.records), source.sourceLabel, silent);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to connect to source.";
-      addEvent("error", message);
-      toast({ title: "Source connection failed", description: message, variant: "destructive" });
+      if (!silent) {
+         addEvent("error", message);
+         toast({ title: "Source connection failed", description: message, variant: "destructive" });
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [addEvent, apiBody, apiKeyHeader, apiMethod, apiUrl, authMode, authToken, hydrateSource, sheetUrl, toast]);
 
@@ -270,274 +320,305 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50">
-      <div className="border-b border-slate-200 bg-white px-4 py-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">Primary Workflow</Badge>
-              <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">{lastSource}</Badge>
-            </div>
-            <h2 className="mt-2 text-xl font-black">Admissions Data Integration</h2>
-            <p className="text-sm text-muted-foreground">
-              Admissions data to school detection, matching, geolocation, saved coordinates, GIS pins, and student counts.
-            </p>
+    <div className="flex h-full min-h-0 flex-col w-full bg-transparent overflow-hidden">
+      
+      {/* 1. Header */}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-slate-200/40 px-6 py-4">
+        <div className="flex items-center gap-4">
+          <h2 className="text-lg font-bold text-slate-800">Data Syncing</h2>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="bg-slate-100 text-slate-600 font-medium hover:bg-slate-200/80 rounded-md shadow-none">Rows: {summary.total}</Badge>
+            <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 font-medium hover:bg-emerald-100/80 rounded-md shadow-none">Ready: {summary.ready}</Badge>
+            <Badge variant="secondary" className="bg-amber-50 text-amber-700 font-medium hover:bg-amber-100/80 rounded-md shadow-none">Geocode: {summary.needsGeocode}</Badge>
+            {summary.duplicates > 0 && <Badge variant="secondary" className="bg-rose-50 text-rose-700 font-medium hover:bg-rose-100/80 rounded-md shadow-none">Dupes: {summary.duplicates}</Badge>}
           </div>
-          <Button className="h-10 gap-2" disabled={isApplying || summary.ready === 0} onClick={applyToGis}>
-            {isApplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPinned className="h-4 w-4" />}
-            Apply to GIS
-          </Button>
+        </div>
+        <div className="flex items-center gap-3">
+           <Button variant="ghost" size="sm" className="h-8 gap-2 text-[13px] font-medium" onClick={() => setShowLogs(true)}>
+              <Activity className="h-3.5 w-3.5" />
+              Activity Logs {events.length > 0 && <Badge variant="secondary" className="ml-0.5 h-4 min-w-4 rounded-full px-1 text-[10px] font-semibold bg-slate-200 text-slate-700">{events.length}</Badge>}
+           </Button>
+           <Button variant="ghost" size="sm" className="h-8 gap-2 text-[13px] font-medium" onClick={() => setShowMapping(true)}>
+              <GitMerge className="h-3.5 w-3.5" />
+              Field Mapping {mappedFields.length > 0 && <Badge variant="secondary" className="ml-0.5 h-4 min-w-4 rounded-full px-1 text-[10px] font-semibold bg-teal-100 text-teal-700">{mappedFields.length}</Badge>}
+           </Button>
+           <Button size="sm" className="h-8 gap-2 px-4 text-[13px] font-medium shadow-sm" disabled={isApplying || summary.ready === 0} onClick={applyToGis}>
+             {isApplying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPinned className="h-3.5 w-3.5" />}
+             Apply to GIS
+           </Button>
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_340px]">
-        <main className="min-h-0 overflow-auto p-4">
-          <div className="grid gap-3 xl:grid-cols-3">
-            {sourcePriority.map((source, index) => {
+      {/* 2. Source & Connection Row */}
+      <div className="flex shrink-0 flex-col gap-4 border-b border-slate-100 px-6 py-4">
+         <div className="flex items-center gap-1.5">
+            {sourcePriority.map((source) => {
               const Icon = source.icon;
               return (
-                <button
-                  key={source.mode}
-                  type="button"
-                  onClick={() => setSourceMode(source.mode)}
-                  className={cn(
-                    "rounded-lg border bg-white p-4 text-left shadow-sm transition hover:border-primary/30",
-                    sourceMode === source.mode && "border-primary/40 ring-2 ring-primary/10",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="grid h-10 w-10 place-items-center rounded-lg bg-primary/10 text-primary">
-                      <Icon className="h-5 w-5" />
-                    </div>
-                    <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-500">
-                      Priority {index + 1}
-                    </span>
-                  </div>
-                  <h3 className="mt-3 font-bold">{source.label}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">{source.description}</p>
-                </button>
+                <Button 
+                   key={source.mode} 
+                   variant={sourceMode === source.mode ? "secondary" : "ghost"} 
+                   size="sm"
+                   className={cn("h-7 gap-1.5 rounded-md px-3 text-[12px] font-medium", sourceMode !== source.mode && "text-slate-500 hover:text-slate-700")}
+                   onClick={() => setSourceMode(source.mode)}
+                 >
+                   <Icon className="h-3.5 w-3.5" />
+                   {source.label}
+                 </Button>
               );
             })}
+         </div>
+
+         <div className="flex w-full items-start gap-2">
+           {sourceMode === "api" && (
+             <div className="flex w-full max-w-4xl flex-col gap-2">
+               <div className="flex w-full items-center gap-2">
+                 <Select value={apiMethod} onValueChange={(value) => setApiMethod(value as "GET" | "POST")}>
+                   <SelectTrigger className="w-[80px] h-9 bg-white border-slate-200 text-[13px] shadow-sm"><SelectValue /></SelectTrigger>
+                   <SelectContent>
+                     <SelectItem value="GET" className="text-[13px]">GET</SelectItem>
+                     <SelectItem value="POST" className="text-[13px]">POST</SelectItem>
+                   </SelectContent>
+                 </Select>
+                 <Input className="h-9 min-w-[200px] flex-1 bg-white border-slate-200 text-[13px] shadow-sm transition-colors focus-visible:ring-1" placeholder="https://admissions.example.edu/api/enrollees" value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} />
+                 <Select value={authMode} onValueChange={(value) => setAuthMode(value as "none" | "bearer" | "apiKey")}>
+                   <SelectTrigger className="w-[120px] h-9 bg-white border-slate-200 text-[13px] shadow-sm"><SelectValue /></SelectTrigger>
+                   <SelectContent>
+                     <SelectItem value="none" className="text-[13px]">No Auth</SelectItem>
+                     <SelectItem value="bearer" className="text-[13px]">Bearer</SelectItem>
+                     <SelectItem value="apiKey" className="text-[13px]">API Key</SelectItem>
+                   </SelectContent>
+                 </Select>
+                 {authMode === "apiKey" && (
+                   <Input className="w-32 h-9 bg-white border-slate-200 text-[13px] shadow-sm focus-visible:ring-1" placeholder="Header Name" value={apiKeyHeader} onChange={(e) => setApiKeyHeader(e.target.value)} />
+                 )}
+                 {authMode !== "none" && (
+                   <Input type="password" placeholder="Token" className="w-40 h-9 bg-white border-slate-200 text-[13px] shadow-sm focus-visible:ring-1" value={authToken} onChange={(e) => setAuthToken(e.target.value)} />
+                 )}
+                 <Button size="sm" className="h-9 gap-2 px-5 text-[13px] font-medium shadow-sm" disabled={isLoading} onClick={() => void loadRemoteSource("api")}>
+                   {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudCog className="h-4 w-4" />}
+                   Fetch Data
+                 </Button>
+                 <div className="flex items-center gap-2 ml-2 shrink-0">
+                   <Switch id="auto-sync-api" checked={autoSyncApi} onCheckedChange={setAutoSyncApi} />
+                   <label htmlFor="auto-sync-api" className="text-[12px] font-medium text-slate-600 cursor-pointer">Auto Sync</label>
+                 </div>
+               </div>
+               {apiMethod === "POST" && (
+                 <Textarea
+                    className="min-h-[60px] bg-white border-slate-200 text-[13px] font-mono shadow-sm focus-visible:ring-1 mt-1"
+                    placeholder='{"term":"2026-2027"}'
+                    value={apiBody}
+                    onChange={(e) => setApiBody(e.target.value)}
+                 />
+               )}
+             </div>
+           )}
+
+           {sourceMode === "googleSheets" && (
+             <div className="flex w-full max-w-3xl items-center gap-2">
+               <Input className="h-9 flex-1 bg-white border-slate-200 text-[13px] shadow-sm focus-visible:ring-1" placeholder="Paste public Google Sheets URL" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} />
+               <Button size="sm" className="h-9 gap-2 px-5 text-[13px] font-medium shadow-sm" disabled={isLoading} onClick={() => void loadRemoteSource("googleSheets")}>
+                 {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sheet className="h-4 w-4" />}
+                 Fetch Sheet
+               </Button>
+               <div className="flex items-center gap-2 ml-2 shrink-0">
+                 <Switch id="auto-sync-sheets" checked={autoSyncSheets} onCheckedChange={setAutoSyncSheets} />
+                 <label htmlFor="auto-sync-sheets" className="text-[12px] font-medium text-slate-600 cursor-pointer">Auto Sync</label>
+               </div>
+             </div>
+           )}
+
+           {sourceMode === "file" && (
+             <div className="flex w-full max-w-xl items-center gap-3">
+               <Input id="workspace-file-upload" type="file" className="h-9 flex-1 bg-white border-slate-200 text-[13px] shadow-sm cursor-pointer file:text-[13px] file:font-medium file:h-full file:bg-slate-50 file:border-0 file:mr-3 focus-visible:ring-1" accept=".xlsx,.xls,.csv,.json" onChange={handleFileChange} />
+               {isLoading && <Loader2 className="h-4 w-4 animate-spin text-primary shrink-0" />}
+               <div className="flex items-center gap-2 ml-2 shrink-0">
+                 <Switch id="auto-sync-file" checked={autoSyncFile} onCheckedChange={setAutoSyncFile} />
+                 <label htmlFor="auto-sync-file" className="text-[12px] font-medium text-slate-600 cursor-pointer">Auto Sync</label>
+               </div>
+             </div>
+           )}
+         </div>
+      </div>
+
+      {/* 3. Modal Dialogs for Activity Logs & Field Mapping */}
+
+      {/* Activity Logs Modal */}
+      <Dialog open={showLogs} onOpenChange={setShowLogs}>
+        <DialogContent className="max-w-lg w-full rounded-2xl border border-white/60 bg-white/95 shadow-[0_32px_80px_-24px_rgba(15,23,42,0.4)] backdrop-blur-2xl p-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-slate-100 to-slate-200 text-slate-500">
+                <Activity className="h-4 w-4" />
+              </span>
+              <div>
+                <DialogTitle className="text-[15px] font-semibold text-slate-900">Activity Logs</DialogTitle>
+                <DialogDescription className="text-[12px] text-slate-500 mt-0.5">
+                  Real-time sync and import events from this session.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <ScrollArea className="max-h-[420px]">
+            <div className="flex flex-col gap-2.5 px-6 py-5">
+              {events.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <span className="grid h-12 w-12 place-items-center rounded-full bg-slate-100 text-slate-300">
+                    <Activity className="h-5 w-5" />
+                  </span>
+                  <p className="text-[13px] font-medium text-slate-500">No activity yet</p>
+                  <p className="text-[12px] text-slate-400">Connect a source and fetch data to start logging.</p>
+                </div>
+              ) : (
+                events.map((event) => (
+                  <div key={event.id} className={cn(
+                    "flex items-start gap-3 rounded-xl border px-4 py-3 text-[13px] shadow-sm",
+                    eventTone(event.tone)
+                  )}>
+                    <span className="mt-0.5 shrink-0">
+                      {event.tone === "success" ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      ) : event.tone === "warning" ? (
+                        <Activity className="h-4 w-4 text-amber-500" />
+                      ) : (
+                        <X className="h-4 w-4 text-rose-500" />
+                      )}
+                    </span>
+                    <span className="leading-relaxed">{event.message}</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </ScrollArea>
+          <div className="flex justify-end border-t border-slate-100 px-6 py-4">
+            <DialogClose asChild>
+              <Button variant="outline" size="sm" className="h-8 px-5 text-[13px]">Close</Button>
+            </DialogClose>
           </div>
+        </DialogContent>
+      </Dialog>
 
-          <Card className="mt-4 rounded-lg border-slate-200 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Source Connection</CardTitle>
-              <CardDescription>Connect data, then the workflow detects schools and prepares GIS marker updates inside this import screen.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {sourceMode === "api" && (
-                <div className="space-y-3">
-                  <Input className="h-10 bg-slate-50" placeholder="https://admissions.example.edu/api/enrollees" value={apiUrl} onChange={(event) => setApiUrl(event.target.value)} />
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <Select value={apiMethod} onValueChange={(value) => setApiMethod(value as "GET" | "POST")}>
-                      <SelectTrigger className="h-10 bg-slate-50"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="GET">GET</SelectItem>
-                        <SelectItem value="POST">POST</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Select value={authMode} onValueChange={(value) => setAuthMode(value as "none" | "bearer" | "apiKey")}>
-                      <SelectTrigger className="h-10 bg-slate-50"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">No Auth</SelectItem>
-                        <SelectItem value="bearer">Bearer Token</SelectItem>
-                        <SelectItem value="apiKey">API Key</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {authMode === "apiKey" && <Input className="h-10 bg-slate-50" value={apiKeyHeader} onChange={(event) => setApiKeyHeader(event.target.value)} />}
-                  {authMode !== "none" && <Input className="h-10 bg-slate-50" type="password" placeholder="Token or API key" value={authToken} onChange={(event) => setAuthToken(event.target.value)} />}
-                  {apiMethod === "POST" && <Textarea className="min-h-20 bg-slate-50" placeholder='{"term":"2026-2027"}' value={apiBody} onChange={(event) => setApiBody(event.target.value)} />}
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button className="h-10 gap-2" disabled={isLoading} onClick={() => void loadRemoteSource("api")}>
-                      {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                      Retrieve Admissions Data
-                    </Button>
-                    <SettingInline label="Live sync" checked={liveSync} onChange={setLiveSync} />
-                    <SettingInline label="Auto apply" checked={autoApply} onChange={setAutoApply} />
-                  </div>
+      {/* Field Mapping Modal */}
+      <Dialog open={showMapping} onOpenChange={setShowMapping}>
+        <DialogContent className="max-w-2xl w-full rounded-2xl border border-white/60 bg-white/95 shadow-[0_32px_80px_-24px_rgba(15,23,42,0.4)] backdrop-blur-2xl p-0 overflow-hidden">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-teal-50 to-teal-100 text-teal-600">
+                <GitMerge className="h-4 w-4" />
+              </span>
+              <div>
+                <DialogTitle className="text-[15px] font-semibold text-slate-900">Field Mapping</DialogTitle>
+                <DialogDescription className="text-[12px] text-slate-500 mt-0.5">
+                  Map each source column to a GIS system field. Set to Ignore to skip.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <ScrollArea className="max-h-[460px]">
+            <div className="px-6 py-5">
+              {fields.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <span className="grid h-12 w-12 place-items-center rounded-full bg-teal-50 text-teal-300">
+                    <GitMerge className="h-5 w-5" />
+                  </span>
+                  <p className="text-[13px] font-medium text-slate-500">No fields detected yet</p>
+                  <p className="text-[12px] text-slate-400">Connect a source and fetch data to configure field mappings.</p>
                 </div>
-              )}
-
-              {sourceMode === "googleSheets" && (
-                <div className="space-y-3">
-                  <Input className="h-10 bg-slate-50" placeholder="Paste public Google Sheets URL" value={sheetUrl} onChange={(event) => setSheetUrl(event.target.value)} />
-                  <Button className="h-10 gap-2" disabled={isLoading} onClick={() => void loadRemoteSource("googleSheets")}>
-                    {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sheet className="h-4 w-4" />}
-                    Retrieve Sheet Data
-                  </Button>
-                </div>
-              )}
-
-              {sourceMode === "file" && (
-                <label className="flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-primary/30 bg-slate-50 p-5 text-center transition hover:bg-primary/[0.03]">
-                  {isLoading ? <Loader2 className="h-8 w-8 animate-spin text-primary" /> : <FileSpreadsheet className="h-8 w-8 text-primary" />}
-                  <p className="mt-3 font-bold">{fileName || "Upload Excel, CSV, JSON, or Google Sheets export"}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Manual uploads are processed through the same matching and geolocation pipeline.</p>
-                  <input className="sr-only" type="file" accept=".xlsx,.xls,.csv,.json" onChange={handleFileChange} />
-                </label>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-            <Card className="rounded-lg border-slate-200 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Detected Fields</CardTitle>
-                <CardDescription>Map incoming source columns to the Student Mapping System fields.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {fields.length === 0 ? (
-                  <EmptyLine text="Connect a source to detect admissions columns." />
-                ) : fields.map((field) => (
-                  <div key={field} className="grid gap-2 rounded-lg border border-slate-200 bg-white p-2 md:grid-cols-[minmax(0,1fr)_220px]">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">{field}</p>
-                      <p className="truncate text-xs text-muted-foreground">{sampleValue(records, field)}</p>
-                    </div>
-                    <Select value={fieldMapping[field] || "ignore"} onValueChange={(value) => updateMapping(field, value)}>
-                      <SelectTrigger className="h-9 bg-slate-50"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="ignore">Ignore</SelectItem>
-                        {SYSTEM_FIELDS.map((systemField) => (
-                          <SelectItem key={systemField.key} value={systemField.key}>{systemField.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-lg border-slate-200 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <GitBranch className="h-4 w-4 text-primary" />
-                  School Matching in Import
-                </CardTitle>
-                <CardDescription>Fuse.js normalizes entries like Lumban NHS to their canonical feeder school record.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {preview.length === 0 ? (
-                  <EmptyLine text="Matched schools and geolocation needs will appear here." />
-                ) : (
-                  <div className="max-h-[470px] overflow-auto rounded-lg border border-slate-200">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Student</TableHead>
-                          <TableHead>Detected Feeder</TableHead>
-                          <TableHead>Match</TableHead>
-                          <TableHead className="text-right">Status</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {preview.slice(0, 80).map((row) => (
-                          <TableRow key={row.fingerprint}>
-                            <TableCell>
-                              <p className="font-medium">{row.fullName || "Unnamed student"}</p>
-                              <p className="text-xs text-muted-foreground">{row.studentNumber || `Row ${row.rowNumber}`}</p>
-                            </TableCell>
-                            <TableCell>{row.feederSchool || "Missing school"}</TableCell>
-                            <TableCell>
-                              {row.matchedSchool ? (
-                                <div>
-                                  <p className="font-medium">{row.matchedSchool.name}</p>
-                                  <p className="text-xs text-muted-foreground">{row.matchConfidence}% confidence</p>
-                                </div>
-                              ) : row.feederSchool ? (
-                                <span className="text-amber-700">Will geolocate as new school</span>
-                              ) : (
-                                <span className="text-rose-700">No school field</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Badge variant="outline" className={statusTone(row)}>{row.status}</Badge>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        </main>
-
-        <aside className="min-h-0 overflow-auto border-l border-slate-200 bg-white p-4">
-          <div className="space-y-4">
-            <Card className="rounded-lg border-slate-200 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">GIS Readiness</CardTitle>
-                <CardDescription>Rows become map markers after matching and coordinate save.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Progress value={summary.progress} className="h-2" />
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <Metric label="Rows" value={summary.total} />
-                  <Metric label="Matched" value={summary.matched} />
-                  <Metric label="Ready" value={summary.ready} />
-                  <Metric label="Geocode" value={summary.needsGeocode} />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-lg border-slate-200 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Workflow</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {[
-                  "Admissions Data",
-                  "School Detection",
-                  "Fuse.js Matching",
-                  "Nominatim Geolocation",
-                  "Save Coordinates",
-                  "GIS Pin Mapping",
-                  "Student Count Visualization",
-                ].map((step, index) => (
-                  <div key={step} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                    <span className="grid h-6 w-6 place-items-center rounded-full bg-white text-xs font-black">{index + 1}</span>
-                    <span className="font-medium">{step}</span>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-lg border-slate-200 shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Activity</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {events.length === 0 ? (
-                  <EmptyLine text="No import activity yet." />
-                ) : events.map((event) => (
-                  <div key={event.id} className={cn("rounded-lg border px-3 py-2 text-sm", eventTone(event.tone))}>
-                    {event.message}
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            {mappedFields.length > 0 && (
-              <Card className="rounded-lg border-slate-200 shadow-sm">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base">Active Mapping</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {mappedFields.slice(0, 8).map(([source, target]) => (
-                    <div key={source} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs">
-                      <span className="truncate">{source}</span>
-                      <strong className="truncate text-primary">{target}</strong>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {fields.map((field) => (
+                    <div key={field} className="flex items-center gap-2 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5 shadow-sm transition-colors hover:bg-slate-50">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[12px] font-semibold text-slate-700" title={field}>{field}</p>
+                        <p className="text-[10px] text-slate-400">source column</p>
+                      </div>
+                      <Select value={fieldMapping[field] || "ignore"} onValueChange={(value) => updateMapping(field, value)}>
+                        <SelectTrigger className="h-8 w-36 shrink-0 bg-white text-[11px] border-slate-200 shadow-sm hover:bg-slate-50 transition-colors">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ignore" className="text-[11px] text-slate-400">— Ignore —</SelectItem>
+                          {SYSTEM_FIELDS.map((systemField) => (
+                            <SelectItem key={systemField.key} value={systemField.key} className="text-[11px]">{systemField.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                   ))}
-                </CardContent>
-              </Card>
-            )}
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+          <div className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
+            <p className="text-[12px] text-slate-500">
+              {mappedFields.length > 0 ? (
+                <span className="font-medium text-teal-700">{mappedFields.length} field{mappedFields.length !== 1 ? 's' : ''} mapped</span>
+              ) : (
+                <span>No fields mapped yet</span>
+              )}
+            </p>
+            <DialogClose asChild>
+              <Button size="sm" className="h-8 px-5 text-[13px]">Done</Button>
+            </DialogClose>
           </div>
-        </aside>
+        </DialogContent>
+      </Dialog>
+
+      {/* 4. Full-bleed Table */}
+      <div className="flex min-h-0 flex-1 flex-col w-full bg-transparent">
+         <div className="overflow-auto flex-1 w-full">
+           <Table className="min-w-[1000px] w-full">
+             <TableHeader className="sticky top-0 z-10 bg-white/40 backdrop-blur-md border-b border-slate-200/60 shadow-sm">
+               <TableRow className="hover:bg-transparent border-0">
+                 <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10 px-6">Student #</TableHead>
+                 <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Full Name</TableHead>
+                 <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Course</TableHead>
+                 <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Admission Type</TableHead>
+                 <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Last School</TableHead>
+                 <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">School Type</TableHead>
+                 <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Municipality</TableHead>
+                 <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Source</TableHead>
+                 <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10 text-right px-6">Status</TableHead>
+               </TableRow>
+             </TableHeader>
+             <TableBody>
+               {preview.length === 0 ? (
+                 <TableRow>
+                   <TableCell colSpan={9} className="h-64 text-center">
+                     <p className="text-[14px] font-medium text-slate-700">No data to preview</p>
+                     <p className="text-[13px] text-slate-500 mt-1">Connect a source and fetch records to begin mapping.</p>
+                     {records.length > 0 && <p className="text-[13px] text-amber-600 mt-2">Debug: {records.length} records in memory, but preview array is empty!</p>}
+                   </TableCell>
+                 </TableRow>
+               ) : (
+                 preview.map((row) => {
+                   const admissionType = String(row.sourceRecord[Object.entries(fieldMapping).find(([, mapped]) => mapped === "studentType")?.[0] || ""] || "") || "—";
+                   const schoolType = row.matchedSchool?.institutionType || inferSchoolType(row.feederSchool);
+                   const municipality = row.matchedSchool?.municipality || row.municipality || "Laguna";
+                   
+                   return (
+                     <TableRow key={row.fingerprint} className="text-[13px] hover:bg-slate-50/80 transition-colors border-b border-slate-50">
+                       <TableCell className="font-mono text-[12px] text-slate-500 whitespace-nowrap px-6">{row.studentNumber || "—"}</TableCell>
+                       <TableCell className="font-medium text-slate-900 whitespace-nowrap">{row.fullName || "—"}</TableCell>
+                       <TableCell className="whitespace-nowrap text-slate-600">{row.program || row.strand || "—"}</TableCell>
+                       <TableCell className="whitespace-nowrap text-slate-600">{admissionType}</TableCell>
+                       <TableCell className="max-w-[240px] truncate text-slate-800" title={row.feederSchool}>{row.feederSchool || "—"}</TableCell>
+                       <TableCell className="whitespace-nowrap text-slate-600">{schoolType}</TableCell>
+                       <TableCell className="whitespace-nowrap text-slate-600">{municipality}</TableCell>
+                       <TableCell className="whitespace-nowrap text-slate-500 text-[12px]">{lastSource}</TableCell>
+                       <TableCell className="whitespace-nowrap text-right px-6">
+                         <Badge variant="outline" className={cn("text-[11px] font-medium tracking-wide shadow-none border-transparent", statusTone(row))}>
+                           {row.status === "ready" ? "Ready" : row.status === "needsReview" ? "Review" : row.status === "duplicate" ? "Duplicate" : "Blocked"}
+                         </Badge>
+                       </TableCell>
+                     </TableRow>
+                   );
+                 })
+               )}
+             </TableBody>
+           </Table>
+         </div>
       </div>
     </div>
   );
@@ -569,14 +650,16 @@ async function buildGeocodedSchoolUpdates(
     let lng = school?.lng ?? incomingLng ?? null;
     let source = school?.source || "Admissions Integration";
     const name = school?.name || first.feederSchool;
-    const municipality = first.municipality || school?.municipality || "Laguna";
+    const municipality =
+      first.municipality?.trim() || school?.municipality?.trim() || undefined;
+    const savedMunicipality = municipality || "Laguna";
 
     if (!hasCoordinates({ lat, lng })) {
-      const geocoded = await geocodeSchool(name, municipality);
+      const geocoded = await requestGeocodeSchool({ name, municipality });
       if (geocoded) {
         lat = geocoded.lat;
         lng = geocoded.lng;
-        source = "Nominatim + Admissions Integration";
+        source = `${geocoded.source} + Admissions Integration`;
         addEvent("success", `${name} geolocated and saved to the feeder registry.`);
       } else {
         addEvent("warning", `${name} needs manual coordinate review.`);
@@ -587,7 +670,8 @@ async function buildGeocodedSchoolUpdates(
     updates.push({
       name,
       normalizedName: normalizeSchoolName(name),
-      municipality,
+      municipality: savedMunicipality,
+      province: school?.province || "Laguna",
       institutionType: school?.institutionType || inferSchoolType(name),
       lat,
       lng,
@@ -600,18 +684,6 @@ async function buildGeocodedSchoolUpdates(
   }
 
   return updates;
-}
-
-async function geocodeSchool(name: string, municipality: string) {
-  const response = await fetch(api.geocode.school.path, {
-    method: api.geocode.school.method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, municipality }),
-    credentials: "include",
-  });
-
-  if (!response.ok) return null;
-  return api.geocode.school.responses[200].parse(await response.json());
 }
 
 function hasIncomingCoordinates(row: AdmissionsPreviewRow) {
@@ -638,29 +710,4 @@ function eventTone(tone: ImportEvent["tone"]) {
   return "border-rose-200 bg-rose-50 text-rose-700";
 }
 
-function sampleValue(records: SourceRecord[], field: string) {
-  const value = records.find((record) => record[field] != null && record[field] !== "")?.[field];
-  return String(value ?? "No sample value").slice(0, 96);
-}
 
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-black">{value.toLocaleString()}</p>
-    </div>
-  );
-}
-
-function EmptyLine({ text }: { text: string }) {
-  return <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-sm text-muted-foreground">{text}</p>;
-}
-
-function SettingInline({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium">
-      <Switch checked={checked} onCheckedChange={onChange} />
-      {label}
-    </label>
-  );
-}

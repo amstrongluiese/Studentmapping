@@ -2,35 +2,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import L from "leaflet";
 import {
   clearCanvas,
-  drawArrow,
-  drawCircle,
-  drawLine,
-  drawRectangle,
   extractPressure,
-  generateId,
   getCtx,
   resizeCanvas,
+  type DrawingObject,
   type DrawingPoint,
-  type DrawingRenderOptions,
 } from "@/lib/drawingUtils";
 import type { UseDrawingReturn } from "@/hooks/useDrawing";
-import { getOptimalStrokeSettings, useStylus } from "@/hooks/useStylus";
 import { cursorForAnnotationOverlay, type AnnotationInteractionPhase } from "@/lib/annotationInteraction";
-import { readPointerDrawEnvironment } from "@/lib/pointerEnvironment";
-import { setLeafletDrawGestureSuppression } from "@/lib/leafletDrawGestureSuppression";
+import { resetLeafletDrawGestureSuppression, setLeafletDrawGestureSuppression } from "@/lib/leafletDrawGestureSuppression";
 import {
-  domEventToDrawingPoint,
+  containerPointToDrawingPoint,
   domPointerEventToMapContainerPoint,
   isContainerPointInDrawingLayout,
   type DrawingLayoutMetrics,
 } from "@/lib/leafletAnnotationCoordinates";
 import {
-  calculateVisibleMapViewportBounds,
+  calculateFullMapViewportBounds,
   computeOverlayPlacementWithinParent,
   createViewportBoundsMonitor,
-  DEFAULT_MAP_DRAW_VIEWPORT_OPTIONS,
-  isCoordinateWithinViewport,
   hasViewportChanged,
+  resolveRectAgainstProtectedOverlays,
   type ViewportBounds,
 } from "@/lib/responsiveViewportCalculations";
 
@@ -45,153 +37,14 @@ interface DrawingCanvasProps {
   onStrokeActivityChange?: (active: boolean) => void;
 }
 
-type HoverPreview = {
-  x: number;
-  y: number;
-  pointerType: "mouse" | "touch" | "pen" | "unknown";
-  inContact: boolean;
-};
-
-const MAP_TOUCH_ACTIONS = "pan-x pan-y pinch-zoom";
-const DRAW_TOUCH_ACTIONS = "pan-x pan-y pinch-zoom";
-
-const MAX_INTERP_STEPS = 48;
-/** Reject finger touch briefly after pen lifts (palm guard), not for the whole session. */
-const PEN_PALM_GUARD_MS = 400;
-
-function resolvePointingType(event: PointerEvent | MouseEvent | TouchEvent): HoverPreview["pointerType"] {
-  if (event instanceof PointerEvent) {
-    if (event.pointerType === "pen") return "pen";
-    if (event.pointerType === "touch") return "touch";
-    if (event.pointerType === "mouse") return "mouse";
-    return "unknown";
-  }
-  if (event instanceof MouseEvent) return "mouse";
-  return "touch";
-}
-
-function isStylusContact(event: PointerEvent): boolean {
-  if (event.pointerType !== "pen") return true;
-  return event.buttons > 0 || event.pressure > 0;
-}
-
-function isShapeMode(mode: UseDrawingReturn["mode"]) {
-  return mode === "line" || mode === "arrow" || mode === "rectangle" || mode === "circle";
-}
-
-function isFreehandLikeStroke(mode: UseDrawingReturn["mode"]) {
-  return mode === "free" || mode === "eraser";
-}
-
-function isUsableTouch(event: TouchEvent): boolean {
-  return event.touches.length <= 1 && event.changedTouches.length <= 1;
-}
-
-/** When finger-guard is on + coarse device: ignore touch while pen is down or briefly after pen lifts. */
-function touchRejectedForPalmGuard(opts: {
-  fingerGuardOn: boolean;
-  coarsePointer: boolean;
-  penInContact: boolean;
-  lastPenInputAt: number;
-}) {
-  if (!opts.fingerGuardOn || !opts.coarsePointer) return false;
-  if (opts.penInContact) return true;
-  return Date.now() - opts.lastPenInputAt < PEN_PALM_GUARD_MS;
-}
-
-function getDistance(a: DrawingPoint, b: DrawingPoint) {
-  return Math.hypot(b.x - a.x, b.y - a.y);
-}
-
-/** Overlay-local bounds for jump / containment checks (from synced layout metrics). */
-function coordBoundsFromLayoutMetrics(layout: DrawingLayoutMetrics | null): ViewportBounds | null {
-  if (!layout || layout.width <= 0 || layout.height <= 0) return null;
-  return {
-    left: 0,
-    top: 0,
-    right: layout.width,
-    bottom: layout.height,
-    width: layout.width,
-    height: layout.height,
-    calculatedAt: Date.now(),
-  };
-}
-
-/** Reject corrupted jumps when Android merges pan/zoom with draw (diagonal spikes). */
-function androidFreehandMaxJumpPx(layout: DrawingLayoutMetrics | null): number {
-  if (!layout || layout.width <= 0 || layout.height <= 0) return 120;
-  return Math.min(260, Math.max(48, Math.hypot(layout.width, layout.height) * 0.16));
-}
-
 /**
- * Append freehand samples without bridging rejected gaps with a straight interpolateSegment.
- * When the jump is too large, advance the cursor only so the next accepted point does not spike.
+ * Minimal, stable single-canvas Draw engine.
+ * - Pointer Events only (pointerdown/pointermove/pointerup/pointercancel)
+ * - requestAnimationFrame rendering
+ * - Leaflet viewport sync
+ * - setPointerCapture on pointerdown
+ * - Uses `useDrawing` state manager for stroke storage
  */
-function appendFreehandSamples(
-  cursor: DrawingPoint,
-  samples: DrawingPoint[],
-  minD: number,
-  maxJump: number,
-  addPoint: (point: DrawingPoint) => void,
-): DrawingPoint {
-  let next = cursor;
-  for (const coords of samples) {
-    const distance = getDistance(next, coords);
-    if (distance > maxJump) {
-      next = coords;
-      continue;
-    }
-    if (distance < minD * 0.85) continue;
-    interpolateSegment(next, coords, minD).forEach(addPoint);
-    next = coords;
-  }
-  return next;
-}
-
-function resolveViewportCalculationElement(map: L.Map | null, fallback: HTMLElement | null): HTMLElement | null {
-  return map?.getContainer() ?? fallback?.parentElement ?? fallback;
-}
-
-function syncDrawingLayoutFromDom(
-  overlay: HTMLElement | null,
-  map: L.Map | null,
-  layout: { current: DrawingLayoutMetrics },
-) {
-  if (!overlay || !map) return;
-  const mapRect = map.getContainer().getBoundingClientRect();
-  const overlayRect = overlay.getBoundingClientRect();
-  layout.current = {
-    insetX: overlayRect.left - mapRect.left,
-    insetY: overlayRect.top - mapRect.top,
-    width: overlayRect.width,
-    height: overlayRect.height,
-  };
-}
-
-function interpolateSegment(start: DrawingPoint, end: DrawingPoint, spacing: number): DrawingPoint[] {
-  const distance = getDistance(start, end);
-  if (distance <= spacing * 1.2) return [end];
-  const steps = Math.min(MAX_INTERP_STEPS, Math.max(1, Math.floor(distance / Math.max(0.6, spacing * 0.65))));
-  return Array.from({ length: steps }, (_, index) => {
-    const t = (index + 1) / steps;
-    const startTime = start.timestamp || end.timestamp || Date.now();
-    const endTime = end.timestamp || startTime;
-    return {
-      x: start.x + (end.x - start.x) * t,
-      y: start.y + (end.y - start.y) * t,
-      pressure: (start.pressure || 0.5) + ((end.pressure || 0.5) - (start.pressure || 0.5)) * t,
-      timestamp: Math.round(startTime + (endTime - startTime) * t),
-      latLng:
-        start.latLng && end.latLng
-          ? {
-              lat: start.latLng.lat + (end.latLng.lat - start.latLng.lat) * t,
-              lng: start.latLng.lng + (end.latLng.lng - start.latLng.lng) * t,
-            }
-          : end.latLng,
-    } satisfies DrawingPoint;
-  });
-}
-
 export const DrawingCanvas = ({
   drawing,
   layerActive,
@@ -202,87 +55,46 @@ export const DrawingCanvas = ({
   map,
   onStrokeActivityChange,
 }: DrawingCanvasProps) => {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const dirtyRef = useRef(true);
+  const layoutRef = useRef<DrawingLayoutMetrics>({ insetX: 0, insetY: 0, width: 1, height: 1 });
   const viewportBoundsRef = useRef<ViewportBounds | null>(null);
-  const drawingLayoutRef = useRef<DrawingLayoutMetrics>({ insetX: 0, insetY: 0, width: 1, height: 1 });
   const viewportMonitorRef = useRef<ReturnType<typeof createViewportBoundsMonitor> | null>(null);
-  const isDrawingRef = useRef(false);
   const activePointerIdRef = useRef<number | null>(null);
-  const capturedPointerIdRef = useRef<number | null>(null);
+  const capturedPointerTargetRef = useRef<HTMLElement | null>(null);
   const activeTouchPointersRef = useRef<Set<number>>(new Set());
-  const lastPointRef = useRef<DrawingPoint | null>(null);
-  const startPointRef = useRef<DrawingPoint | null>(null);
-  const shapePreviewEndRef = useRef<DrawingPoint | null>(null);
-  const freehandQueueRef = useRef<DrawingPoint[]>([]);
-  const paintRafRef = useRef<number | null>(null);
-  const hoverRafRef = useRef<number | null>(null);
-  const hoverPendingRef = useRef<HoverPreview | null>(null);
-  const lastPenInputAtRef = useRef(0);
-  const hasPointerEvents = typeof window !== "undefined" && "PointerEvent" in window;
-  const pointerDrawEnv = useMemo(() => readPointerDrawEnvironment(), []);
-  const pointerDrawEnvRef = useRef(pointerDrawEnv);
-  pointerDrawEnvRef.current = pointerDrawEnv;
+  const activeWindowListenersRef = useRef<{
+    move?: (event: PointerEvent) => void;
+    up?: (event: PointerEvent) => void;
+    cancel?: (event: PointerEvent) => void;
+  }>({});
+  const activePointerHandlersRef = useRef<{
+    move?: (event: PointerEvent) => void;
+    up?: (event: PointerEvent) => void;
+    release?: (event: PointerEvent) => void;
+    detach?: () => void;
+  }>({});
+  const migratedObjectIdsRef = useRef<Set<string>>(new Set());
+  const zoomAnimationRef = useRef<{ center: L.LatLng; zoom: number } | null>(null);
+  const pendingPointBufferRef = useRef<DrawingPoint[]>([]);
+  const lastBufferedPointRef = useRef<DrawingPoint | null>(null);
+
+  // Object interaction state
+  const activeDragRef = useRef<{
+    type: "move" | "resize";
+    objectId: string;
+    handle?: "start" | "end" | "nw" | "ne" | "sw" | "se" | "radius";
+    startPoint: DrawingPoint;
+    lastPoint: DrawingPoint;
+  } | null>(null);
 
   const drawingRef = useRef(drawing);
   drawingRef.current = drawing;
   const mapRef = useRef(map);
   mapRef.current = map;
-  const showStrokeAnnotationsRef = useRef(showStrokeAnnotations);
-  showStrokeAnnotationsRef.current = showStrokeAnnotations;
-  const interactionEnabledRef = useRef(interactionEnabled);
-  interactionEnabledRef.current = interactionEnabled;
-  const interactionCoarseRef = useRef(interactionCoarse);
-  interactionCoarseRef.current = interactionCoarse;
-  const onStrokeActivityChangeRef = useRef(onStrokeActivityChange);
-  onStrokeActivityChangeRef.current = onStrokeActivityChange;
 
-  const refreshViewportLayoutRef = useRef<(() => void) | null>(null);
-
-  const syncOverlayTouchAction = useCallback(() => {
-    const el = containerRef.current;
-    const canvas = canvasRef.current;
-    const setBoth = (value: string) => {
-      if (el) {
-        el.style.touchAction = value;
-        el.style.overscrollBehavior = "none";
-      }
-      if (canvas) {
-        canvas.style.touchAction = value;
-        canvas.style.overscrollBehavior = "none";
-      }
-    };
-    if (!el) return;
-    if (!interactionEnabledRef.current || !drawingRef.current.mode) {
-      setBoth(MAP_TOUCH_ACTIONS);
-      return;
-    }
-    if (isDrawingRef.current) {
-      setBoth("none");
-      return;
-    }
-    if (pointerDrawEnvRef.current.androidDrawingOptimizations) {
-      setBoth("none");
-      return;
-    }
-    setBoth(DRAW_TOUCH_ACTIONS);
-  }, []);
-
-  const { stylusInfo } = useStylus();
-  const stylusInfoRef = useRef(stylusInfo);
-  stylusInfoRef.current = stylusInfo;
-
-  const penInContactForPalmGuard = useCallback(() => {
-    const info = stylusInfoRef.current;
-    return info.type === "pen" && info.inContact;
-  }, []);
-  const strokeSettings = getOptimalStrokeSettings(stylusInfo, {
-    androidDrawing: pointerDrawEnv.androidDrawingOptimizations,
-  });
-  const strokeSettingsRef = useRef(strokeSettings);
-  strokeSettingsRef.current = strokeSettings;
-
-  const [hoverPreview, setHoverPreview] = useState<HoverPreview | null>(null);
   const [overlayBoundsStyle, setOverlayBoundsStyle] = useState<{
     left: number;
     top: number;
@@ -290,114 +102,283 @@ export const DrawingCanvas = ({
     height: number | string;
   }>({ left: 0, top: 0, width: "100%", height: "100%" });
 
-  const projectPoint = useCallback((point: DrawingPoint): DrawingPoint => {
+  const scheduleRedraw = useCallback(() => {
+    if (rafRef.current != null) return;
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = null;
+      if (!dirtyRef.current) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      if (pendingPointBufferRef.current.length > 0) {
+        const pending = pendingPointBufferRef.current;
+        pendingPointBufferRef.current = [];
+        for (const point of pending) {
+          drawingRef.current.addPoint(point);
+        }
+      }
+      const ctx = getCtx(canvas);
+      if (!showStrokeAnnotations) {
+        clearCanvas(ctx, canvas);
+        dirtyRef.current = false;
+        return;
+      }
+
+      clearCanvas(ctx, canvas);
+
+      drawingRef.current.redraw(ctx, canvas, {
+        showLabels: false,
+        currentZoom: mapRef.current?.getZoom(),
+        projectPoint: mapRef.current
+          ? (p) => {
+              if (!p.latLng) return p;
+              const projected = projectLatLngToContainerPoint(L.latLng(p.latLng.lat, p.latLng.lng));
+              return { ...p, x: projected.x - layoutRef.current.insetX, y: projected.y - layoutRef.current.insetY } as DrawingPoint;
+            }
+          : undefined,
+      });
+      drawSelectedObjectOverlay(ctx);
+
+      dirtyRef.current = false;
+    });
+  }, [showStrokeAnnotations]);
+
+  const markDirtyAndRedraw = useCallback(() => {
+    dirtyRef.current = true;
+    scheduleRedraw();
+  }, [scheduleRedraw]);
+
+  const projectLatLngToContainerPoint = useCallback((latLng: L.LatLng) => {
+    const m = mapRef.current;
+    if (!m) return L.point(0, 0);
+
+    const anim = zoomAnimationRef.current;
+    const animatedProjector = m as L.Map & {
+      _getNewPixelOrigin?: (center: L.LatLng, zoom: number) => L.Point;
+    };
+
+    if (anim && typeof animatedProjector._getNewPixelOrigin === "function") {
+      const pixelOrigin = animatedProjector._getNewPixelOrigin(anim.center, anim.zoom);
+      return m.project(latLng, anim.zoom).subtract(pixelOrigin);
+    }
+
+    return m.latLngToContainerPoint(latLng);
+  }, []);
+
+  const projectPointToOverlay = useCallback((point: DrawingPoint): DrawingPoint => {
     const m = mapRef.current;
     if (!m || !point.latLng) return point;
-    const { insetX, insetY } = drawingLayoutRef.current;
-    const projectedPoint = m.latLngToContainerPoint(L.latLng(point.latLng.lat, point.latLng.lng));
+    const projected = projectLatLngToContainerPoint(L.latLng(point.latLng.lat, point.latLng.lng));
     return {
       ...point,
-      x: projectedPoint.x - insetX,
-      y: projectedPoint.y - insetY,
+      x: projected.x - layoutRef.current.insetX,
+      y: projected.y - layoutRef.current.insetY,
     };
-  }, []);
+  }, [projectLatLngToContainerPoint]);
 
-  const buildRenderOptions = useCallback((): DrawingRenderOptions => {
+  const unprojectOverlayPoint = useCallback((point: DrawingPoint): DrawingPoint => {
     const m = mapRef.current;
-    return {
-      showLabels: false,
-      currentZoom: m?.getZoom(),
-      projectPoint: m ? projectPoint : undefined,
-    };
-  }, [projectPoint]);
-
-  /** Full canvas paint: committed strokes + in-progress freehand + live shape preview (single pass per rAF). */
-  const paintCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = getCtx(canvas);
-    const d = drawingRef.current;
-    if (!showStrokeAnnotationsRef.current) {
-      clearCanvas(ctx, canvas);
-      return;
-    }
-    
-    clearCanvas(ctx, canvas);
-    const opts = buildRenderOptions();
-
-    ctx.imageSmoothingEnabled = true;
-    if ("imageSmoothingQuality" in ctx) {
-      (ctx as CanvasRenderingContext2D & { imageSmoothingQuality?: string }).imageSmoothingQuality = "high";
-    }
-
-    const clipW = canvas.clientWidth || viewportBoundsRef.current?.width || 0;
-    const clipH = canvas.clientHeight || viewportBoundsRef.current?.height || 0;
-    if (clipW > 0 && clipH > 0) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, clipW, clipH);
-      ctx.clip();
-    }
-    
-    d.redraw(ctx, canvas, opts);
-
-    const preview = shapePreviewEndRef.current;
-    const start = startPointRef.current;
-    if (preview && isDrawingRef.current && start && isShapeMode(d.mode)) {
-      switch (d.mode) {
-        case "line":
-          drawLine(ctx, start, preview, d.color, d.width, d.opacity);
-          break;
-        case "arrow":
-          drawArrow(ctx, start, preview, d.color, d.width, d.opacity);
-          break;
-        case "circle":
-          drawCircle(ctx, start, getDistance(start, preview), d.color, d.width, false, d.opacity);
-          break;
-        case "rectangle":
-          drawRectangle(ctx, start, preview, d.color, d.width, false, d.opacity);
-          break;
-      }
-    }
-
-    if (clipW > 0 && clipH > 0) {
-      ctx.restore();
-    }
-  }, [buildRenderOptions]);
-
-  const schedulePaint = useCallback(() => {
-    if (paintRafRef.current != null) return;
-    paintRafRef.current = window.requestAnimationFrame(() => {
-      paintRafRef.current = null;
-      const d = drawingRef.current;
-      const minD = strokeSettingsRef.current.minDistance;
-      const last = lastPointRef.current;
-
-      if (isFreehandLikeStroke(d.mode) && isDrawingRef.current && last && freehandQueueRef.current.length > 0) {
-        const queue = freehandQueueRef.current;
-        freehandQueueRef.current = [];
-        const ad = pointerDrawEnvRef.current.androidDrawingOptimizations;
-        const maxJump = ad ? androidFreehandMaxJumpPx(drawingLayoutRef.current) : Infinity;
-        lastPointRef.current = appendFreehandSamples(last, queue, minD, maxJump, d.addPoint);
-      }
-
-      paintCanvas();
-    });
-  }, [paintCanvas]);
-
-  const cancelPaintRaf = useCallback(() => {
-    if (paintRafRef.current != null) {
-      window.cancelAnimationFrame(paintRafRef.current);
-      paintRafRef.current = null;
-    }
+    if (!m) return point;
+    const latLng = m.containerPointToLatLng(L.point(point.x + layoutRef.current.insetX, point.y + layoutRef.current.insetY));
+    return { ...point, latLng: { lat: latLng.lat, lng: latLng.lng } };
   }, []);
 
-  const scheduleHoverCommit = useCallback(() => {
-    if (hoverRafRef.current != null) return;
-    hoverRafRef.current = window.requestAnimationFrame(() => {
-      hoverRafRef.current = null;
-      setHoverPreview(hoverPendingRef.current);
-    });
+  const getProjectedObjectPoints = useCallback((object: DrawingObject) => {
+    return object.points.map((point) => projectPointToOverlay(point));
+  }, [projectPointToOverlay]);
+
+  const shapeEndpoint = (points: DrawingPoint[]) => points[points.length - 1];
+
+  const clampContainerPointToLayout = useCallback((point: L.Point, layout: DrawingLayoutMetrics) => {
+    return L.point(
+      Math.max(layout.insetX, Math.min(layout.insetX + layout.width, point.x)),
+      Math.max(layout.insetY, Math.min(layout.insetY + layout.height, point.y)),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!layerActive || !mapRef.current || layoutRef.current.width <= 1 || layoutRef.current.height <= 1) return;
+
+    for (const object of drawing.objects) {
+      if (migratedObjectIdsRef.current.has(object.id)) continue;
+      if (object.points.every((point) => point.latLng)) {
+        migratedObjectIdsRef.current.add(object.id);
+        continue;
+      }
+
+      migratedObjectIdsRef.current.add(object.id);
+      drawing.updateObjectPoints(
+        object.id,
+        object.points.map((point) => point.latLng ? point : unprojectOverlayPoint(point)),
+      );
+    }
+  }, [drawing, drawing.objects, layerActive, unprojectOverlayPoint]);
+
+  const moveObjectByOverlayDelta = useCallback((objectId: string, deltaX: number, deltaY: number) => {
+    const object = drawingRef.current.objects.find((item) => item.id === objectId);
+    if (!object) return;
+    const currentPoints = getProjectedObjectPoints(object);
+    if (currentPoints.length === 0) return;
+    let nextPoints = currentPoints.map((point) => ({ ...point, x: point.x + deltaX, y: point.y + deltaY }));
+    const minX = Math.min(...nextPoints.map((point) => point.x));
+    const maxX = Math.max(...nextPoints.map((point) => point.x));
+    const minY = Math.min(...nextPoints.map((point) => point.y));
+    const maxY = Math.max(...nextPoints.map((point) => point.y));
+    const padding = Math.max(8, object.width + 8);
+    const proposedRect = {
+      x: minX - padding,
+      y: minY - padding,
+      width: Math.max(1, maxX - minX + padding * 2),
+      height: Math.max(1, maxY - minY + padding * 2),
+    };
+    const adjustedRect = resolveRectAgainstProtectedOverlays(
+      proposedRect,
+      [],
+      { width: layoutRef.current.width, height: layoutRef.current.height },
+    );
+    const adjustX = adjustedRect.x - proposedRect.x;
+    const adjustY = adjustedRect.y - proposedRect.y;
+    if (adjustX || adjustY) {
+      nextPoints = nextPoints.map((point) => ({ ...point, x: point.x + adjustX, y: point.y + adjustY }));
+    }
+      drawingRef.current.updateObjectPoints(objectId, nextPoints.map((point) => unprojectOverlayPoint(point)), { refresh: false });
+  }, [getProjectedObjectPoints, unprojectOverlayPoint]);
+
+  const resizeObjectToPoint = useCallback((
+    objectId: string,
+    handle: NonNullable<typeof activeDragRef.current>["handle"],
+    pointer: DrawingPoint,
+  ) => {
+    if (!handle) return;
+    const object = drawingRef.current.objects.find((item) => item.id === objectId);
+    if (!object) return;
+    const points = getProjectedObjectPoints(object);
+    if (points.length === 0) return;
+    let next = points;
+
+    if ((object.type === "line" || object.type === "arrow") && points.length >= 2) {
+      next = handle === "start"
+        ? [pointer, ...points.slice(1)]
+        : [points[0], ...points.slice(1, -1), pointer];
+    } else if (object.type === "circle" && points.length >= 2) {
+      next = [points[0], pointer];
+    } else if (object.type === "rectangle" && points.length >= 2) {
+      const a = points[0];
+      const b = points[points.length - 1];
+      const left = Math.min(a.x, b.x);
+      const right = Math.max(a.x, b.x);
+      const top = Math.min(a.y, b.y);
+      const bottom = Math.max(a.y, b.y);
+      const corners = {
+        nw: { x: pointer.x, y: pointer.y },
+        ne: { x: pointer.x, y: pointer.y },
+        sw: { x: pointer.x, y: pointer.y },
+        se: { x: pointer.x, y: pointer.y },
+      };
+      const fixed = {
+        nw: { x: right, y: bottom },
+        ne: { x: left, y: bottom },
+        sw: { x: right, y: top },
+        se: { x: left, y: top },
+      };
+      const h = handle as "nw" | "ne" | "sw" | "se";
+      next = [
+        { ...a, ...corners[h] },
+        { ...b, ...fixed[h] },
+      ];
+    }
+
+    drawingRef.current.updateObjectPoints(objectId, next.map((point) => unprojectOverlayPoint(point)), { refresh: false });
+  }, [getProjectedObjectPoints, unprojectOverlayPoint]);
+
+  const getHandleAtPoint = useCallback((point: DrawingPoint) => {
+    const selectedId = drawingRef.current.selectedAnnotationId;
+    if (!selectedId) return null;
+    const object = drawingRef.current.objects.find((item) => item.id === selectedId);
+    if (!object || object.type === "label") return null;
+    const points = getProjectedObjectPoints(object);
+    if (points.length === 0) return null;
+    const hitRadius = interactionCoarse ? 18 : 11;
+    const hit = (p: DrawingPoint) => Math.hypot(point.x - p.x, point.y - p.y) <= hitRadius;
+
+    if ((object.type === "line" || object.type === "arrow") && points.length >= 2) {
+      if (hit(points[0])) return { object, handle: "start" as const };
+      if (hit(points[points.length - 1])) return { object, handle: "end" as const };
+    }
+
+    if (object.type === "circle" && points.length >= 2 && hit(shapeEndpoint(points))) {
+      return { object, handle: "radius" as const };
+    }
+
+    if (object.type === "rectangle" && points.length >= 2) {
+      const a = points[0];
+      const b = points[points.length - 1];
+      const corners = [
+        { handle: "nw" as const, x: Math.min(a.x, b.x), y: Math.min(a.y, b.y) },
+        { handle: "ne" as const, x: Math.max(a.x, b.x), y: Math.min(a.y, b.y) },
+        { handle: "sw" as const, x: Math.min(a.x, b.x), y: Math.max(a.y, b.y) },
+        { handle: "se" as const, x: Math.max(a.x, b.x), y: Math.max(a.y, b.y) },
+      ];
+      const found = corners.find((corner) => hit({ x: corner.x, y: corner.y }));
+      if (found) return { object, handle: found.handle };
+    }
+
+    return null;
+  }, [getProjectedObjectPoints, interactionCoarse]);
+
+  const drawSelectedObjectOverlay = useCallback((ctx: CanvasRenderingContext2D) => {
+    const selectedId = drawingRef.current.selectedAnnotationId;
+    if (!selectedId) return;
+    const object = drawingRef.current.objects.find((item) => item.id === selectedId);
+    if (!object || object.type === "label") return;
+    const points = getProjectedObjectPoints(object);
+    if (points.length === 0) return;
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(15, 118, 110, 0.78)";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([5, 4]);
+
+    if (object.type === "circle" && points.length >= 2) {
+      const endpoint = shapeEndpoint(points);
+      const radius = Math.hypot(endpoint.x - points[0].x, endpoint.y - points[0].y);
+      ctx.beginPath();
+      ctx.arc(points[0].x, points[0].y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (object.type === "rectangle" && points.length >= 2) {
+      const left = Math.min(points[0].x, points[1].x);
+      const top = Math.min(points[0].y, points[1].y);
+      ctx.strokeRect(left, top, Math.abs(points[1].x - points[0].x), Math.abs(points[1].y - points[0].y));
+    }
+
+    ctx.setLineDash([]);
+    const handlePoints: DrawingPoint[] = [];
+    if ((object.type === "line" || object.type === "arrow") && points.length >= 2) {
+      handlePoints.push(points[0], points[points.length - 1]);
+    } else if (object.type === "circle" && points.length >= 2) {
+      handlePoints.push(shapeEndpoint(points));
+    } else if (object.type === "rectangle" && points.length >= 2) {
+      const left = Math.min(points[0].x, points[1].x);
+      const right = Math.max(points[0].x, points[1].x);
+      const top = Math.min(points[0].y, points[1].y);
+      const bottom = Math.max(points[0].y, points[1].y);
+      handlePoints.push({ x: left, y: top }, { x: right, y: top }, { x: left, y: bottom }, { x: right, y: bottom });
+    }
+
+    for (const handle of handlePoints) {
+      ctx.beginPath();
+      ctx.roundRect(handle.x - 5, handle.y - 5, 10, 10, 3);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }, [getProjectedObjectPoints]);
+
+  const cancelRedraw = useCallback(() => {
+    if (rafRef.current != null) {
+      window.cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
   }, []);
 
   useEffect(() => {
@@ -411,13 +392,13 @@ export const DrawingCanvas = ({
     canvas.style.zIndex = "1";
     canvas.style.cursor = "inherit";
     canvas.style.pointerEvents = "none";
-    canvas.style.touchAction = MAP_TOUCH_ACTIONS;
+    canvas.style.touchAction = "none";
     canvas.style.willChange = "contents";
     container.appendChild(canvas);
     canvasRef.current = canvas;
 
     const getViewportBounds = () =>
-      calculateVisibleMapViewportBounds(mapRef.current?.getContainer() ?? container, DEFAULT_MAP_DRAW_VIEWPORT_OPTIONS);
+      calculateFullMapViewportBounds(mapRef.current?.getContainer() ?? container);
 
     const syncOverlayBounds = (bounds: ViewportBounds | null) => {
       if (!bounds) return;
@@ -429,76 +410,54 @@ export const DrawingCanvas = ({
       container.style.top = `${top}px`;
       container.style.width = `${width}px`;
       container.style.height = `${height}px`;
-      container.style.right = "auto";
-      container.style.bottom = "auto";
       container.style.overflow = "hidden";
-      setOverlayBoundsStyle((current) =>
-        current.left === left &&
-        current.top === top &&
-        current.width === width &&
-        current.height === height
-          ? current
-          : { left, top, width, height },
-      );
-      canvas.style.width = `${width}px`;
-      canvas.style.height = `${height}px`;
-      syncDrawingLayoutFromDom(container, mapRef.current, drawingLayoutRef);
+      setOverlayBoundsStyle({ left, top, width, height });
+
+      layoutRef.current = {
+        insetX: bounds.left - (mapRef.current?.getContainer().getBoundingClientRect().left ?? 0),
+        insetY: bounds.top - (mapRef.current?.getContainer().getBoundingClientRect().top ?? 0),
+        width,
+        height,
+      };
+
+      resizeCanvas(canvas, width, height);
+      dirtyRef.current = true;
+      scheduleRedraw();
     };
 
     viewportBoundsRef.current = getViewportBounds();
     syncOverlayBounds(viewportBoundsRef.current);
-    syncDrawingLayoutFromDom(container, mapRef.current, drawingLayoutRef);
 
-    let inUpdateSize = false;
+    const shouldIgnoreStickyNoteKeyboardResize = () => {
+      const activeElement = document.activeElement as HTMLElement | null;
+      const vv = window.visualViewport;
+      return Boolean(
+        activeElement?.closest("[data-sticky-note-editor='true']") &&
+        vv &&
+        window.innerHeight - vv.height > 80,
+      );
+    };
+
+    let inUpdate = false;
     const updateSize = () => {
-      if (inUpdateSize) return;
-      if (!containerRef.current || !canvasRef.current) return;
-      inUpdateSize = true;
+      if (shouldIgnoreStickyNoteKeyboardResize()) return;
+      if (inUpdate) return;
+      inUpdate = true;
       try {
-        mapRef.current?.invalidateSize({ animate: false });
-
+        mapRef.current?.invalidateSize({ animate: false, pan: false });
         const newBounds = getViewportBounds();
-
-        if (hasViewportChanged(viewportBoundsRef.current, newBounds, 2)) {
-          viewportBoundsRef.current = newBounds;
-        }
+        if (hasViewportChanged(viewportBoundsRef.current, newBounds, 2)) viewportBoundsRef.current = newBounds;
         syncOverlayBounds(viewportBoundsRef.current);
-
-        const mapInst = mapRef.current;
-        const mapEl = mapInst?.getContainer();
-        const b = viewportBoundsRef.current;
-        if (mapEl && b) {
-          const mr = mapEl.getBoundingClientRect();
-          drawingLayoutRef.current = {
-            insetX: b.left - mr.left,
-            insetY: b.top - mr.top,
-            width: b.width,
-            height: b.height,
-          };
-        } else {
-          syncDrawingLayoutFromDom(containerRef.current, mapRef.current, drawingLayoutRef);
-        }
-
-        if (viewportBoundsRef.current) {
-          resizeCanvas(canvasRef.current, viewportBoundsRef.current.width, viewportBoundsRef.current.height);
-        } else if (containerRef.current) {
-          const rect = containerRef.current.getBoundingClientRect();
-          resizeCanvas(canvasRef.current, rect.width, rect.height);
-        }
-
-        schedulePaint();
       } finally {
-        inUpdateSize = false;
+        inUpdate = false;
       }
     };
 
-    refreshViewportLayoutRef.current = updateSize;
-
-    updateSize();
-
-    viewportMonitorRef.current?.destroy();
-    const boundsMonitor = createViewportBoundsMonitor(mapRef.current?.getContainer() ?? container, {
-      ...DEFAULT_MAP_DRAW_VIEWPORT_OPTIONS,
+    viewportMonitorRef.current?.destroy?.();
+    viewportMonitorRef.current = createViewportBoundsMonitor(mapRef.current?.getContainer() ?? container, {
+      sidebarSelector: false,
+      navbarSelector: undefined,
+      useDeclarativeOccluders: false,
       debounceMs: 50,
       changeThresholdPx: 2,
       onChange: (newBounds) => {
@@ -508,742 +467,426 @@ export const DrawingCanvas = ({
         }
       },
     });
-    viewportMonitorRef.current = boundsMonitor;
 
-    const resizeObserver = new ResizeObserver(updateSize);
-    resizeObserver.observe(container);
-    const mapElement = mapRef.current?.getContainer();
-    if (mapElement) resizeObserver.observe(mapElement);
-    if (container.parentElement) resizeObserver.observe(container.parentElement);
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(container);
+    const mapEl = mapRef.current?.getContainer();
+    if (mapEl) ro.observe(mapEl);
+    if (container.parentElement) ro.observe(container.parentElement);
     window.addEventListener("orientationchange", updateSize);
-
+    window.addEventListener("resize", updateSize);
     const vv = window.visualViewport;
-    const onVisualViewportChange = () => updateSize();
+    const onVV = () => updateSize();
     if (vv) {
-      vv.addEventListener("resize", onVisualViewportChange);
-      vv.addEventListener("scroll", onVisualViewportChange);
+      vv.addEventListener("resize", onVV);
+      vv.addEventListener("scroll", onVV);
     }
 
     return () => {
-      refreshViewportLayoutRef.current = null;
-      resizeObserver.disconnect();
+      ro.disconnect();
       window.removeEventListener("orientationchange", updateSize);
+      window.removeEventListener("resize", updateSize);
       if (vv) {
-        vv.removeEventListener("resize", onVisualViewportChange);
-        vv.removeEventListener("scroll", onVisualViewportChange);
+        vv.removeEventListener("resize", onVV);
+        vv.removeEventListener("scroll", onVV);
       }
-      viewportMonitorRef.current?.destroy();
-      viewportMonitorRef.current = null;
-      cancelPaintRaf();
+      viewportMonitorRef.current?.destroy?.();
+      cancelRedraw();
       canvas.remove();
       canvasRef.current = null;
       viewportBoundsRef.current = null;
-      isDrawingRef.current = false;
-      lastPointRef.current = null;
-      startPointRef.current = null;
-      shapePreviewEndRef.current = null;
-      freehandQueueRef.current = [];
     };
-  }, [cancelPaintRaf, layerActive, map, schedulePaint]);
+  }, [cancelRedraw, layerActive, map, scheduleRedraw]);
 
-  useEffect(() => {
-    if (!layerActive) return undefined;
-    schedulePaint();
-    return undefined;
-  }, [drawing.objects, drawing.currentDrawing, layerActive, map, schedulePaint, showStrokeAnnotations]);
-
-  useEffect(() => {
-    if (!layerActive || !map) return undefined;
-
-    const handleMapRedraw = () => {
-      schedulePaint();
-    };
-
-    const handleMapLayoutSync = () => {
-      refreshViewportLayoutRef.current?.();
-      schedulePaint();
-    };
-
-    map.on("move", handleMapRedraw);
-    map.on("zoom", handleMapRedraw);
-    map.on("zoomend", handleMapRedraw);
-    map.on("resize", handleMapLayoutSync);
-    map.on("viewreset", handleMapLayoutSync);
-
-    return () => {
-      map.off("move", handleMapRedraw);
-      map.off("zoom", handleMapRedraw);
-      map.off("zoomend", handleMapRedraw);
-      map.off("resize", handleMapLayoutSync);
-      map.off("viewreset", handleMapLayoutSync);
-    };
-  }, [layerActive, map, schedulePaint]);
-
-  const drawingPointFromInteraction = useCallback((event: PointerEvent | MouseEvent | TouchEvent): DrawingPoint | null => {
-    if (!mapRef.current || !containerRef.current) return null;
-    syncDrawingLayoutFromDom(containerRef.current, mapRef.current, drawingLayoutRef);
+  const drawingPointFromInteraction = useCallback((event: PointerEvent): DrawingPoint | null => {
+    if (!mapRef.current || !containerRef.current || !canvasRef.current) return null;
     const m = mapRef.current;
-    const layout = drawingLayoutRef.current;
+    const layout = layoutRef.current;
     if (layout.width <= 0 || layout.height <= 0) return null;
-    return domEventToDrawingPoint(m, layout, event);
-  }, []);
+    const cp = domPointerEventToMapContainerPoint(m, event);
+    if (!cp) return null;
+    const drawingActive = activePointerIdRef.current === event.pointerId || activeDragRef.current != null;
+    if (!drawingActive && !isContainerPointInDrawingLayout(cp, layout)) return null;
+    return containerPointToDrawingPoint(m, layout, drawingActive ? clampContainerPointToLayout(cp, layout) : cp);
+  }, [clampContainerPointToLayout]);
 
-  const isInsideCanvas = useCallback((event: PointerEvent | MouseEvent | TouchEvent) => {
+  const isInsideCanvas = useCallback((event: PointerEvent) => {
     const m = mapRef.current;
-    if (!m) return false;
+    if (!m || !layoutRef.current) return false;
     const cp = domPointerEventToMapContainerPoint(m, event);
     if (!cp) return false;
-    return isContainerPointInDrawingLayout(cp, drawingLayoutRef.current);
+    return isContainerPointInDrawingLayout(cp, layoutRef.current);
   }, []);
 
-  const claimEvent = (event: PointerEvent | MouseEvent | TouchEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-  };
-
-  const releaseDrawingPointerCapture = useCallback((onlyPointerId?: number | null) => {
-    const el = containerRef.current;
-    const capId = capturedPointerIdRef.current;
-    if (capId == null) return;
-    if (onlyPointerId != null && onlyPointerId !== capId) return;
-    if (el?.hasPointerCapture?.(capId)) {
-      try {
-        el.releasePointerCapture(capId);
-      } catch {
-        /* ignore */
-      }
-    }
-    capturedPointerIdRef.current = null;
-  }, []);
-
-  const stopDrawingSession = useCallback(() => {
-    if (!isDrawingRef.current) return;
-    isDrawingRef.current = false;
-    shapePreviewEndRef.current = null;
-    freehandQueueRef.current = [];
-    releaseDrawingPointerCapture();
-    if (pointerDrawEnvRef.current.androidDrawingOptimizations) {
-      setLeafletDrawGestureSuppression(mapRef.current, false);
-    }
-    drawingRef.current.cancelCurrentStroke();
-    lastPointRef.current = null;
-    startPointRef.current = null;
-    onStrokeActivityChangeRef.current?.(false);
-    schedulePaint();
-    syncOverlayTouchAction();
-  }, [releaseDrawingPointerCapture, schedulePaint, syncOverlayTouchAction]);
-
-  const shouldUsePointerForDrawing = useCallback((event: PointerEvent, phase: "start" | "move" | "end") => {
+  const shouldUsePointerForDrawing = useCallback((event: PointerEvent) => {
     const d = drawingRef.current;
     if (!d.mode) return false;
-
-    if (activePointerIdRef.current != null && phase !== "start") {
-      return event.pointerId === activePointerIdRef.current;
-    }
-
     if (!isInsideCanvas(event)) return false;
-    if (event.pointerType === "pen") return true;
-    if (event.pointerType === "mouse") return true;
+    if (event.pointerType === "pen" || event.pointerType === "mouse") return true;
+    if (event.pointerType === "touch" && activeTouchPointersRef.current.size > 1) return false;
+    if (event.pointerType === "touch") return true; // single-touch drawing allowed
+    return false;
+  }, [isInsideCanvas]);
+
+  const getPointSpacing = useCallback((event: PointerEvent) => {
+    const longestSide = Math.max(layoutRef.current.width, layoutRef.current.height);
+    const compactViewport = longestSide < 900;
+    if (event.pointerType === "pen") return compactViewport ? 0.75 : 0.5;
+    if (event.pointerType === "touch") return compactViewport ? 2.4 : 1.6;
+    return 1;
+  }, []);
+
+  const queueDrawingPoint = useCallback((point: DrawingPoint, event: PointerEvent) => {
+    const last = lastBufferedPointRef.current;
+    const spacing = getPointSpacing(event);
+    if (last && Math.hypot(point.x - last.x, point.y - last.y) < spacing) return;
+    lastBufferedPointRef.current = point;
+    pendingPointBufferRef.current.push(point);
+    dirtyRef.current = true;
+    scheduleRedraw();
+  }, [getPointSpacing, scheduleRedraw]);
+
+  const attachActiveWindowPointerListeners = useCallback(() => {
+    if (activeWindowListenersRef.current.move) return;
+
+    const onMove = (event: PointerEvent) => activePointerHandlersRef.current.move?.(event);
+    const onUp = (event: PointerEvent) => activePointerHandlersRef.current.up?.(event);
+    const onCancel = (event: PointerEvent) => {
+      activePointerHandlersRef.current.release?.(event);
+      if (event.pointerType === "touch") activeTouchPointersRef.current.delete(event.pointerId);
+      activePointerIdRef.current = null;
+      activeDragRef.current = null;
+      pendingPointBufferRef.current = [];
+      lastBufferedPointRef.current = null;
+      drawingRef.current.cancelCurrentStroke();
+      setLeafletDrawGestureSuppression(mapRef.current, false);
+      activePointerHandlersRef.current.detach?.();
+      onStrokeActivityChange?.(false);
+      dirtyRef.current = true;
+      scheduleRedraw();
+    };
+
+    window.addEventListener("pointermove", onMove as EventListener, { passive: false });
+    window.addEventListener("pointerup", onUp as EventListener);
+    window.addEventListener("pointercancel", onCancel as EventListener);
+
+    activeWindowListenersRef.current.move = onMove;
+    activeWindowListenersRef.current.up = onUp;
+    activeWindowListenersRef.current.cancel = onCancel;
+  }, [scheduleRedraw, onStrokeActivityChange]);
+
+  const detachActiveWindowPointerListeners = useCallback(() => {
+    const listeners = activeWindowListenersRef.current;
+    if (listeners.move) window.removeEventListener("pointermove", listeners.move as EventListener, { passive: false } as AddEventListenerOptions);
+    if (listeners.up) window.removeEventListener("pointerup", listeners.up as EventListener);
+    if (listeners.cancel) window.removeEventListener("pointercancel", listeners.cancel as EventListener);
+    activeWindowListenersRef.current = {};
+  }, []);
+
+  const capturePointer = useCallback((event: PointerEvent) => {
+    const target = mapRef.current?.getContainer() ?? canvasRef.current ?? (event.currentTarget as HTMLElement | null);
+    try {
+      target?.setPointerCapture?.(event.pointerId);
+      capturedPointerTargetRef.current = target ?? null;
+    } catch {}
+  }, []);
+
+  const releaseCapturedPointer = useCallback((pointerId: number | null) => {
+    if (pointerId == null) return;
+    const target = capturedPointerTargetRef.current ?? mapRef.current?.getContainer() ?? canvasRef.current;
+    try {
+      target?.releasePointerCapture?.(pointerId);
+    } catch {}
+    if (capturedPointerTargetRef.current === target) {
+      capturedPointerTargetRef.current = null;
+    }
+  }, []);
+
+  const releasePointer = useCallback((event: PointerEvent) => {
+    releaseCapturedPointer(event.pointerId);
+  }, [releaseCapturedPointer]);
+
+  const getObjectAtProjectedPoint = useCallback((point: DrawingPoint) =>
+    drawingRef.current.getObjectAt(point, {
+      currentZoom: mapRef.current?.getZoom(),
+      projectPoint: projectPointToOverlay,
+    }), [projectPointToOverlay]);
+
+  const handlePointerDown = useCallback((event: PointerEvent) => {
+    if (!interactionEnabled || !canvasRef.current) return;
 
     if (event.pointerType === "touch") {
-      if (activeTouchPointersRef.current.size > 1) return false;
-      if (
-        touchRejectedForPalmGuard({
-          fingerGuardOn: d.isStylusMode,
-          coarsePointer: interactionCoarseRef.current,
-          penInContact: penInContactForPalmGuard(),
-          lastPenInputAt: lastPenInputAtRef.current,
-        })
-      ) {
-        return false;
+      activeTouchPointersRef.current.add(event.pointerId);
+      if (activeTouchPointersRef.current.size > 1) {
+        if (activePointerIdRef.current != null) {
+          releaseCapturedPointer(activePointerIdRef.current);
+          pendingPointBufferRef.current = [];
+          lastBufferedPointRef.current = null;
+          drawingRef.current.cancelCurrentStroke();
+          activePointerIdRef.current = null;
+          activeDragRef.current = null;
+          setLeafletDrawGestureSuppression(mapRef.current, false);
+          onStrokeActivityChange?.(false);
+          markDirtyAndRedraw();
+        }
+        return;
       }
-      return true;
     }
 
-    return !d.isStylusMode;
-  }, [isInsideCanvas, penInContactForPalmGuard]);
-
-  const shouldUseFallbackEventForDrawing = useCallback((event: MouseEvent | TouchEvent) => {
-    const d = drawingRef.current;
-    if (!d.mode || !isInsideCanvas(event)) return false;
-    if (event instanceof MouseEvent) return true;
-    if (
-      touchRejectedForPalmGuard({
-        fingerGuardOn: d.isStylusMode,
-        coarsePointer: interactionCoarseRef.current,
-        penInContact: penInContactForPalmGuard(),
-        lastPenInputAt: lastPenInputAtRef.current,
-      })
-    ) {
-      return false;
-    }
-    return isUsableTouch(event);
-  }, [isInsideCanvas, penInContactForPalmGuard]);
-
-  const updateHoverPreview = useCallback((event: PointerEvent | MouseEvent | TouchEvent, inContact: boolean) => {
-    const d = drawingRef.current;
-    if (!d.mode) {
-      hoverPendingRef.current = null;
-      scheduleHoverCommit();
-      return;
-    }
-
+    if (activePointerIdRef.current != null) return;
+    
     const coords = drawingPointFromInteraction(event);
-    if (!coords) {
-      hoverPendingRef.current = null;
-      scheduleHoverCommit();
+    if (!coords) return;
+
+    // If we have a drawing mode, draw
+    if (drawingRef.current.mode) {
+      if (!shouldUsePointerForDrawing(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      coords.pressure = extractPressure(event);
+      activePointerIdRef.current = event.pointerId;
+      pendingPointBufferRef.current = [];
+      lastBufferedPointRef.current = coords;
+      capturePointer(event);
+      setLeafletDrawGestureSuppression(mapRef.current, true);
+
+      if (drawingRef.current.mode === "label") {
+        const stickyNoteColor = ["#fff7c2", "#dbeafe", "#dcfce7", "#fce7f3", "#ffedd5", "#ede9fe", "#ffffff"]
+          .includes(drawingRef.current.color.toLowerCase())
+            ? drawingRef.current.color
+            : "#fff7c2";
+        const label = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+          type: "label" as const,
+          points: [coords],
+          color: stickyNoteColor,
+          width: drawingRef.current.width,
+          opacity: drawingRef.current.opacity,
+          label: "",
+          labelSize: { width: 176, height: 92 },
+          referenceZoom: mapRef.current?.getZoom(),
+          timestamp: Date.now(),
+        };
+        drawingRef.current.addObject(label);
+        drawingRef.current.setSelectedAnnotationId(label.id);
+        drawingRef.current.setMode(null);
+        dirtyRef.current = true;
+        scheduleRedraw();
+        setLeafletDrawGestureSuppression(mapRef.current, false);
+        detachActiveWindowPointerListeners();
+        releasePointer(event);
+        return;
+      }
+
+      onStrokeActivityChange?.(true);
+      drawingRef.current.startDrawing(drawingRef.current.mode, coords, { referenceZoom: mapRef.current?.getZoom() });
+      attachActiveWindowPointerListeners();
+      dirtyRef.current = true;
+      scheduleRedraw();
       return;
     }
 
-    hoverPendingRef.current = {
-      x: coords.x,
-      y: coords.y,
-      pointerType: resolvePointingType(event),
-      inContact,
-    };
-    scheduleHoverCommit();
-  }, [drawingPointFromInteraction, scheduleHoverCommit]);
-
-/** Validate that a coordinate change is reasonable for the current viewport. */
-function isValidCoordinateChange(
-  from: DrawingPoint | null,
-  to: DrawingPoint,
-  viewport: ViewportBounds | null,
-): boolean {
-  if (!from || !viewport) return true;
-
-  const distance = Math.hypot(to.x - from.x, to.y - from.y);
-  
-  // Prevent jumps larger than 40% of viewport diagonal (too large to be natural movement)
-  const maxReasonableDistance = Math.hypot(viewport.width, viewport.height) * 0.4;
-  
-  return distance <= maxReasonableDistance;
-}
-
-  const handlePointerDown = useCallback((event: PointerEvent | MouseEvent | TouchEvent) => {
-    if (!interactionEnabledRef.current || !drawingRef.current.mode || !canvasRef.current) return;
-
-    if (event instanceof TouchEvent && !isUsableTouch(event)) {
-      return;
+    // No drawing mode: leave strokes/shapes fixed. Sticky Notes own their interactions in DrawingLabelLayer.
+    if (!drawingRef.current.mode) {
+      drawingRef.current.setSelectedAnnotationId(null);
+      dirtyRef.current = true;
+      scheduleRedraw();
     }
+  }, [interactionEnabled, drawingPointFromInteraction, shouldUsePointerForDrawing, capturePointer, releasePointer, releaseCapturedPointer, attachActiveWindowPointerListeners, onStrokeActivityChange, scheduleRedraw, markDirtyAndRedraw]);
 
-    const d = drawingRef.current;
-
-    if (event instanceof PointerEvent) {
-      if (!event.isPrimary && event.pointerType !== "pen") return;
-      if (event.pointerType === "touch" && activeTouchPointersRef.current.size >= 2) {
-        stopDrawingSession();
-        return;
-      }
-      if (!shouldUsePointerForDrawing(event, "start")) {
-        if (event.pointerType === "pen") updateHoverPreview(event, false);
-        return;
-      }
-
-      if (event.pointerType === "pen") {
-        lastPenInputAtRef.current = Date.now();
-      }
-
-      if (event.pointerType === "pen" && !isStylusContact(event)) {
-        updateHoverPreview(event, false);
-        return;
-      }
-
-      if (
-        event.pointerType === "touch" &&
-        touchRejectedForPalmGuard({
-          fingerGuardOn: d.isStylusMode,
-          coarsePointer: interactionCoarseRef.current,
-          penInContact: penInContactForPalmGuard(),
-          lastPenInputAt: lastPenInputAtRef.current,
-        })
-      ) {
-        return;
-      }
-    } else {
-      if (!shouldUseFallbackEventForDrawing(event)) return;
-    }
+  const handlePointerMove = useCallback((event: PointerEvent) => {
+    if (!interactionEnabled || !canvasRef.current) return;
+    if (event.pointerType === "touch" && activeTouchPointersRef.current.size > 1) return;
+    if (activePointerIdRef.current != null && activePointerIdRef.current !== event.pointerId) return;
 
     const coords = drawingPointFromInteraction(event);
     if (!coords) return;
 
-    coords.pressure = extractPressure(event as PointerEvent | MouseEvent);
-    updateHoverPreview(event, true);
-
-    if (d.mode === "label") {
-      claimEvent(event);
-      if (event instanceof PointerEvent) {
-        activePointerIdRef.current = event.pointerId;
-      }
-      const id = generateId();
-      d.addObject({
-        id,
-        type: "label",
-        points: [coords],
-        color: d.color,
-        width: d.width,
-        opacity: d.opacity,
-        label: "Label",
-        referenceZoom: mapRef.current?.getZoom(),
-        timestamp: Date.now(),
-      });
-      d.setSelectedAnnotationId(id);
-      d.setMode(null);
-      schedulePaint();
-      activePointerIdRef.current = null;
-      return;
-    }
-
-    claimEvent(event);
-    const pe = event instanceof PointerEvent ? event : null;
-    const androidDraw = pointerDrawEnvRef.current.androidDrawingOptimizations;
-    if (pe) {
-      activePointerIdRef.current = pe.pointerId;
-      if (containerRef.current?.setPointerCapture) {
-        try {
-          containerRef.current.setPointerCapture(pe.pointerId);
-          capturedPointerIdRef.current = pe.pointerId;
-        } catch {
-          capturedPointerIdRef.current = null;
-        }
-      }
-    }
-
-    if (pe && androidDraw) {
-      setLeafletDrawGestureSuppression(mapRef.current, true);
-    }
-
-    isDrawingRef.current = true;
-    shapePreviewEndRef.current = null;
-    freehandQueueRef.current = [];
-    lastPointRef.current = coords;
-    startPointRef.current = coords;
-
-    onStrokeActivityChangeRef.current?.(true);
-    d.startDrawing(d.mode, coords, { referenceZoom: mapRef.current?.getZoom() });
-
-    if (pe && capturedPointerIdRef.current == null && containerRef.current?.setPointerCapture) {
-      try {
-        containerRef.current.setPointerCapture(pe.pointerId);
-        capturedPointerIdRef.current = pe.pointerId;
-      } catch {
-        capturedPointerIdRef.current = null;
-      }
-    }
-
-    schedulePaint();
-    syncOverlayTouchAction();
-  }, [
-    drawingPointFromInteraction,
-    shouldUseFallbackEventForDrawing,
-    shouldUsePointerForDrawing,
-    stopDrawingSession,
-    syncOverlayTouchAction,
-    updateHoverPreview,
-    schedulePaint,
-  ]);
-
-  const handlePointerMove = useCallback((event: PointerEvent | MouseEvent | TouchEvent) => {
-    if (!interactionEnabledRef.current || !drawingRef.current.mode || !canvasRef.current) return;
-
-    if (event instanceof TouchEvent && !isUsableTouch(event)) {
-      return;
-    }
-
-    const d = drawingRef.current;
-
-    if (event instanceof PointerEvent) {
-      if (!event.isPrimary && event.pointerType !== "pen") return;
-      if (event.pointerType === "touch" && activeTouchPointersRef.current.size >= 2) {
-        stopDrawingSession();
-        return;
-      }
-      if (!shouldUsePointerForDrawing(event, "move")) {
-        if (event.pointerType === "pen" && isInsideCanvas(event)) {
-          updateHoverPreview(event, false);
-        }
-        return;
-      }
-
-      if (isDrawingRef.current) {
-        claimEvent(event);
-      }
-
-      if (event.pointerType === "pen") {
-        lastPenInputAtRef.current = Date.now();
-      }
-    } else {
-      if (!shouldUseFallbackEventForDrawing(event)) return;
-      if (isDrawingRef.current) claimEvent(event);
-    }
-
-    const inContact =
-      event instanceof PointerEvent
-        ? event.pointerType === "pen"
-          ? isStylusContact(event) ||
-            (isDrawingRef.current && activePointerIdRef.current === event.pointerId)
-          : event.pointerType === "touch"
-            ? isDrawingRef.current && activePointerIdRef.current === event.pointerId
-              ? true
-              : event.pressure > 0 || (event.buttons & 1) !== 0
-            : (event.buttons & 1) !== 0
-        : event instanceof MouseEvent
-          ? event.buttons > 0
-          : event.touches.length > 0;
-
-    if (!(isDrawingRef.current && isFreehandLikeStroke(d.mode) && inContact)) {
-      updateHoverPreview(event, inContact);
-    }
-
-    if (!isDrawingRef.current) {
-      return;
-    }
-
-    if (event instanceof PointerEvent) {
-      if (isFreehandLikeStroke(d.mode)) {
-        const coalesced =
-          (event.pointerType === "touch" || event.pointerType === "pen") &&
-          typeof event.getCoalescedEvents === "function"
-            ? event.getCoalescedEvents()
-            : [];
-        const list = coalesced.length > 0 ? coalesced : [event];
-        const isTouchPrimary = event.pointerType === "touch";
-        const ad = pointerDrawEnvRef.current.androidDrawingOptimizations;
-        // Increased effMinCap for Android touch from 1.5 to 2.0 to prevent excessive point accumulation
-        const effMinCap = ad && isTouchPrimary ? 2.0 : 2.5;
-        const effMin = isTouchPrimary
-          ? Math.min(strokeSettingsRef.current.minDistance, effMinCap)
-          : strokeSettingsRef.current.minDistance;
-        const maxJump = ad ? androidFreehandMaxJumpPx(drawingLayoutRef.current) : Infinity;
-        const coordBounds =
-          coordBoundsFromLayoutMetrics(drawingLayoutRef.current) ?? viewportBoundsRef.current;
-        let prev = lastPointRef.current;
-        for (const sample of list) {
-          if (sample.pointerId !== event.pointerId) continue;
-          const sampleCoords = drawingPointFromInteraction(sample);
-          if (!sampleCoords || !prev) continue;
-          sampleCoords.pressure = extractPressure(sample);
-
-          if (!isCoordinateWithinViewport(sampleCoords.x, sampleCoords.y, coordBounds, 50)) continue;
-          if (!isValidCoordinateChange(prev, sampleCoords, coordBounds)) continue;
-          
-          const distance = getDistance(prev, sampleCoords);
-          if (distance > maxJump) {
-            prev = sampleCoords;
-            continue;
-          }
-          if (distance < effMin * 0.65) continue;
-          freehandQueueRef.current.push(sampleCoords);
-          prev = sampleCoords;
-        }
-        schedulePaint();
-        return;
-      }
-
-      const coords = drawingPointFromInteraction(event);
-      if (!coords || !lastPointRef.current) return;
-      coords.pressure = extractPressure(event);
-      if (isShapeMode(d.mode)) {
-        if (getDistance(lastPointRef.current, coords) < 0.35) return;
-        shapePreviewEndRef.current = coords;
-        schedulePaint();
-      }
-      return;
-    }
-
-    const coords = drawingPointFromInteraction(event);
-    if (!coords || !lastPointRef.current) return;
-    coords.pressure = extractPressure(event as PointerEvent | MouseEvent);
-    if (isFreehandLikeStroke(d.mode)) {
-      const ad = pointerDrawEnvRef.current.androidDrawingOptimizations;
-      const effMin = Math.min(strokeSettingsRef.current.minDistance, ad ? 2.0 : 2.5);
-      const maxJump = ad ? androidFreehandMaxJumpPx(drawingLayoutRef.current) : Infinity;
-      const coordBounds =
-        coordBoundsFromLayoutMetrics(drawingLayoutRef.current) ?? viewportBoundsRef.current;
-
-      if (!isCoordinateWithinViewport(coords.x, coords.y, coordBounds, 50)) return;
-      if (!isValidCoordinateChange(lastPointRef.current, coords, coordBounds)) return;
-      
-      const distance = getDistance(lastPointRef.current, coords);
-      if (distance > maxJump) {
-        lastPointRef.current = coords;
-        return;
-      }
-      if (distance < effMin * 0.65) return;
-      freehandQueueRef.current.push(coords);
-      schedulePaint();
-      return;
-    }
-    if (isShapeMode(d.mode)) {
-      if (getDistance(lastPointRef.current, coords) < 0.35) return;
-      shapePreviewEndRef.current = coords;
-      schedulePaint();
-    }
-  }, [
-    drawingPointFromInteraction,
-    isInsideCanvas,
-    schedulePaint,
-    shouldUseFallbackEventForDrawing,
-    shouldUsePointerForDrawing,
-    stopDrawingSession,
-    updateHoverPreview,
-  ]);
-
-  const handlePointerUp = useCallback((event?: PointerEvent | MouseEvent | TouchEvent) => {
-    const hadSession = isDrawingRef.current;
-    try {
-      if (event instanceof PointerEvent) {
-        if (activePointerIdRef.current != null && event.pointerId !== activePointerIdRef.current) {
-          return;
-        }
-        if (hadSession) claimEvent(event);
-        updateHoverPreview(event, false);
-      } else if (event) {
-        if (hadSession && shouldUseFallbackEventForDrawing(event)) {
-          claimEvent(event);
-        }
-        updateHoverPreview(event, false);
-      }
-
-      if (!hadSession || !canvasRef.current) {
-        activePointerIdRef.current = null;
-        return;
-      }
-
-      isDrawingRef.current = false;
-      shapePreviewEndRef.current = null;
-      if (pointerDrawEnvRef.current.androidDrawingOptimizations) {
-        setLeafletDrawGestureSuppression(mapRef.current, false);
-      }
-      onStrokeActivityChangeRef.current?.(false);
-      syncOverlayTouchAction();
-
-      const d = drawingRef.current;
-      const startPoint = startPointRef.current;
-      const endPoint = event ? drawingPointFromInteraction(event) : lastPointRef.current;
-
-      if (endPoint && event) {
-        endPoint.pressure = extractPressure(event as PointerEvent | MouseEvent);
-      }
-
-      cancelPaintRaf();
-
-      const minD = strokeSettingsRef.current.minDistance;
-      if (isFreehandLikeStroke(d.mode)) {
-        const ad = pointerDrawEnvRef.current.androidDrawingOptimizations;
-        const maxJump = ad ? androidFreehandMaxJumpPx(drawingLayoutRef.current) : Infinity;
-        const pending = freehandQueueRef.current;
-        freehandQueueRef.current = [];
-        const cursor = lastPointRef.current;
-        if (cursor && pending.length > 0) {
-          lastPointRef.current = appendFreehandSamples(cursor, pending, minD, maxJump, d.addPoint);
-        }
-        if (endPoint && lastPointRef.current) {
-          const tailDistance = getDistance(lastPointRef.current, endPoint);
-          if (tailDistance > maxJump) {
-            lastPointRef.current = endPoint;
-          } else if (tailDistance >= minD * 0.3) {
-            interpolateSegment(lastPointRef.current, endPoint, minD).forEach(d.addPoint);
-            lastPointRef.current = endPoint;
-          }
-        }
-        d.endDrawing();
-      } else if (startPoint && endPoint && isShapeMode(d.mode) && getDistance(startPoint, endPoint) >= 3) {
-        d.addPoint(endPoint);
-        d.endDrawing();
+    // Handle object dragging
+    if (activeDragRef.current) {
+      const drag = activeDragRef.current;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      if (drag.type === "move") {
+        const deltaX = coords.x - drag.lastPoint.x;
+        const deltaY = coords.y - drag.lastPoint.y;
+        moveObjectByOverlayDelta(drag.objectId, deltaX, deltaY);
       } else {
-        freehandQueueRef.current = [];
-        d.cancelCurrentStroke();
+        resizeObjectToPoint(drag.objectId, drag.handle, coords);
       }
+      drag.lastPoint = coords;
+      dirtyRef.current = true;
+      scheduleRedraw();
+      return;
+    }
 
-      lastPointRef.current = null;
-      startPointRef.current = null;
-      activePointerIdRef.current = null;
-      paintCanvas();
-      syncOverlayTouchAction();
-    } finally {
-      if (event instanceof PointerEvent) {
-        releaseDrawingPointerCapture(event.pointerId);
+    // Handle free drawing
+    if (activePointerIdRef.current === event.pointerId && drawingRef.current.mode && shouldUsePointerForDrawing(event)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      const coalesced = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
+      for (const ev of coalesced) {
+        const c = drawingPointFromInteraction(ev as PointerEvent);
+        if (!c) continue;
+        c.pressure = extractPressure(ev as PointerEvent);
+        queueDrawingPoint(c, ev as PointerEvent);
       }
     }
-  }, [
-    cancelPaintRaf,
-    drawingPointFromInteraction,
-    paintCanvas,
-    releaseDrawingPointerCapture,
-    shouldUseFallbackEventForDrawing,
-    syncOverlayTouchAction,
-    updateHoverPreview,
-  ]);
+  }, [interactionEnabled, drawingPointFromInteraction, shouldUsePointerForDrawing, moveObjectByOverlayDelta, resizeObjectToPoint, queueDrawingPoint]);
 
-  const handlePointerDownRef = useRef(handlePointerDown);
-  handlePointerDownRef.current = handlePointerDown;
-  const handlePointerMoveRef = useRef(handlePointerMove);
-  handlePointerMoveRef.current = handlePointerMove;
-  const handlePointerUpRef = useRef(handlePointerUp);
-  handlePointerUpRef.current = handlePointerUp;
+  const handlePointerUp = useCallback((event: PointerEvent) => {
+    if (!canvasRef.current) return;
+    if (event.pointerType === "touch") {
+      activeTouchPointersRef.current.delete(event.pointerId);
+    }
+    if (activePointerIdRef.current != null && activePointerIdRef.current !== event.pointerId) return;
+
+    releasePointer(event);
+    activePointerIdRef.current = null;
+
+    // End object drag
+    if (activeDragRef.current) {
+      activeDragRef.current = null;
+      drawingRef.current.commitInteractionUpdate();
+      setLeafletDrawGestureSuppression(mapRef.current, false);
+      detachActiveWindowPointerListeners();
+      onStrokeActivityChange?.(false);
+      dirtyRef.current = true;
+      scheduleRedraw();
+      return;
+    }
+
+    // End drawing stroke
+    if (drawingRef.current.mode) {
+      if (pendingPointBufferRef.current.length > 0) {
+        const pending = pendingPointBufferRef.current;
+        pendingPointBufferRef.current = [];
+        for (const point of pending) {
+          drawingRef.current.addPoint(point);
+        }
+      }
+      drawingRef.current.endDrawing();
+      pendingPointBufferRef.current = [];
+      lastBufferedPointRef.current = null;
+      setLeafletDrawGestureSuppression(mapRef.current, false);
+      detachActiveWindowPointerListeners();
+      onStrokeActivityChange?.(false);
+      dirtyRef.current = true;
+      scheduleRedraw();
+    }
+  }, [releasePointer, onStrokeActivityChange, scheduleRedraw, detachActiveWindowPointerListeners]);
+
+  activePointerHandlersRef.current.move = handlePointerMove;
+  activePointerHandlersRef.current.up = handlePointerUp;
+  activePointerHandlersRef.current.release = releasePointer;
+  activePointerHandlersRef.current.detach = detachActiveWindowPointerListeners;
 
   useEffect(() => {
-    if (!containerRef.current || !interactionEnabled) return undefined;
+    const m = mapRef.current;
+    if (!m || !layerActive) return undefined;
 
-    const container = containerRef.current;
+    const onMapFrame = () => {
+      if (zoomAnimationRef.current) return;
+      markDirtyAndRedraw();
+    };
+    const onZoomAnim = (event: L.ZoomAnimEvent) => {
+      zoomAnimationRef.current = { center: event.center, zoom: event.zoom };
+      markDirtyAndRedraw();
+    };
+    const onZoomSettled = () => {
+      zoomAnimationRef.current = null;
+      markDirtyAndRedraw();
+    };
+    const onMapResize = () => {
+      const newBounds = calculateFullMapViewportBounds(m.getContainer());
+      if (hasViewportChanged(viewportBoundsRef.current, newBounds, 1)) {
+        viewportBoundsRef.current = newBounds;
+      }
+      markDirtyAndRedraw();
+    };
 
-    if (hasPointerEvents) {
-      const trackPointerDown = (event: PointerEvent) => {
-        if (event.pointerType === "touch") activeTouchPointersRef.current.add(event.pointerId);
-        handlePointerDownRef.current(event);
-      };
+    m.on("move", onMapFrame);
+    m.on("moveend", onMapFrame);
+    m.on("zoom", onMapFrame);
+    m.on("zoomanim", onZoomAnim);
+    m.on("zoomend", onZoomSettled);
+    m.on("viewreset", onZoomSettled);
+    m.on("resize", onMapResize);
 
-      const trackPointerMove = (event: PointerEvent) => {
-        handlePointerMoveRef.current(event);
-      };
+    return () => {
+      m.off("move", onMapFrame);
+      m.off("moveend", onMapFrame);
+      m.off("zoom", onMapFrame);
+      m.off("zoomanim", onZoomAnim);
+      m.off("zoomend", onZoomSettled);
+      m.off("viewreset", onZoomSettled);
+      m.off("resize", onMapResize);
+      zoomAnimationRef.current = null;
+    };
+  }, [layerActive, markDirtyAndRedraw]);
 
-      const trackPointerUp = (event: PointerEvent) => {
-        handlePointerUpRef.current(event);
-        if (event.pointerType === "touch") {
-          activeTouchPointersRef.current.delete(event.pointerId);
-        }
-      };
+  useEffect(() => {
+    const eventTarget = mapRef.current?.getContainer() ?? containerRef.current;
+    if (!eventTarget || !interactionEnabled) return undefined;
 
-      const onLostPointerCapture = (ev: Event) => {
-        const pe = ev as PointerEvent;
-        if (capturedPointerIdRef.current === pe.pointerId) {
-          capturedPointerIdRef.current = null;
-        }
-        if (isDrawingRef.current && activePointerIdRef.current === pe.pointerId) {
-          handlePointerUpRef.current(pe);
-        }
-      };
+    const onDown = (e: PointerEvent) => handlePointerDown(e);
+    const onMove = (e: PointerEvent) => handlePointerMove(e);
+    const onUp = (e: PointerEvent) => handlePointerUp(e);
+    const onCancel = (e: PointerEvent) => {
+      releasePointer(e);
+      if (e.pointerType === "touch") activeTouchPointersRef.current.delete(e.pointerId);
+      activePointerIdRef.current = null;
+      activeDragRef.current = null;
+      pendingPointBufferRef.current = [];
+      lastBufferedPointRef.current = null;
+      drawingRef.current.cancelCurrentStroke();
+      setLeafletDrawGestureSuppression(mapRef.current, false);
+      detachActiveWindowPointerListeners();
+      onStrokeActivityChange?.(false);
+      dirtyRef.current = true;
+      scheduleRedraw();
+    };
 
-      container.addEventListener("pointerdown", trackPointerDown as EventListener, { capture: true, passive: false });
-      container.addEventListener("pointermove", trackPointerMove as EventListener, { capture: true, passive: false });
-      container.addEventListener("pointerup", trackPointerUp as EventListener, { capture: true, passive: false });
-      container.addEventListener("pointercancel", trackPointerUp as EventListener, { capture: true, passive: false });
-      container.addEventListener("lostpointercapture", onLostPointerCapture as EventListener);
+    eventTarget.addEventListener("pointerdown", onDown as EventListener, { passive: false, capture: true });
+    eventTarget.addEventListener("pointermove", onMove as EventListener, { passive: false, capture: true });
+    eventTarget.addEventListener("pointerup", onUp as EventListener, { passive: false, capture: true });
+    eventTarget.addEventListener("pointercancel", onCancel as EventListener, { passive: false, capture: true });
 
-      return () => {
-        container.removeEventListener("pointerdown", trackPointerDown as EventListener, { capture: true });
-        container.removeEventListener("pointermove", trackPointerMove as EventListener, { capture: true });
-        container.removeEventListener("pointerup", trackPointerUp as EventListener, { capture: true });
-        container.removeEventListener("pointercancel", trackPointerUp as EventListener, { capture: true });
-        container.removeEventListener("lostpointercapture", onLostPointerCapture as EventListener);
-        activeTouchPointersRef.current.clear();
-        activePointerIdRef.current = null;
-        releaseDrawingPointerCapture();
-        onStrokeActivityChangeRef.current?.(false);
-        if (pointerDrawEnvRef.current.androidDrawingOptimizations) {
-          setLeafletDrawGestureSuppression(mapRef.current, false);
-        }
-        syncOverlayTouchAction();
-      };
-    }
+    return () => {
+      eventTarget.removeEventListener("pointerdown", onDown as EventListener, { capture: true } as AddEventListenerOptions);
+      eventTarget.removeEventListener("pointermove", onMove as EventListener, { capture: true } as AddEventListenerOptions);
+      eventTarget.removeEventListener("pointerup", onUp as EventListener, { capture: true } as AddEventListenerOptions);
+      eventTarget.removeEventListener("pointercancel", onCancel as EventListener, { capture: true } as AddEventListenerOptions);
+      onStrokeActivityChange?.(false);
+      resetLeafletDrawGestureSuppression(mapRef.current);
+      detachActiveWindowPointerListeners();
+      activePointerIdRef.current = null;
+      activeTouchPointersRef.current.clear();
+      capturedPointerTargetRef.current = null;
+      activeDragRef.current = null;
+      dirtyRef.current = true;
+      cancelRedraw();
+    };
+  }, [interactionEnabled, handlePointerDown, handlePointerMove, handlePointerUp, releasePointer, cancelRedraw, scheduleRedraw, onStrokeActivityChange, map]);
 
-    if (!hasPointerEvents) {
-      const down = (e: Event) => handlePointerDownRef.current(e as MouseEvent | TouchEvent);
-      const move = (e: Event) => handlePointerMoveRef.current(e as MouseEvent | TouchEvent);
-      const up = (e: Event) => handlePointerUpRef.current(e as MouseEvent | TouchEvent);
-
-      container.addEventListener("mousedown", down, { capture: true });
-      container.addEventListener("mousemove", move, { capture: true });
-      container.addEventListener("mouseup", up, { capture: true });
-      container.addEventListener("touchstart", down, { capture: true, passive: false });
-      container.addEventListener("touchmove", move, { capture: true, passive: false });
-      container.addEventListener("touchend", up, { capture: true });
-
-      return () => {
-        container.removeEventListener("mousedown", down, { capture: true });
-        container.removeEventListener("mousemove", move, { capture: true });
-        container.removeEventListener("mouseup", up, { capture: true });
-        container.removeEventListener("touchstart", down, { capture: true });
-        container.removeEventListener("touchmove", move, { capture: true });
-        container.removeEventListener("touchend", up, { capture: true });
-        activePointerIdRef.current = null;
-        releaseDrawingPointerCapture();
-        onStrokeActivityChangeRef.current?.(false);
-        if (pointerDrawEnvRef.current.androidDrawingOptimizations) {
-          setLeafletDrawGestureSuppression(mapRef.current, false);
-        }
-        syncOverlayTouchAction();
-      };
-    }
-  }, [hasPointerEvents, interactionEnabled, releaseDrawingPointerCapture, syncOverlayTouchAction]);
+  useEffect(() => {
+    // redraw when mode/objects change
+    dirtyRef.current = true;
+    scheduleRedraw();
+  }, [drawing.mode, drawing.objects, scheduleRedraw]);
 
   useEffect(() => {
     if (!interactionEnabled) {
-      hoverPendingRef.current = null;
-      if (hoverRafRef.current != null) {
-        window.cancelAnimationFrame(hoverRafRef.current);
-        hoverRafRef.current = null;
-      }
-      setHoverPreview(null);
-      onStrokeActivityChangeRef.current?.(false);
-      releaseDrawingPointerCapture();
-      if (pointerDrawEnvRef.current.androidDrawingOptimizations) {
-        setLeafletDrawGestureSuppression(mapRef.current, false);
-      }
-      if (isDrawingRef.current) {
-        isDrawingRef.current = false;
-        shapePreviewEndRef.current = null;
-        freehandQueueRef.current = [];
-        drawingRef.current.cancelCurrentStroke();
-        lastPointRef.current = null;
-        startPointRef.current = null;
-        activePointerIdRef.current = null;
-        cancelPaintRaf();
-        paintCanvas();
-      }
-      syncOverlayTouchAction();
+      onStrokeActivityChange?.(false);
+      dirtyRef.current = true;
+      scheduleRedraw();
     }
-  }, [cancelPaintRaf, interactionEnabled, paintCanvas, releaseDrawingPointerCapture, syncOverlayTouchAction]);
-
-  const drawingModeRef = useRef<typeof drawing.mode | undefined>(undefined);
-  useEffect(() => {
-    if (drawingModeRef.current === undefined) {
-      drawingModeRef.current = drawing.mode;
-      return;
-    }
-    if (drawingModeRef.current === drawing.mode) return;
-    drawingModeRef.current = drawing.mode;
-    if (isDrawingRef.current) {
-      isDrawingRef.current = false;
-      onStrokeActivityChangeRef.current?.(false);
-    }
-    if (pointerDrawEnvRef.current.androidDrawingOptimizations) {
-      setLeafletDrawGestureSuppression(mapRef.current, false);
-    }
-    shapePreviewEndRef.current = null;
-    freehandQueueRef.current = [];
-    drawingRef.current.cancelCurrentStroke();
-    lastPointRef.current = null;
-    startPointRef.current = null;
-    activePointerIdRef.current = null;
-    releaseDrawingPointerCapture();
-    hoverPendingRef.current = null;
-    setHoverPreview(null);
-    cancelPaintRaf();
-    schedulePaint();
-    syncOverlayTouchAction();
-  }, [cancelPaintRaf, drawing.mode, releaseDrawingPointerCapture, schedulePaint, syncOverlayTouchAction]);
-
-  useEffect(() => {
-    syncOverlayTouchAction();
-  }, [drawing.mode, interactionEnabled, layerActive, syncOverlayTouchAction]);
-
-  useEffect(() => () => {
-    if (hoverRafRef.current != null) {
-      window.cancelAnimationFrame(hoverRafRef.current);
-    }
-    cancelPaintRaf();
-  }, [cancelPaintRaf]);
+  }, [interactionEnabled, onStrokeActivityChange, scheduleRedraw]);
 
   if (!layerActive) return null;
-
-  const showPenHoverPreview = Boolean(
-    hoverPreview &&
-    drawing.mode &&
-    (hoverPreview.pointerType === "pen" || drawing.isStylusMode),
-  );
-  const penHoverPreview = showPenHoverPreview ? hoverPreview : null;
 
   const overlayCursor = interactionEnabled ? cursorForAnnotationOverlay(interactionPhase) : "inherit";
 
@@ -1251,9 +894,9 @@ function isValidCoordinateChange(
     <div
       ref={containerRef}
       onContextMenu={(event) => event.preventDefault()}
-      className="absolute z-[1090] select-none"
+      className="absolute z-[20] select-none"
       style={{
-        pointerEvents: interactionEnabled ? "auto" : "none",
+        pointerEvents: "none",
         userSelect: "none",
         WebkitUserSelect: "none",
         WebkitTouchCallout: "none",
@@ -1264,25 +907,6 @@ function isValidCoordinateChange(
         height: overlayBoundsStyle.height,
         overflow: "hidden",
       }}
-    >
-      {penHoverPreview && (
-        <div
-          className="pointer-events-none rounded-full transition-[width,height,border-color,background] duration-100"
-          style={{
-            position: "absolute",
-            left: penHoverPreview.x,
-            top: penHoverPreview.y,
-            width: penHoverPreview.inContact ? 10 : 14,
-            height: penHoverPreview.inContact ? 10 : 14,
-            transform: "translate(-50%, -50%)",
-            border: penHoverPreview.inContact ? "1px solid rgba(14,116,144,0.85)" : "1px solid rgba(15,23,42,0.55)",
-            background: penHoverPreview.inContact ? "rgba(14,116,144,0.22)" : "rgba(255,255,255,0.36)",
-            boxShadow: penHoverPreview.inContact
-              ? "0 0 0 3px rgba(14,116,144,0.18), 0 6px 14px -10px rgba(15,23,42,0.72)"
-              : "0 0 0 2px rgba(255,255,255,0.55), 0 6px 14px -11px rgba(15,23,42,0.7)",
-          }}
-        />
-      )}
-    </div>
+    />
   );
 };

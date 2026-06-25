@@ -1,7 +1,7 @@
 import type { Config } from "tailwindcss";
 
 export default {
-  darkMode: ["class"],
+  darkMode: ["selector", '[data-theme="dark"]'],
   content: ["./client/index.html", "./client/src/**/*.{js,jsx,ts,tsx}"],
   theme: {
     extend: {
@@ -11,10 +11,15 @@ export default {
         sm: ".1875rem", /* 3px */
       },
       colors: {
+        bg: "var(--bg)",
+        surface: "var(--surface)",
+        "surface-soft": "var(--surface-soft)",
+        text: "var(--text)",
+        mutedText: "var(--muted)",
         // Flat / base colors (regular buttons)
         background: "hsl(var(--background) / <alpha-value>)",
         foreground: "hsl(var(--foreground) / <alpha-value>)",
-        border: "hsl(var(--border) / <alpha-value>)",
+        border: "hsl(var(--border-hsl) / <alpha-value>)",
         input: "hsl(var(--input) / <alpha-value>)",
         card: {
           DEFAULT: "hsl(var(--card) / <alpha-value>)",
@@ -27,7 +32,7 @@ export default {
           border: "hsl(var(--popover-border) / <alpha-value>)",
         },
         primary: {
-          DEFAULT: "hsl(var(--primary) / <alpha-value>)",
+          DEFAULT: "hsl(var(--primary-hsl) / <alpha-value>)",
           foreground: "hsl(var(--primary-foreground) / <alpha-value>)",
           border: "var(--primary-border)",
         },
@@ -37,7 +42,7 @@ export default {
           border: "var(--secondary-border)",
         },
         muted: {
-          DEFAULT: "hsl(var(--muted) / <alpha-value>)",
+          DEFAULT: "hsl(var(--muted-hsl) / <alpha-value>)",
           foreground: "hsl(var(--muted-foreground) / <alpha-value>)",
           border: "var(--muted-border)",
         },

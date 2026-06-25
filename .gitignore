@@ -3,4 +3,11 @@ dist
 .DS_Store
 server/public
 vite.config.ts.*
+.env
+*.log
+*.code-workspace
+googlesheet.txt
+test-db-connection.js
+test-fetch.js
+test-sheet.ts
 *.tar.gz

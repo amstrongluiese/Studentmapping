@@ -1,7 +1,8 @@
 import Fuse from "fuse.js";
 import * as XLSX from "xlsx";
 import type { School } from "@shared/schema";
-import { api, type SchoolInput } from "@shared/routes";
+import type { SchoolInput } from "@shared/routes";
+import { requestGeocodeSchool } from "@/lib/geocodeSchoolApi";
 import { hasCoordinates, normalizeSchoolName, type SchoolStatus } from "@shared/schoolRegistry";
 
 type UploadRow = Record<string, unknown>;
@@ -163,12 +164,12 @@ export async function geocodeMissingSchools(
     processed[index] = {
       ...row,
       ...geocoded,
-      source: hasGeocodedCoordinates ? "Nominatim Auto-Locate" : row.source,
+      source: hasGeocodedCoordinates ? "Google/Geocoding Auto-Locate" : row.source,
       importStatus: hasGeocodedCoordinates ? "Auto-Located" : "Missing Coordinates",
       status: hasGeocodedCoordinates ? "Auto-Located" : "Missing Coordinates",
       verified: false,
       issues: hasGeocodedCoordinates
-        ? [...row.issues, "Coordinates auto-located with Nominatim."]
+        ? [...row.issues, "Coordinates auto-located with Google Geocoding or fallback geocoder."]
         : [...row.issues, "Coordinates still need review."],
     };
 
@@ -230,6 +231,7 @@ function normalizeUploadRow(row: UploadRow, rowNumber: number): SchoolImportPrev
     name,
     normalizedName: normalizeSchoolName(name),
     municipality: stringValue(getField(row, HEADER_ALIASES.municipality)) || "Laguna",
+    province: "Laguna",
     institutionType: stringValue(getField(row, HEADER_ALIASES.institutionType)) || "Feeder Institution",
     lat: hasLatLng ? lat : null,
     lng: hasLatLng ? lng : null,
@@ -277,24 +279,18 @@ async function geocodeSchool(row: SchoolImportPreview): Promise<{ lat: number | 
   if (cached) return cached;
 
   try {
-    const response = await fetch(api.geocode.school.path, {
-      method: api.geocode.school.method,
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ name: row.name, municipality: row.municipality || "Laguna" }),
-    });
-
-    if (!response.ok) {
+    const municipality = row.municipality?.trim() || undefined;
+    const result = await requestGeocodeSchool({ name: row.name, municipality });
+    if (!result) {
       cache[cacheKey] = { lat: null, lng: null };
       saveGeocodeCache(cache);
       return { lat: null, lng: null };
     }
-
-    const result = api.geocode.school.responses[200].parse(await response.json());
     cache[cacheKey] = { lat: result.lat, lng: result.lng };
     saveGeocodeCache(cache);
     return { lat: result.lat, lng: result.lng };
-  } catch {
+  } catch (error) {
+    console.warn("[geocode] school import lookup failed:", error);
     cache[cacheKey] = { lat: null, lng: null };
     saveGeocodeCache(cache);
     return { lat: null, lng: null };

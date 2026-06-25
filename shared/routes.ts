@@ -43,17 +43,53 @@ const integrationPreviewResponseSchema = z.object({
 });
 
 const geocodeSchoolInputSchema = z.object({
-  name: z.string().trim().min(2),
-  municipality: z.string().trim().min(1).default("Laguna"),
+  name: z
+    .string({ required_error: "School name is required" })
+    .trim()
+    .min(2, "School name is required"),
+  municipality: z
+    .union([z.string(), z.null(), z.undefined()])
+    .optional()
+    .transform((value) => {
+      if (typeof value !== "string") return undefined;
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    }),
+});
+
+const geocodeSchoolFailureSchema = z.object({
+  success: z.literal(false),
+  message: z.string(),
 });
 
 const geocodeSchoolResponseSchema = z.object({
+  success: z.literal(true).optional(),
   lat: z.number(),
   lng: z.number(),
   displayName: z.string(),
-  source: z.enum(["Nominatim", "cache", "registry", "alias"]),
+  source: z.enum(["Google Maps", "Nominatim", "cache", "registry", "alias"]),
   schoolId: z.number().optional(),
   reused: z.boolean().optional(),
+});
+
+const googlePlaceSuggestionSchema = z.object({
+  placeId: z.string(),
+  description: z.string(),
+  mainText: z.string(),
+  secondaryText: z.string(),
+  types: z.array(z.string()),
+});
+
+const resolveGooglePlaceInputSchema = z.object({
+  placeId: z.string().trim().min(1, "Google place_id is required"),
+  alias: z.string().trim().optional(),
+});
+
+const resolveGooglePlaceResponseSchema = z.object({
+  school: z.custom<typeof schools.$inferSelect>(),
+  created: z.boolean(),
+  reused: z.boolean(),
+  displayName: z.string(),
 });
 
 const studentSyncRecordSchema = z.object({
@@ -64,6 +100,10 @@ const studentSyncRecordSchema = z.object({
   lastSchoolType: z.string().trim().optional().nullable(),
   studentType: z.string().trim().optional().nullable(),
   municipality: z.string().trim().optional().nullable(),
+  province: z.string().trim().optional().nullable(),
+  yearLevel: z.string().trim().optional().nullable(),
+  enrollmentStatus: z.string().trim().optional().nullable(),
+  enrollmentDate: z.string().trim().optional().nullable(),
   rawPayload: z.record(z.unknown()).optional(),
 });
 
@@ -88,6 +128,45 @@ const mappingQueueItemSchema = z.object({
   subtitle: z.string(),
   issues: z.array(z.string()),
   schoolId: z.number().optional(),
+});
+
+const batchDeleteInputSchema = z.object({
+  ids: z.array(z.number()).min(1, "Please select at least one record to delete"),
+});
+
+const studentManagementStatusSchema = z.enum([
+  "Active",
+  "Enrolled",
+  "Pending",
+  "Dropped",
+  "Transferred",
+  "Graduated",
+  "Archived",
+]);
+
+const studentManagementUpdateSchema = z.object({
+  studentNumber: z.string().trim().min(1).optional(),
+  fullName: z.string().trim().min(1).optional(),
+  course: z.string().trim().nullable().optional(),
+  lastSchoolName: z.string().trim().min(1).optional(),
+  lastSchoolType: z.string().trim().nullable().optional(),
+  municipality: z.string().trim().min(1).optional(),
+  province: z.string().trim().min(1).optional(),
+  yearLevel: z.string().trim().nullable().optional(),
+  enrollmentStatus: studentManagementStatusSchema.optional(),
+  enrollmentDate: z.string().trim().nullable().optional(),
+});
+
+const batchStudentStatusInputSchema = z.object({
+  ids: z.array(z.number()).min(1, "Please select at least one student"),
+  enrollmentStatus: studentManagementStatusSchema,
+});
+
+const batchDeleteResponseSchema = z.object({
+  success: z.boolean(),
+  deletedCount: z.number(),
+  skippedCount: z.number(),
+  message: z.string(),
 });
 
 const verifyMappingInputSchema = z.object({
@@ -166,6 +245,15 @@ export const api = {
         404: errorSchemas.notFound,
       },
     },
+    batchDelete: {
+      method: 'POST' as const,
+      path: '/api/schools/batch-delete' as const,
+      input: batchDeleteInputSchema,
+      responses: {
+        200: batchDeleteResponseSchema,
+        400: errorSchemas.validation,
+      },
+    },
   },
   integrations: {
     preview: {
@@ -185,8 +273,36 @@ export const api = {
       input: geocodeSchoolInputSchema,
       responses: {
         200: geocodeSchoolResponseSchema,
-        400: errorSchemas.validation,
-        404: errorSchemas.notFound,
+        400: geocodeSchoolFailureSchema,
+        404: geocodeSchoolFailureSchema,
+      },
+    },
+    suggest: {
+      method: 'GET' as const,
+      path: '/api/geocode/suggest' as const,
+      responses: {
+        200: z.object({
+          registry: z.array(z.custom<typeof schools.$inferSelect>()),
+          places: z.array(googlePlaceSuggestionSchema),
+          nominatim: z.array(
+            z.object({
+              name: z.string(),
+              displayName: z.string(),
+              lat: z.number(),
+              lng: z.number(),
+            }),
+          ),
+        }),
+      },
+    },
+    resolvePlace: {
+      method: 'POST' as const,
+      path: '/api/geocode/resolve-place' as const,
+      input: resolveGooglePlaceInputSchema,
+      responses: {
+        200: resolveGooglePlaceResponseSchema,
+        400: geocodeSchoolFailureSchema,
+        404: geocodeSchoolFailureSchema,
       },
     },
   },
@@ -226,6 +342,34 @@ export const api = {
         200: z.array(z.custom<typeof studentsProcessed.$inferSelect>()),
       },
     },
+    batchDeleteStudents: {
+      method: 'POST' as const,
+      path: '/api/students/processed/batch-delete' as const,
+      input: batchDeleteInputSchema,
+      responses: {
+        200: batchDeleteResponseSchema,
+        400: errorSchemas.validation,
+      },
+    },
+    updateProcessedStudent: {
+      method: 'PATCH' as const,
+      path: '/api/students/processed/:id' as const,
+      input: studentManagementUpdateSchema,
+      responses: {
+        200: z.custom<typeof studentsProcessed.$inferSelect>(),
+        400: errorSchemas.validation,
+        404: errorSchemas.notFound,
+      },
+    },
+    batchUpdateStudentStatus: {
+      method: 'POST' as const,
+      path: '/api/students/processed/batch-status' as const,
+      input: batchStudentStatusInputSchema,
+      responses: {
+        200: batchDeleteResponseSchema,
+        400: errorSchemas.validation,
+      },
+    },
     overview: {
       method: 'GET' as const,
       path: '/api/gis/overview' as const,
@@ -244,6 +388,15 @@ export const api = {
       path: '/api/imports/logs' as const,
       responses: {
         200: z.array(z.custom<typeof imports.$inferSelect>()),
+      },
+    },
+    batchDeleteImports: {
+      method: 'POST' as const,
+      path: '/api/imports/batch-delete' as const,
+      input: batchDeleteInputSchema,
+      responses: {
+        200: batchDeleteResponseSchema,
+        400: errorSchemas.validation,
       },
     },
   },
