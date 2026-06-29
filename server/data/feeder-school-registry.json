@@ -1,8 +1,8 @@
 {
-  "updatedAt": "2026-06-29T06:42:23.205Z",
+  "updatedAt": "2026-06-29T07:57:37.750Z",
   "schools": [
     {
-      "id": 53,
+      "id": 58,
       "name": "Biñan City Senior High School - San Antonio Campus",
       "normalizedName": "binan city senior high school - san antonio campus",
       "latitude": 14.3227,
@@ -16,7 +16,7 @@
       "source": "5-School Test Dataset"
     },
     {
-      "id": 54,
+      "id": 59,
       "name": "Calamba City Senior High School",
       "normalizedName": "calamba city senior high school",
       "latitude": 14.2117,
@@ -30,7 +30,7 @@
       "source": "5-School Test Dataset"
     },
     {
-      "id": 52,
+      "id": 57,
       "name": "Laguna Senior High School",
       "normalizedName": "laguna senior high school",
       "latitude": 14.2782,
@@ -44,7 +44,7 @@
       "source": "5-School Test Dataset"
     },
     {
-      "id": 55,
+      "id": 60,
       "name": "Pagsanjan Stand-Alone Senior High School",
       "normalizedName": "pagsanjan stand-alone senior high school",
       "latitude": 14.2738,
@@ -58,7 +58,7 @@
       "source": "5-School Test Dataset"
     },
     {
-      "id": 51,
+      "id": 56,
       "name": "Trimex Colleges",
       "normalizedName": "trimex colleges",
       "latitude": 14.339063,
