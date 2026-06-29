@@ -137,16 +137,20 @@ export class DatabaseStorage implements IStorage {
     const normalizedName = school.name
       ? normalizeSchoolName(school.normalizedName || school.name)
       : school.normalizedName;
-
-    return {
+    const prepared: Partial<InsertSchool> = {
       ...school,
       ...(normalizedName ? { normalizedName } : {}),
-      municipality: school.municipality?.trim() || "Laguna",
-      province: school.province?.trim() || "Laguna",
-      institutionType: school.institutionType?.trim() || "Feeder Institution",
-      status: school.status || (school.lat != null && school.lng != null ? "Needs Review" : "Missing Coordinates"),
-      source: school.source?.trim() || "Manual Entry",
     };
+
+    if ("municipality" in school) prepared.municipality = school.municipality?.trim() || "Laguna";
+    if ("province" in school) prepared.province = school.province?.trim() || "Laguna";
+    if ("institutionType" in school) prepared.institutionType = school.institutionType?.trim() || "Feeder Institution";
+    if ("source" in school) prepared.source = school.source?.trim() || "Manual Entry";
+    if ("status" in school || "lat" in school || "lng" in school) {
+      prepared.status = school.status || (school.lat != null && school.lng != null ? "Needs Review" : "Missing Coordinates");
+    }
+
+    return prepared as T;
   }
 
   private async persistLocalRegistry() {

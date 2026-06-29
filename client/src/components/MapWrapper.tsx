@@ -36,7 +36,6 @@ import type { School } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
 import {
   ALL_PROGRAM_FILTER,
-  PROGRAM_COLORS,
   distributionMatchesFilters,
   programFilterIsActive,
   type ProgramAnalytics,
@@ -144,6 +143,7 @@ export interface DrawDisplaySettings {
 
 interface MapWrapperProps {
   onEditSchool: (school: School) => void;
+  onMarkerClick?: (cluster: SchoolCluster) => void;
   isPresenting?: boolean;
   isTouring?: boolean;
   layoutKey?: string;
@@ -163,9 +163,9 @@ interface MapWrapperProps {
   legendOffsetPx?: number;
 }
 
-type MappedSchool = ProgramSchool & { lat: number; lng: number };
+export type MappedSchool = ProgramSchool & { lat: number; lng: number };
 
-interface SchoolCluster {
+export interface SchoolCluster {
   id: string;
   lat: number;
   lng: number;
@@ -230,11 +230,10 @@ function createSchoolIcon(
     html: `
       <div class="gis-marker ${isCluster ? "gis-marker-cluster" : ""} ${showLabel ? "gis-marker-show-label" : ""}" style="--marker-color:${color}; --marker-secondary-color:${secondaryColor}; animation-delay:${Math.min(index * 35, 420)}ms">
         <div class="gis-marker-core">
-          <svg class="gis-marker-pin" viewBox="0 0 42 52" aria-hidden="true" focusable="false">
-            <path class="gis-marker-pin-fill" d="M21 50C16.1 42.7 5 31.9 5 19.6C5 10.4 12.2 3 21 3s16 7.4 16 16.6C37 31.9 25.9 42.7 21 50Z" />
-            <path class="gis-marker-pin-ring" d="M21 50C16.1 42.7 5 31.9 5 19.6C5 10.4 12.2 3 21 3s16 7.4 16 16.6C37 31.9 25.9 42.7 21 50Z" />
-            <circle class="gis-marker-pin-center" cx="21" cy="20" r="10.5" />
-          </svg>
+          <span class="gis-marker-pin" aria-hidden="true">
+            <span class="gis-marker-stem"></span>
+            <span class="gis-marker-ball"></span>
+          </span>
           <span class="gis-marker-count">${countLabel}</span>
         </div>
         ${showNameLabel && !isCluster ? `<div class="gis-marker-name-label" aria-hidden="false">${escapeHtml(primaryTitle)}</div>` : ""}
@@ -246,9 +245,9 @@ function createSchoolIcon(
       </div>
     `,
     className: "custom-leaflet-icon",
-    iconSize: [42, 42],
-    iconAnchor: [21, 21],
-    popupAnchor: [0, -18],
+    iconSize: [22, 32],
+    iconAnchor: [11, 31],
+    popupAnchor: [0, -22],
   });
 }
 
@@ -458,6 +457,7 @@ const SchoolMarker = memo(function SchoolMarker({
   cluster,
   index,
   onEditSchool,
+  onMarkerClick,
   isPresenting,
   showLabel,
   showNameLabel,
@@ -467,6 +467,7 @@ const SchoolMarker = memo(function SchoolMarker({
   cluster: SchoolCluster;
   index: number;
   onEditSchool: (school: School) => void;
+  onMarkerClick?: (cluster: SchoolCluster) => void;
   isPresenting: boolean;
   showLabel: boolean;
   showNameLabel: boolean;
@@ -483,83 +484,10 @@ const SchoolMarker = memo(function SchoolMarker({
       position={[cluster.lat, cluster.lng]}
       icon={icon}
       riseOnHover
-    >
-      <Popup className="custom-popup">
-        <div className="w-[260px] p-0">
-          <div className="border-b bg-slate-50 px-4 py-3">
-            <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-              {cluster.schools.length > 1 ? "School Cluster" : "Feeder School"}
-            </p>
-            <h4 className="mt-1 font-display text-base font-bold leading-tight">
-              {cluster.schools.length > 1 ? `${cluster.schools.length} feeder schools` : cluster.schools[0].name}
-            </h4>
-          </div>
-
-          <div className="space-y-2 p-3">
-            {cluster.schools.slice(0, 5).map((school) => (
-              <div key={school.id} className="rounded-lg border bg-white p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold">{school.name}</p>
-                    <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                      <MapPin className="h-3 w-3" />
-                      {school.municipality || "Laguna"}
-                    </p>
-                    <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                      <Building2 className="h-3 w-3" />
-                      {school.dominantProgram?.collegeName || school.institutionType || "Feeder Institution"}
-                    </p>
-                    <div className="mt-2 space-y-1 text-[11px] text-slate-600">
-                      <p>Filtered Students: <strong className="text-slate-900">{school.filteredStudentCount.toLocaleString()}</strong></p>
-                      <p>Total Students: <strong className="text-slate-900">{school.totalStudentCount.toLocaleString()}</strong></p>
-                      <p>Dominant College: <strong className="text-slate-900">{school.dominantProgram?.college || "Unknown"}</strong></p>
-                      <p>Active Program: <strong className="text-slate-900">{programFilters.program === ALL_PROGRAM_FILTER ? "All Programs" : programFilters.program}</strong></p>
-                      <p>Active Track: <strong className="text-slate-900">{programFilters.track === ALL_PROGRAM_FILTER ? "All Tracks" : programFilters.track}</strong></p>
-                    </div>
-                    {school.programDistribution.length > 0 && (
-                      <div className="mt-2 rounded-md bg-slate-50 p-2">
-                        <p className="mb-1 text-[10px] font-bold uppercase text-slate-500">Program Distribution</p>
-                        <div className="space-y-1">
-                          {school.programDistribution.slice(0, 5).map((entry) => (
-                            <div key={entry.code} className="flex items-center justify-between gap-2 text-[11px]">
-                              <span className="flex min-w-0 items-center gap-1.5">
-                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                                <span className="truncate">{entry.code}</span>
-                              </span>
-                              <strong>{entry.count}</strong>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="rounded-lg bg-primary/10 px-2 py-1 text-right text-primary">
-                    <p className="text-sm font-black">{school.filteredStudentCount}</p>
-                    <p className="text-[9px] font-bold uppercase">Filtered</p>
-                  </div>
-                </div>
-                {!isPresenting && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-3 h-8 w-full gap-2"
-                    onClick={() => onEditSchool(school)}
-                  >
-                    <Edit2 className="h-3.5 w-3.5" />
-                    Update Record
-                  </Button>
-                )}
-              </div>
-            ))}
-            {cluster.schools.length > 5 && (
-              <p className="px-1 text-xs text-muted-foreground">
-                +{cluster.schools.length - 5} more schools in this area.
-              </p>
-            )}
-          </div>
-        </div>
-      </Popup>
-    </Marker>
+      eventHandlers={{
+        click: () => onMarkerClick?.(cluster),
+      }}
+    />
   );
 });
 
@@ -606,9 +534,9 @@ function MiniStat({ label, value }: { label: string; value: string }) {
 
 function LegendItem({ color, label }: { color: string; label: string }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <span className="h-3 w-3 rounded-full shadow-sm" style={{ backgroundColor: color }} />
-      <span>{label}</span>
+      <span className="min-w-0 truncate">{label}</span>
     </div>
   );
 }
@@ -631,6 +559,9 @@ function ProgramMapLegend({
     filters.program !== ALL_PROGRAM_FILTER ? filters.program : "",
     filters.track !== ALL_PROGRAM_FILTER ? filters.track : "",
   ].filter(Boolean).join(" / ") || "All Programs";
+  const legendItems = analytics?.departmentDistribution.length
+    ? analytics.departmentDistribution
+    : [];
 
   return (
     <div className={cn("program-map-legend", open && "is-open")} style={{ "--program-legend-left": `${leftOffset}px` } as CSSProperties}>
@@ -646,18 +577,20 @@ function ProgramMapLegend({
       {open && (
         <div className="program-map-legend-body">
           <p className="program-map-legend-active">{activeLabel}</p>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-[11px]">
-            <LegendItem color={PROGRAM_COLORS.COE} label="COE" />
-            <LegendItem color={PROGRAM_COLORS.CBA} label="CBA" />
-            <LegendItem color={PROGRAM_COLORS.CCS} label="CCS" />
-            <LegendItem color={PROGRAM_COLORS.COED} label="COEd" />
-            <LegendItem color={PROGRAM_COLORS.TOURISM} label="Tourism" />
-            <LegendItem color={PROGRAM_COLORS.COA} label="COA" />
-            <LegendItem color={PROGRAM_COLORS.TESDA} label="TESDA" />
-            <LegendItem color={PROGRAM_COLORS.NA} label="NA" />
-            <LegendItem color={PROGRAM_COLORS.EIT_IT} label="EIT / IT" />
-            <LegendItem color={PROGRAM_COLORS.UNKNOWN} label="Unknown" />
-          </div>
+          {legendItems.length > 0 ? (
+            <div className="grid grid-cols-1 gap-y-1.5 text-[11px]">
+              {legendItems.map((item) => (
+                <div key={item.department} className="flex min-w-0 items-center justify-between gap-2">
+                  <LegendItem color={item.color} label={item.departmentName || item.department} />
+                  <span className="shrink-0 rounded-full bg-slate-900 px-1.5 py-0.5 text-[10px] font-black text-white">
+                    {item.count.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-md bg-slate-50 px-2 py-2 text-[11px] font-semibold text-slate-500">No active program matches.</p>
+          )}
         </div>
       )}
     </div>
@@ -716,6 +649,7 @@ function MapAnnotationClickBridge({
 
 export default function MapWrapper({
   onEditSchool,
+  onMarkerClick,
   isPresenting = false,
   isTouring = false,
   layoutKey = "default",
@@ -905,6 +839,7 @@ export default function MapWrapper({
             cluster={cluster}
             index={index}
             onEditSchool={onEditSchool}
+            onMarkerClick={onMarkerClick}
             isPresenting={isPresenting}
             showLabel={uiMapSettings.schoolLabels && !isPresenting}
             showNameLabel={uiMapSettings.schoolNameLabels && !isPresenting}

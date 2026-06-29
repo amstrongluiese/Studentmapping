@@ -248,6 +248,7 @@ export const DrawingToolbar = memo(function DrawingToolbar({
               )}
               title={isStylusMode ? "Finger guard on (stylus prioritized)" : "Finger guard off"}
               aria-pressed={isStylusMode}
+              data-active={isStylusMode ? "true" : "false"}
               onClick={() => onStylusModeChange(!isStylusMode)}
               style={iconButtonStyle}
             >

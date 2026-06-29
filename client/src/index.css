@@ -252,8 +252,8 @@
 
 .gis-marker {
   position: relative;
-  width: 42px;
-  height: 52px;
+  width: 22px;
+  height: 32px;
   display: grid;
   place-items: center;
   animation: fadeInScale 0.24s ease-out both;
@@ -263,56 +263,79 @@
 
 .gis-marker-core {
   position: relative;
-  width: 42px;
-  height: 52px;
+  width: 22px;
+  height: 32px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   transition: transform 0.18s ease;
   box-shadow: none;
 }
 
 .gis-marker-pin {
-  width: 42px;
-  height: 52px;
+  position: relative;
+  width: 22px;
+  height: 32px;
   display: block;
   overflow: visible;
-  filter: drop-shadow(0 8px 8px rgba(15, 23, 42, 0.18));
-  shape-rendering: geometricPrecision;
+  filter:
+    drop-shadow(0 7px 6px rgba(15, 23, 42, 0.24))
+    drop-shadow(0 2px 1px rgba(15, 23, 42, 0.16));
 }
 
-.gis-marker-pin-fill {
-  fill: var(--marker-color, #64748b);
+.gis-marker-stem {
+  position: absolute;
+  left: 50%;
+  top: 18px;
+  z-index: 0;
+  width: 4px;
+  height: 13px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(255, 239, 218, 0.82) 0%, rgba(151, 134, 113, 0.9) 18%, rgba(37, 34, 30, 0.94) 58%, rgba(236, 219, 194, 0.88) 100%);
+  box-shadow:
+    inset 1px 0 1px rgba(255, 255, 255, 0.45),
+    inset -2px 0 3px rgba(0, 0, 0, 0.42);
 }
 
-.gis-marker-pin-ring {
-  fill: none;
-  stroke: rgba(255, 255, 255, 0.95);
-  stroke-width: 3;
-  vector-effect: non-scaling-stroke;
-}
-
-.gis-marker-pin-center {
-  fill: rgba(255, 255, 255, 0.95);
-  stroke: color-mix(in srgb, var(--marker-color, #64748b) 72%, #0f172a);
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
+.gis-marker-ball {
+  position: absolute;
+  left: 50%;
+  top: 1px;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 64% 28%, rgba(255, 255, 255, 0.92) 0 9%, rgba(255, 255, 255, 0.35) 10% 18%, transparent 27%),
+    radial-gradient(circle at 30% 40%, color-mix(in srgb, var(--marker-color, #64748b) 88%, #ffffff) 0 16%, transparent 38%),
+    radial-gradient(circle at 68% 70%, color-mix(in srgb, var(--marker-color, #64748b) 72%, #111827) 0 12%, transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--marker-color, #64748b) 96%, #ffffff) 0%, var(--marker-color, #64748b) 52%, color-mix(in srgb, var(--marker-color, #64748b) 68%, #111827) 100%);
+  box-shadow:
+    inset 6px 5px 9px rgba(255, 255, 255, 0.24),
+    inset -8px -10px 12px rgba(15, 23, 42, 0.26),
+    0 0 0 1px color-mix(in srgb, var(--marker-color, #64748b) 72%, #0f172a),
+    0 14px 20px -15px rgba(15, 23, 42, 0.86);
 }
 
 .gis-marker-count {
   position: absolute;
   left: 50%;
-  top: 19px;
-  width: 21px;
-  height: 18px;
+  top: 11px;
+  width: 16px;
+  height: 11px;
   transform: translate(-50%, -50%);
-  color: #0f172a;
-  font-size: 9.5px;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 6px;
   font-weight: 900;
-  line-height: 18px;
+  line-height: 11px;
   text-align: center;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
-  z-index: 2;
+  text-shadow:
+    0 1px 1px rgba(15, 23, 42, 0.58),
+    0 0 6px rgba(15, 23, 42, 0.38);
+  z-index: 3;
 }
 
 .gis-marker:hover .gis-marker-core {
@@ -327,17 +350,32 @@
   stroke-width: 4;
 }
 
-.gis-marker-cluster .gis-marker-pin-fill {
-  fill: color-mix(in srgb, var(--marker-color, #64748b) 72%, var(--marker-secondary-color, #111827));
+.leaflet-marker-icon:focus-visible .gis-marker-ball,
+.leaflet-marker-icon:focus-within .gis-marker-ball,
+.gis-marker.is-selected .gis-marker-ball {
+  box-shadow:
+    inset 6px 5px 9px rgba(255, 255, 255, 0.24),
+    inset -8px -10px 12px rgba(15, 23, 42, 0.26),
+    0 0 0 2px rgba(255, 255, 255, 0.94),
+    0 0 0 4px rgba(15, 23, 42, 0.72),
+    0 14px 20px -15px rgba(15, 23, 42, 0.86);
+}
+
+.gis-marker-cluster .gis-marker-ball {
+  background:
+    radial-gradient(circle at 64% 28%, rgba(255, 255, 255, 0.92) 0 9%, rgba(255, 255, 255, 0.35) 10% 18%, transparent 27%),
+    radial-gradient(circle at 30% 40%, color-mix(in srgb, var(--marker-color, #64748b) 88%, #ffffff) 0 16%, transparent 38%),
+    radial-gradient(circle at 68% 70%, color-mix(in srgb, var(--marker-secondary-color, #111827) 72%, #111827) 0 12%, transparent 34%),
+    linear-gradient(145deg, color-mix(in srgb, var(--marker-color, #64748b) 96%, #ffffff) 0%, var(--marker-color, #64748b) 50%, var(--marker-secondary-color, #111827) 100%);
 }
 
 .gis-marker-cluster .gis-marker-core::before {
   content: "";
   position: absolute;
   left: 50%;
-  top: 19px;
-  width: 34px;
-  height: 34px;
+  top: 11px;
+  width: 24px;
+  height: 24px;
   border-radius: 999px;
   border: 2px solid var(--marker-secondary-color, #94a3b8);
   transform: translate(-50%, -50%);
@@ -760,9 +798,14 @@
 }
 
 .gis-drawing-toolbar button[data-active="true"] {
-  background: linear-gradient(142deg, #0f766e 0%, #0d9488 58%, #14b8a6 100%);
-  color: #ffffff;
-  box-shadow: 0 16px 26px -18px rgba(15, 23, 42, 0.9), 0 0 0 4px rgba(20, 184, 166, 0.12);
+  background: linear-gradient(142deg, #b91c1c 0%, #dc2626 58%, #ef4444 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 16px 26px -18px rgba(127, 29, 29, 0.78), 0 0 0 4px rgba(239, 68, 68, 0.16);
+}
+
+.gis-drawing-toolbar button[data-active="true"] svg {
+  color: #ffffff !important;
+  stroke: currentColor;
 }
 
 .gis-drawing-toolbar button svg {

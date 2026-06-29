@@ -54,6 +54,19 @@ export async function ensureGisSchema() {
     );
   `);
 
+  await pool.query(`
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS import_id INTEGER;
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS student_number TEXT NOT NULL DEFAULT '';
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS course TEXT;
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS last_school_name TEXT NOT NULL DEFAULT '';
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS last_school_type TEXT;
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS student_type TEXT;
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS municipality TEXT NOT NULL DEFAULT 'Laguna';
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS raw_payload TEXT;
+    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP NOT NULL DEFAULT NOW();
+  `);
+
   const legacyProcessed = await pool.query(`
     SELECT column_name FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'students_processed';

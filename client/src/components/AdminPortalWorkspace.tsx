@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import type { Import, School, StudentProcessed } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
-import { ALL_PROGRAM_FILTER, recognizeProgram } from "@shared/programIntelligence";
+import { ALL_PROGRAM_FILTER, PROGRAM_CATALOG, normalizeStudentProgramValue, recognizeProgram } from "@shared/programIntelligence";
 import { formatAdmissionLabel, parseStudentNumberTag } from "@/lib/adminPortalUtils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -299,7 +299,7 @@ export function AdminPortalWorkspace({
     try {
       const res = await apiRequest("PATCH", `/api/students/processed/${editingStudent.id}`, {
         ...studentEditDraft,
-        course: studentEditDraft.course || null,
+        course: normalizeStudentProgramValue(studentEditDraft.course),
         lastSchoolType: studentEditDraft.lastSchoolType || null,
         yearLevel: studentEditDraft.yearLevel || null,
         enrollmentDate: studentEditDraft.enrollmentDate || null,
@@ -388,9 +388,9 @@ export function AdminPortalWorkspace({
 
   const studentRows = useMemo(() => processedStudents.map((student) => enrichStudentRow(student, schools)), [processedStudents, schools]);
   const studentOptions = useMemo(() => ({
-    colleges: uniqueSorted(studentRows.map((row) => row.college).filter(Boolean)),
-    programs: uniqueSorted(studentRows.map((row) => row.program).filter(Boolean)),
-    tracks: uniqueSorted(studentRows.map((row) => row.track || "General")),
+    colleges: uniqueSorted([...PROGRAM_CATALOG.map((program) => program.college), ...studentRows.map((row) => row.college)].filter(Boolean)),
+    programs: uniqueSorted([...PROGRAM_CATALOG.map((program) => program.program), ...studentRows.map((row) => row.program)].filter(Boolean)),
+    tracks: uniqueSorted([...PROGRAM_CATALOG.map((program) => program.track || "General"), ...studentRows.map((row) => row.track || "General")]),
     years: uniqueSorted(studentRows.map((row) => row.yearLevel || "Unspecified")),
     municipalities: uniqueSorted(studentRows.map((row) => row.municipality || "Laguna")),
     statuses: STUDENT_STATUSES,

@@ -44,6 +44,7 @@ import MapWrapper, {
   type AnalyticsVisibility,
   type DrawDisplaySettings,
   type MapDisplaySettings,
+  type SchoolCluster,
 } from "@/components/MapWrapper";
 import { SchoolFormDialog } from "@/components/SchoolFormDialog";
 import { useDeleteSchool, useSchools, useUpdateSchool } from "@/hooks/use-schools";
@@ -161,6 +162,7 @@ export default function Dashboard() {
     track: ALL_PROGRAM_FILTER,
   });
   const [programSort, setProgramSort] = usePersistentState(`${STORAGE_PREFIX}:program-sort`, "filtered-desc");
+  const [selectedCluster, setSelectedCluster] = useState<SchoolCluster | null>(null);
 
   const presentationStageRef = useRef<HTMLDivElement>(null);
   const presentationBrowserFullscreenRef = useRef(false);
@@ -420,6 +422,14 @@ export default function Dashboard() {
                 </div>
 
                 <div className="space-y-2.5">
+                  {selectedCluster && (
+                    <SelectedClusterPanel
+                      cluster={selectedCluster}
+                      programFilters={programFilters}
+                      onClose={() => setSelectedCluster(null)}
+                      onEditSchool={openEditSchool}
+                    />
+                  )}
                   <Metric label="Mapped Schools" value={mappedSchools.length} />
                   <Metric label="Enrollees" value={totalStudents} />
                   <Metric label="Municipalities" value={municipalityCount} />
@@ -461,6 +471,14 @@ export default function Dashboard() {
               </div>
 
               <div className="space-y-2.5">
+                {selectedCluster && (
+                  <SelectedClusterPanel
+                    cluster={selectedCluster}
+                    programFilters={programFilters}
+                    onClose={() => setSelectedCluster(null)}
+                    onEditSchool={openEditSchool}
+                  />
+                )}
                 <Metric label="Mapped Schools" value={mappedSchools.length} />
                 <Metric label="Enrollees" value={totalStudents} />
                 <Metric label="Municipalities" value={municipalityCount} />
@@ -508,11 +526,12 @@ export default function Dashboard() {
                 onDrawSettingChange={updateDrawSetting}
                 onPresentationChange={applyPresentation}
                 onTouringChange={setIsTouring}
+                onMarkerClick={setSelectedCluster}
                 onOpenSettings={() => {
                   setMainTab("admin");
                   setAdminTab("settings");
                 }}
-                schools={programSchools}
+                schools={sortedProgramSchools}
                 programFilters={programFilters}
                 programAnalytics={programAnalytics}
                 legendOffsetPx={legendOffsetPx}
@@ -648,6 +667,90 @@ export default function Dashboard() {
         initialData={editingSchool}
         defaultCoordinates={selectedCoords}
       />
+    </div>
+  );
+}
+
+function SelectedClusterPanel({
+  cluster,
+  programFilters,
+  onClose,
+  onEditSchool,
+}: {
+  cluster: SchoolCluster;
+  programFilters: ProgramFilters;
+  onClose: () => void;
+  onEditSchool: (school: School) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white shadow-[0_10px_28px_-16px_rgba(15,23,42,0.22)] overflow-hidden flex flex-col mb-1">
+      <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            {cluster.schools.length > 1 ? "School Cluster" : "Feeder School"}
+          </p>
+          <h4 className="mt-1 font-display text-base font-bold leading-tight">
+            {cluster.schools.length > 1 ? `${cluster.schools.length} feeder schools` : cluster.schools[0].name}
+          </h4>
+        </div>
+        <Button variant="ghost" size="icon" className="-mr-2 text-slate-500 hover:text-slate-900" onClick={onClose}>
+          <XCircle className="h-5 w-5" />
+        </Button>
+      </div>
+
+      <div className="space-y-2 p-3 max-h-[60vh] overflow-y-auto">
+        {cluster.schools.map((school) => (
+          <div key={school.id} className="rounded-lg border bg-slate-50/50 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold">{school.name}</p>
+                <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                  <MapIcon className="h-3 w-3" />
+                  {school.municipality || "Laguna"}
+                </p>
+                <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                  <Layers className="h-3 w-3" />
+                  {school.dominantProgram?.collegeName || school.institutionType || "Feeder Institution"}
+                </p>
+                <div className="mt-2 space-y-1 text-[11px] text-slate-600">
+                  <p>Filtered Students: <strong className="text-slate-900">{school.filteredStudentCount.toLocaleString()}</strong></p>
+                  <p>Total Students: <strong className="text-slate-900">{school.totalStudentCount.toLocaleString()}</strong></p>
+                  <p>Dominant College: <strong className="text-slate-900">{school.dominantProgram?.college || "Unknown"}</strong></p>
+                </div>
+                {school.programDistribution.length > 0 && (
+                  <div className="mt-2 rounded-md bg-white p-2 border border-slate-100 shadow-sm">
+                    <p className="mb-1 text-[10px] font-bold uppercase text-slate-500">Program Distribution</p>
+                    <div className="space-y-1">
+                      {school.programDistribution.slice(0, 5).map((entry) => (
+                        <div key={entry.code} className="flex items-center justify-between gap-2 text-[11px]">
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                            <span className="truncate">{entry.code}</span>
+                          </span>
+                          <strong>{entry.count}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="shrink-0 rounded-lg bg-primary/10 px-2 py-1 text-right text-primary">
+                <p className="text-sm font-black">{school.filteredStudentCount}</p>
+                <p className="text-[9px] font-bold uppercase">Filtered</p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3 h-8 w-full gap-2 bg-white"
+              onClick={() => onEditSchool(school)}
+            >
+              <Edit className="h-3.5 w-3.5" />
+              Update Record
+            </Button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1465,7 +1568,7 @@ function sortProgramSchools(schools: ProgramSchool[], sort: string) {
     if (sort === "name-asc") return a.name.localeCompare(b.name);
     if (sort === "municipality-asc") return (a.municipality || "").localeCompare(b.municipality || "") || a.name.localeCompare(b.name);
     if (sort === "college-asc") {
-      return (a.dominantProgram?.collegeName || "Unknown").localeCompare(b.dominantProgram?.collegeName || "Unknown") || a.name.localeCompare(b.name);
+      return (a.dominantDepartment?.departmentName || a.dominantProgram?.collegeName || "Unknown").localeCompare(b.dominantDepartment?.departmentName || b.dominantProgram?.collegeName || "Unknown") || a.name.localeCompare(b.name);
     }
     return b.filteredStudentCount - a.filteredStudentCount;
   });

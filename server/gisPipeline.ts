@@ -16,6 +16,7 @@ import {
   isEligibleForGisMapping,
 } from "@shared/gisClassification";
 import { getSchoolStatus, hasCoordinates, normalizeSchoolName, type SchoolStatus } from "@shared/schoolRegistry";
+import { normalizeStudentProgramValue } from "@shared/programRecognition";
 import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import type { InsertSchool } from "@shared/schema";
 
@@ -329,7 +330,7 @@ export async function syncStudents(
         rawId: raw.id,
         studentNumber,
         fullName: record.fullName.trim(),
-        course: record.course?.trim() || null,
+        course: normalizeStudentProgramValue(record.course),
         admissionType,
         lastSchoolName,
         lastSchoolType,
@@ -429,7 +430,7 @@ export async function updateProcessedStudent(
   };
   if (updates.studentNumber) updateValues.studentNumber = updates.studentNumber.trim();
   if (updates.fullName) updateValues.fullName = updates.fullName.trim();
-  if (updates.course !== undefined) updateValues.course = updates.course?.trim() || null;
+  if (updates.course !== undefined) updateValues.course = normalizeStudentProgramValue(updates.course);
   if (updates.lastSchoolName) updateValues.lastSchoolName = updates.lastSchoolName.trim();
   if (updates.lastSchoolType !== undefined) updateValues.lastSchoolType = updates.lastSchoolType?.trim() || null;
   if (updates.municipality) updateValues.municipality = updates.municipality.trim();

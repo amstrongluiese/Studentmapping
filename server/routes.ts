@@ -1,7 +1,16 @@
 import type { Express } from "express";
 import type { Server } from "http";
+import { getDb } from "./db";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
+import {
+  imports,
+  mappingLogs,
+  schoolAliases,
+  schools as schoolsTable,
+  studentsProcessed,
+  studentsRaw,
+} from "@shared/schema";
 import { z } from "zod";
 import { previewIntegrationSource } from "./integrationService";
 import {
@@ -375,12 +384,133 @@ export async function registerRoutes(
   return httpServer;
 }
 
-async function seedDatabase() {
-  const existingSchools = await storage.getSchools();
-  if (existingSchools.length === 0) {
-    await storage.createSchool({ name: "Laguna Science National High School", municipality: "Santa Cruz", province: "Laguna", institutionType: "Public High School", lat: 14.1610, lng: 121.2335, altitude: 18, studentCount: 150, verified: true, status: "Verified", source: "Seed Registry" });
-    await storage.createSchool({ name: "Los Banos National High School", municipality: "Los Banos", province: "Laguna", institutionType: "Public High School", lat: 14.1706, lng: 121.2216, altitude: 22, studentCount: 300, verified: true, status: "Verified", source: "Seed Registry" });
-    await storage.createSchool({ name: "Pedro Guevara Memorial National High School", municipality: "Santa Cruz", province: "Laguna", institutionType: "Public High School", lat: 14.2758, lng: 121.4168, altitude: 12, studentCount: 420, verified: true, status: "Verified", source: "Seed Registry" });
-    await storage.createSchool({ name: "Calamba Bayside National High School", municipality: "Calamba", province: "Laguna", institutionType: "Public High School", lat: 14.2255, lng: 121.1711, altitude: 15, studentCount: 85, verified: true, status: "Verified", source: "Seed Registry" });
+export async function seedDatabase() {
+  const db = getDb();
+  await db.delete(mappingLogs);
+  await db.delete(schoolAliases);
+  await db.delete(studentsProcessed);
+  await db.delete(studentsRaw);
+  await db.delete(imports);
+  await db.delete(schoolsTable);
+
+  const testSchools = [
+    { name: "Trimex Colleges", lat: 14.339063, lng: 121.085351, municipality: "Biñan", province: "Laguna" },
+    { name: "Laguna Senior High School", lat: 14.2782, lng: 121.4163, municipality: "Santa Cruz", province: "Laguna" },
+    { name: "Biñan City Senior High School - San Antonio Campus", lat: 14.3227, lng: 121.0793, municipality: "Biñan", province: "Laguna" },
+    { name: "Calamba City Senior High School", lat: 14.2117, lng: 121.1653, municipality: "Calamba", province: "Laguna" },
+    { name: "Pagsanjan Stand-Alone Senior High School", lat: 14.2738, lng: 121.4558, municipality: "Pagsanjan", province: "Laguna" },
+  ];
+
+  for (const school of testSchools) {
+    await storage.createSchool({
+      ...school,
+      institutionType: school.name.includes("Colleges") ? "College" : "Senior High School",
+      altitude: null,
+      studentCount: 0,
+      verified: true,
+      status: "Verified",
+      source: "5-School Test Dataset",
+    });
   }
+
+  const seededSchools = await storage.getSchools();
+  const schoolByName = new Map(seededSchools.map((school) => [school.name, school]));
+  const [importRow] = await db.insert(imports).values({
+    source: "5-school-test-dataset",
+    status: "completed",
+    importedCount: 5,
+    failedCount: 0,
+    completedAt: new Date(),
+    notes: "Reliable 5-school / 5-student map test dataset",
+  }).returning();
+
+  const testStudents = [
+    {
+      studentNumber: "26-0001",
+      fullName: "Juan Dela Cruz",
+      course: "BSIT MWD",
+      lastSchoolName: "Trimex Colleges",
+      lastSchoolType: "College",
+      studentType: "Freshman",
+      municipality: "Biñan",
+      province: "Laguna",
+      enrollmentStatus: "Active",
+    },
+    {
+      studentNumber: "26-0002",
+      fullName: "Maria Santos",
+      course: "BSBA FM",
+      lastSchoolName: "Laguna Senior High School",
+      lastSchoolType: "Senior High School",
+      studentType: "Freshman",
+      municipality: "Santa Cruz",
+      province: "Laguna",
+      enrollmentStatus: "Active",
+    },
+    {
+      studentNumber: "26-0003",
+      fullName: "Carlo Reyes",
+      course: "BSCPE",
+      lastSchoolName: "Biñan City Senior High School - San Antonio Campus",
+      lastSchoolType: "Senior High School",
+      studentType: "Freshman",
+      municipality: "Biñan",
+      province: "Laguna",
+      enrollmentStatus: "Active",
+    },
+    {
+      studentNumber: "26-0004",
+      fullName: "Angela Cruz",
+      course: "BTVTE FSM",
+      lastSchoolName: "Calamba City Senior High School",
+      lastSchoolType: "Senior High School",
+      studentType: "Freshman",
+      municipality: "Calamba",
+      province: "Laguna",
+      enrollmentStatus: "Active",
+    },
+    {
+      studentNumber: "26-0005",
+      fullName: "Mark Garcia",
+      course: "BSA",
+      lastSchoolName: "Pagsanjan Stand-Alone Senior High School",
+      lastSchoolType: "Senior High School",
+      studentType: "Freshman",
+      municipality: "Pagsanjan",
+      province: "Laguna",
+      enrollmentStatus: "Active",
+    },
+  ];
+
+  for (const student of testStudents) {
+    const [raw] = await db.insert(studentsRaw).values({
+      importId: importRow.id,
+      studentNumber: student.studentNumber,
+      fullName: student.fullName,
+      course: student.course,
+      lastSchoolName: student.lastSchoolName,
+      lastSchoolType: student.lastSchoolType,
+      studentType: student.studentType,
+      municipality: student.municipality,
+      rawPayload: JSON.stringify(student),
+    }).returning();
+
+    await db.insert(studentsProcessed).values({
+      rawId: raw.id,
+      studentNumber: student.studentNumber,
+      fullName: student.fullName,
+      course: student.course,
+      admissionType: "Freshman",
+      lastSchoolName: student.lastSchoolName,
+      lastSchoolType: student.lastSchoolType,
+      schoolId: schoolByName.get(student.lastSchoolName)?.id ?? null,
+      municipality: student.municipality,
+      province: student.province,
+      enrollmentStatus: student.enrollmentStatus,
+      importedSource: "API",
+      mappingStatus: "verified",
+    });
+  }
+
+  await recomputeSchoolStudentCounts();
 }
