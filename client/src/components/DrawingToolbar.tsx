@@ -169,7 +169,14 @@ export const DrawingToolbar = memo(function DrawingToolbar({
                 </Button>
               </PopoverTrigger>
             </ToolbarItemLabel>
-            <PopoverContent side="left" align="start" sideOffset={10} collisionPadding={16} className="z-[1300] w-56 p-3">
+            <PopoverContent 
+              side="left" 
+              align="start" 
+              sideOffset={10} 
+              collisionPadding={16} 
+              className="z-[10000] w-56 border-white/40 bg-white/60 p-3 shadow-xl backdrop-blur-xl"
+              container={typeof document !== 'undefined' ? document.getElementById('gis-presentation-stage') : null}
+            >
               <div className="grid grid-cols-4 gap-2">
                 {PRESET_COLORS.map((preset) => (
                   <button
@@ -209,7 +216,14 @@ export const DrawingToolbar = memo(function DrawingToolbar({
                 </Button>
               </PopoverTrigger>
             </ToolbarItemLabel>
-            <PopoverContent side="left" align="start" sideOffset={10} collisionPadding={16} className="z-[1300] w-56 p-4">
+            <PopoverContent 
+              side="left" 
+              align="start" 
+              sideOffset={10} 
+              collisionPadding={16} 
+              className="z-[10000] w-56 border-white/40 bg-white/60 p-4 shadow-xl backdrop-blur-xl"
+              container={typeof document !== 'undefined' ? document.getElementById('gis-presentation-stage') : null}
+            >
               <Slider value={[width]} onValueChange={([value]) => onWidthChange(value)} min={1} max={14} step={0.5} />
               <div className="mt-4 flex items-center justify-between">
                 {[2, 4, 7, 10].map((preset) => (

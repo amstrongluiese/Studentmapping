@@ -518,11 +518,11 @@ export function AdminPortalWorkspace({
         onValueChange={(v) => onSectionChange(v as AdminPortalSection)}
         className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:gap-4 md:p-4"
       >
-        <aside className="shrink-0 rounded-2xl border border-border/80 bg-surface/80 p-1.5 shadow-[0_22px_60px_-42px_rgba(15,23,42,0.55)] backdrop-blur-md md:w-60 md:p-2">
+        <aside className="shrink-0 rounded-2xl border border-white/50 bg-white/40 p-1.5 shadow-lg backdrop-blur-md md:w-60 md:p-2">
           <TabsList
             aria-label="Admin sections"
             className={cn(
-              "flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-border/70 bg-surface-soft/70 p-1 text-muted-foreground shadow-inner shadow-white/30 backdrop-blur-md",
+              "flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-white/40 bg-white/50 p-1 text-muted-foreground shadow-inner shadow-white/50 backdrop-blur-md",
               "md:flex-col md:overflow-visible md:bg-transparent md:p-0 md:shadow-none",
             )}
           >
@@ -547,7 +547,7 @@ export function AdminPortalWorkspace({
           </TabsList>
         </aside>
 
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border/80 bg-surface/85 shadow-[0_28px_80px_-50px_rgba(15,23,42,0.55)] backdrop-blur-md">
+        <main className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/50 bg-white/40 shadow-xl backdrop-blur-md">
 
         <TabsContent value="overview" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
           <ScrollArea className="h-full">
@@ -592,7 +592,7 @@ export function AdminPortalWorkspace({
               <StudentStat title="Archived Students" value={studentStats.archived} tone="slate" />
             </div>
 
-            <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="flex flex-col gap-2 rounded-xl border border-white/50 bg-white/50 p-3 shadow-sm backdrop-blur-md">
               <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
                 <div className="relative min-w-0 flex-1">
                   <Input

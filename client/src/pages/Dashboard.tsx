@@ -12,6 +12,7 @@ import {
   KeyRound,
   Layers,
   Map as MapIcon,
+  MapPin,
   MonitorPlay,
   Palette,
   Plus,
@@ -146,12 +147,19 @@ export default function Dashboard() {
   const [analyticsVisibility, setAnalyticsVisibility] = usePersistentState<AnalyticsVisibility>(`${STORAGE_PREFIX}:analytics`, defaultAnalyticsVisibility);
   const [presentationSettings, setPresentationSettings] = usePersistentState(`${STORAGE_PREFIX}:presentation`, defaultPresentationSettings);
   const [importSettings, setImportSettings] = usePersistentState(`${STORAGE_PREFIX}:import`, defaultImportSettings);
-  const [systemSettings, setSystemSettings] = usePersistentState(`${STORAGE_PREFIX}:system`, defaultSystemSettings);
+  const [systemSettings, setSystemSettings] = usePersistentState(`${STORAGE_PREFIX}:system`, { ...defaultSystemSettings, theme: "light" as const });
   const [isPresenting, setIsPresenting] = usePersistentState(`${STORAGE_PREFIX}:presenting`, false);
   const [isTouring, setIsTouring] = usePersistentState(`${STORAGE_PREFIX}:touring`, false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(`${STORAGE_PREFIX}:sidebar-collapsed`, false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  useEffect(() => {
+    // Force light theme
+    if (theme !== "light") {
+      setTheme("light");
+    }
+  }, [theme, setTheme]);
   const [editingSchool, setEditingSchool] = useState<School | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [registrySearch, setRegistrySearch] = useState("");
@@ -324,8 +332,8 @@ export default function Dashboard() {
         <div className="pointer-events-none">
           <div
             className={cn(
-              "pointer-events-auto flex h-[60px] w-full shrink-0 items-center justify-between gap-3 border-b border-border/70",
-              "bg-surface/82 px-3 shadow-[0_16px_40px_-34px_rgba(15,23,42,0.55)] backdrop-blur-md",
+              "pointer-events-auto flex h-[60px] w-full shrink-0 items-center justify-between gap-3 border-b border-white/40",
+              "bg-white/40 px-3 shadow-sm backdrop-blur-md",
             )}
           >
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
@@ -333,13 +341,13 @@ export default function Dashboard() {
                 className="grid h-8 w-8 shrink-0 place-items-center text-slate-800"
                 aria-hidden
               >
-                <MapIcon className="h-3.5 w-3.5" strokeWidth={1.5} />
+                <MapPin className="h-4 w-4" strokeWidth={1.5} />
               </div>
             </div>
             <Tabs value={mainTab} onValueChange={(value) => setMainTab(value as MainTab)} className="flex shrink-0 items-center">
               <TabsList
                 aria-label="Primary navigation"
-                className="inline-flex h-9 items-center gap-1 rounded-full border border-border/80 bg-surface-soft/70 p-1 text-muted-foreground shadow-[0_18px_48px_-34px_rgba(15,23,42,0.55)] backdrop-blur-md"
+                className="inline-flex h-9 items-center gap-1 rounded-full border border-white/50 bg-white/50 p-1 text-muted-foreground shadow-sm backdrop-blur-md"
               >
                 <TabsTrigger
                   value="map"
@@ -381,6 +389,7 @@ export default function Dashboard() {
           )}
         >
             <div
+              id="gis-presentation-stage"
               ref={presentationStageRef}
               className={cn(
                 "presentation-stage relative flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-100",
@@ -388,22 +397,22 @@ export default function Dashboard() {
                 isPresenting && "min-h-[100dvh]",
               )}
             >
-            {!isPresenting && (
+            {!mobileSidebarOpen && (
               <Button
                 variant="secondary"
                 size="icon"
-                className="absolute left-3 top-3 z-[1140] h-9 w-9 rounded-full border border-slate-200 bg-white text-slate-700 shadow-md hover:bg-slate-50 lg:hidden"
+                className="absolute left-3 top-3 z-[1140] h-9 w-9 rounded-full border border-white/30 bg-white/40 text-slate-800 shadow-md backdrop-blur-md hover:bg-white/50 lg:hidden"
                 onClick={() => setMobileSidebarOpen(true)}
-                title="Open sidebar"
-                aria-label="Open sidebar"
+                title="Open menu"
+                aria-label="Open menu"
               >
                 <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.5} />
               </Button>
             )}
 
-            {!isPresenting && mobileSidebarOpen && (
+            {mobileSidebarOpen && (
               <aside
-                className="absolute left-0 top-0 z-[1160] flex h-full w-[min(320px,calc(100vw-1rem))] flex-col overflow-y-auto border-r border-slate-200 bg-slate-50 p-3 shadow-xl lg:hidden"
+                className="absolute left-0 top-0 z-[1160] flex h-full w-[min(320px,calc(100vw-1rem))] flex-col overflow-y-auto border-r border-white/30 bg-white/40 p-3 shadow-xl backdrop-blur-md lg:hidden"
                 data-gis-draw-occlude="left"
               >
                 <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
@@ -434,7 +443,7 @@ export default function Dashboard() {
                   <Metric label="Enrollees" value={totalStudents} />
                   <Metric label="Municipalities" value={municipalityCount} />
                   <AnalyticsInsightPanel analytics={programAnalytics} />
-                  <div className="rounded-xl border-b-2 border-b-slate-300/80 bg-white px-4 py-3 shadow-[0_10px_28px_-16px_rgba(15,23,42,0.22)] backdrop-blur-[18px]">
+                  <div className="rounded-xl border border-white/50 bg-white/40 px-4 py-3 shadow-sm backdrop-blur-md">
                     <p className="text-[10px] font-bold uppercase tracking-wide text-slate-700/85">Last Updated</p>
                     <p className="mt-1 truncate font-mono text-xs text-slate-900">{lastUpdatedMs ? new Date(lastUpdatedMs).toLocaleString() : "-"}</p>
                   </div>
@@ -450,9 +459,9 @@ export default function Dashboard() {
               </aside>
             )}
 
-            {!isPresenting && !sidebarCollapsed && (
+            {!sidebarCollapsed && (
               <aside
-                className="absolute left-0 top-0 z-[45] hidden h-full w-[320px] flex-col overflow-y-auto border-r border-slate-200 bg-slate-50 p-3 shadow-sm lg:flex"
+                className="absolute left-0 top-0 z-[45] hidden h-full w-[320px] flex-col overflow-y-auto border-r border-white/30 bg-white/40 p-3 shadow-sm backdrop-blur-md lg:flex"
                 data-gis-draw-occlude="left"
               >
               <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
@@ -477,6 +486,7 @@ export default function Dashboard() {
                     programFilters={programFilters}
                     onClose={() => setSelectedCluster(null)}
                     onEditSchool={openEditSchool}
+                    isGlassmorphic={true}
                   />
                 )}
                 <Metric label="Mapped Schools" value={mappedSchools.length} />
@@ -500,17 +510,28 @@ export default function Dashboard() {
             )}
 
             <main className="relative flex h-full min-h-0 flex-1 flex-col">
-              {!isPresenting && sidebarCollapsed && (
+              {sidebarCollapsed && (
                 <Button
                   variant="secondary"
                   size="icon"
-                  className="absolute left-3 top-3 z-[1140] hidden h-9 w-9 rounded-full border border-slate-200 bg-white text-slate-700 shadow-md hover:bg-slate-50 lg:inline-flex"
+                  className="absolute left-3 top-3 z-[1140] hidden h-9 w-9 rounded-full border border-white/30 bg-white/40 text-slate-800 shadow-md backdrop-blur-md hover:bg-white/50 lg:inline-flex"
                   onClick={() => setSidebarCollapsed(false)}
                   title="Expand sidebar"
                   aria-label="Expand sidebar"
                 >
                   <ChevronRight className="h-3.5 w-3.5" strokeWidth={1.5} />
                 </Button>
+              )}
+              
+              {isPresenting && sidebarCollapsed && selectedCluster && (
+                <div className="absolute left-4 top-4 z-[9999] w-[320px] rounded-xl border border-white/30 bg-white/40 p-0 shadow-lg backdrop-blur-md">
+                  <SelectedClusterPanel
+                    cluster={selectedCluster}
+                    programFilters={programFilters}
+                    onClose={() => setSelectedCluster(null)}
+                    onEditSchool={openEditSchool}
+                  />
+                </div>
               )}
               <MapWrapper
                 onEditSchool={openEditSchool}
@@ -683,62 +704,75 @@ function SelectedClusterPanel({
   onEditSchool: (school: School) => void;
 }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white shadow-[0_10px_28px_-16px_rgba(15,23,42,0.22)] overflow-hidden flex flex-col mb-1">
-      <div className="flex items-center justify-between border-b bg-slate-50 px-4 py-3">
+    <div className="rounded-xl border-transparent bg-transparent overflow-hidden flex flex-col mb-1">
+      <div className="flex items-start justify-between border-b border-white/20 bg-white/20 px-4 py-3">
         <div>
-          <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             {cluster.schools.length > 1 ? "School Cluster" : "Feeder School"}
           </p>
-          <h4 className="mt-1 font-display text-base font-bold leading-tight">
+          <h4 className="mt-0.5 font-display text-sm font-bold leading-tight text-slate-900">
             {cluster.schools.length > 1 ? `${cluster.schools.length} feeder schools` : cluster.schools[0].name}
           </h4>
         </div>
-        <Button variant="ghost" size="icon" className="-mr-2 text-slate-500 hover:text-slate-900" onClick={onClose}>
-          <XCircle className="h-5 w-5" />
+        <Button variant="ghost" size="icon" className="-mr-2 -mt-1 h-8 w-8 text-slate-400 hover:bg-slate-200/50 hover:text-slate-700" onClick={onClose}>
+          <XCircle className="h-4 w-4" />
         </Button>
       </div>
 
       <div className="space-y-2 p-3 max-h-[60vh] overflow-y-auto">
         {cluster.schools.map((school) => (
-          <div key={school.id} className="rounded-lg border bg-slate-50/50 p-3">
+          <div key={school.id} className="rounded-lg border border-white/30 bg-white/40 p-3 backdrop-blur-sm">
             <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold">{school.name}</p>
-                <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  <MapIcon className="h-3 w-3" />
-                  {school.municipality || "Laguna"}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-bold text-slate-900">{school.name}</p>
+                <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-600">
+                  <MapIcon className="mt-[2px] h-3 w-3 shrink-0" />
+                  <span className="leading-snug">{school.municipality || "Laguna"}</span>
                 </p>
-                <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
-                  <Layers className="h-3 w-3" />
-                  {school.dominantProgram?.collegeName || school.institutionType || "Feeder Institution"}
+                <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-600">
+                  <Layers className="mt-[2px] h-3 w-3 shrink-0" />
+                  <span className="leading-snug">{school.dominantProgram?.collegeName || school.institutionType || "Feeder Institution"}</span>
                 </p>
-                <div className="mt-2 space-y-1 text-[11px] text-slate-600">
-                  <p>Filtered Students: <strong className="text-slate-900">{school.filteredStudentCount.toLocaleString()}</strong></p>
-                  <p>Total Students: <strong className="text-slate-900">{school.totalStudentCount.toLocaleString()}</strong></p>
-                  <p>Dominant College: <strong className="text-slate-900">{school.dominantProgram?.college || "Unknown"}</strong></p>
-                </div>
-                {school.programDistribution.length > 0 && (
-                  <div className="mt-2 rounded-md bg-white p-2 border border-slate-100 shadow-sm">
-                    <p className="mb-1 text-[10px] font-bold uppercase text-slate-500">Program Distribution</p>
-                    <div className="space-y-1">
-                      {school.programDistribution.slice(0, 5).map((entry) => (
-                        <div key={entry.code} className="flex items-center justify-between gap-2 text-[11px]">
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                            <span className="truncate">{entry.code}</span>
-                          </span>
-                          <strong>{entry.count}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
-              <div className="shrink-0 rounded-lg bg-primary/10 px-2 py-1 text-right text-primary">
-                <p className="text-sm font-black">{school.filteredStudentCount}</p>
-                <p className="text-[9px] font-bold uppercase">Filtered</p>
+              <div className="flex shrink-0 min-w-[3.5rem] flex-col items-center justify-center rounded-lg bg-primary/10 px-2.5 py-1.5 text-center text-primary">
+                <p className="text-sm font-black leading-none">{school.filteredStudentCount}</p>
+                <p className="mt-1 text-[9px] font-bold uppercase leading-none">Filtered</p>
               </div>
             </div>
+
+            <div className="mt-3 space-y-1.5 text-[11px] text-slate-600">
+              <div className="flex items-center justify-between border-b border-black/5 pb-1">
+                <span className="font-medium text-slate-500">Filtered Students</span>
+                <strong className="text-slate-900">{school.filteredStudentCount.toLocaleString()}</strong>
+              </div>
+              <div className="flex items-center justify-between border-b border-black/5 pb-1">
+                <span className="font-medium text-slate-500">Total Students</span>
+                <strong className="text-slate-900">{school.totalStudentCount.toLocaleString()}</strong>
+              </div>
+              <div className="flex items-center justify-between pb-1">
+                <span className="font-medium text-slate-500">Dominant College</span>
+                <strong className="truncate max-w-[120px] text-slate-900 ml-2" title={school.dominantProgram?.college || "Unknown"}>
+                  {school.dominantProgram?.college || "Unknown"}
+                </strong>
+              </div>
+            </div>
+            
+            {school.programDistribution.length > 0 && (
+              <div className="mt-3 rounded-md border border-white/40 bg-white/50 p-2 shadow-sm">
+                <p className="mb-1 text-[10px] font-bold uppercase text-slate-500">Program Distribution</p>
+                <div className="space-y-1">
+                  {school.programDistribution.slice(0, 5).map((entry) => (
+                    <div key={entry.code} className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
+                        <span className="truncate">{entry.code}</span>
+                      </span>
+                      <strong>{entry.count}</strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -998,7 +1032,7 @@ function ProgramFiltersPanel({
   };
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className="rounded-xl border border-white/50 bg-white/40 p-3 shadow-sm backdrop-blur-md">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Program Intelligence</p>
@@ -1071,7 +1105,7 @@ function SidebarSelect({
     <div className="space-y-1">
       <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</Label>
       <Select value={value} onValueChange={onValueChange}>
-        <SelectTrigger className="h-8 rounded-md bg-slate-50 text-xs">
+        <SelectTrigger className="h-8 rounded-md border-white/50 bg-white/50 text-xs shadow-sm backdrop-blur-sm hover:bg-white/70">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -1087,14 +1121,14 @@ function SidebarSelect({
 
 function ProgramSchoolList({ schools }: { schools: ProgramSchool[] }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+    <div className="rounded-xl border border-white/50 bg-white/40 p-3 shadow-sm backdrop-blur-md">
       <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">Schools</p>
       <div className="max-h-[310px] space-y-1.5 overflow-y-auto pr-1">
         {schools.length === 0 ? (
-          <p className="rounded-md bg-slate-50 px-2 py-3 text-center text-xs text-slate-500">No schools match the active filters.</p>
+          <p className="rounded-md border border-white/40 bg-white/50 px-2 py-3 text-center text-xs text-slate-500 shadow-sm backdrop-blur-sm">No schools match the active filters.</p>
         ) : (
           schools.slice(0, 80).map((school) => (
-            <div key={school.id} className="flex items-center gap-2 rounded-md border border-slate-100 bg-slate-50 px-2 py-2">
+            <div key={school.id} className="flex items-center gap-2 rounded-md border border-white/40 bg-white/50 px-2 py-2 shadow-sm backdrop-blur-sm transition-colors hover:bg-white/70">
               <span
                 className="h-3 w-3 shrink-0 rounded-full"
                 style={{ backgroundColor: school.dominantProgram?.color || "#cbd5e1" }}
@@ -1473,7 +1507,7 @@ function ReferralStatusBadge({ status }: { status: string }) {
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border-b-2 border-b-slate-300/70 bg-white/85 px-3.5 py-3 shadow-[0_10px_26px_-16px_rgba(15,23,42,0.2)] backdrop-blur-md">
+    <div className="rounded-xl border border-white/50 bg-white/40 px-3.5 py-3 shadow-sm backdrop-blur-md">
       <p className="text-[10px] font-bold uppercase tracking-wide text-slate-700/85">{label}</p>
       <p className="mt-1 text-2xl font-black text-slate-950">{value.toLocaleString()}</p>
     </div>
@@ -1482,7 +1516,7 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 function AnalyticsInsightPanel({ analytics }: { analytics: ProgramAnalytics }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+    <div className="rounded-xl border border-white/50 bg-white/40 px-3 py-2.5 shadow-sm backdrop-blur-md">
       <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Analytics</p>
       <div className="mt-2 space-y-1.5 text-xs">
         <div className="flex items-start justify-between gap-2">

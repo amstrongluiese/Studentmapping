@@ -841,8 +841,8 @@ export default function MapWrapper({
             onEditSchool={onEditSchool}
             onMarkerClick={onMarkerClick}
             isPresenting={isPresenting}
-            showLabel={uiMapSettings.schoolLabels && !isPresenting}
-            showNameLabel={uiMapSettings.schoolNameLabels && !isPresenting}
+            showLabel={uiMapSettings.schoolLabels}
+            showNameLabel={uiMapSettings.schoolNameLabels}
             zoom={zoom}
             programFilters={programFilters}
           />
@@ -879,7 +879,7 @@ export default function MapWrapper({
         <ProgramMapLegend analytics={programAnalytics} filters={programFilters} leftOffset={legendOffsetPx} />
       )}
 
-      <div className="absolute right-4 top-4 z-[1130] flex flex-col items-end gap-2" data-gis-draw-occlude="right">
+      <div className="absolute right-4 top-4 z-[9999] flex flex-col items-end gap-2" data-gis-draw-occlude="right">
         <div className="flex items-center gap-2">
           {onMapSettingChange && (
             <Popover>
@@ -895,9 +895,14 @@ export default function MapWrapper({
                   <Layers className="control-button-icon h-4 w-4" strokeWidth={1.5} />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent align="end" className="w-72 p-3" sideOffset={10}>
+              <PopoverContent 
+                align="end" 
+                className="z-[10000] w-72 p-3 border-white/40 bg-white/60 shadow-xl backdrop-blur-xl" 
+                sideOffset={10} 
+                container={typeof document !== 'undefined' ? document.getElementById('gis-presentation-stage') : null}
+              >
                 <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-600">Map appearance</p>
-                <div className="mb-3 flex gap-1 rounded-lg bg-slate-100 p-0.5">
+                <div className="mb-3 flex gap-1 rounded-lg border border-white/40 bg-white/50 p-0.5 shadow-inner">
                   <Button
                     type="button"
                     variant={uiMapSettings.mapTheme === "light" ? "secondary" : "ghost"}
