@@ -7,11 +7,21 @@ import { testDatabaseConnection, initializeDatabase } from "./db";
 
 dotenv.config();
 
-if (!process.env.GOOGLE_MAPS_API_KEY?.trim()) {
-  console.warn(
-    "[startup] GOOGLE_MAPS_API_KEY is not configured. Google Places autocomplete and geocoding will be limited or fallback to local data.",
-  );
+import { loadMasterDirectory } from "./schoolMatcher";
+import { syncExcelToJSON } from "./syncMasterDirectory";
+import * as fs from "fs";
+import * as path from "path";
+
+// Auto-sync JSON from Excel on boot if JSON doesn't exist
+const excelPath = path.join(process.cwd(), "Geocoded_Schools_2026.xlsx");
+const jsonPath = path.join(process.cwd(), "server", "data", "schools_directory.json");
+
+if (fs.existsSync(excelPath) && !fs.existsSync(jsonPath)) {
+  console.log("[startup] Generating initial schools_directory.json from Excel...");
+  syncExcelToJSON(excelPath);
 }
+
+loadMasterDirectory();
 
 const app = express();
 const httpServer = createServer(app);

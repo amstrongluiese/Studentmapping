@@ -7,17 +7,10 @@ import { Building2, MapPin, Search } from "lucide-react";
 import { hasCoordinates } from "@shared/schoolRegistry";
 
 export type SchoolSearchSelection =
-  | { type: "registry"; school: School }
-  | {
-      type: "googlePlace";
-      placeId: string;
-      name: string;
-      displayName: string;
-    };
+  | { type: "registry"; school: School };
 
 type SuggestionRow =
   | { id: string; kind: "registry"; school: School; label: string; sub: string }
-  | { id: string; kind: "googlePlace"; placeId: string; name: string; displayName: string; label: string; sub: string }
   | { id: string; kind: "custom"; name: string; label: string; sub: string };
 
 export interface SchoolNameAutocompleteProps {
@@ -108,23 +101,10 @@ export function SchoolNameAutocomplete({
           .filter(Boolean)
           .join(" · "),
       }));
-      const placeRows: SuggestionRow[] = data.places.map((item, index) => ({
-        id: `google-place-${item.placeId}-${index}`,
-        kind: "googlePlace",
-        placeId: item.placeId,
-        name: item.mainText,
-        displayName: item.description,
-        label: item.mainText,
-        sub: item.secondaryText || item.description,
-      }));
+      
       const seen = new Set<string>();
-      const uniqueRows = [...registryRows, ...placeRows].filter((row) => {
-        const key =
-          row.kind === "registry"
-            ? `registry-${row.school.id}`
-            : row.kind === "googlePlace"
-            ? `google-${row.placeId}`
-            : row.id;
+      const uniqueRows = registryRows.filter((row) => {
+        const key = `registry-${row.school.id}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -176,14 +156,6 @@ export function SchoolNameAutocomplete({
     if (row.kind === "registry") {
       onValueChange(row.school.name);
       onSelect({ type: "registry", school: row.school });
-    } else if (row.kind === "googlePlace") {
-      onValueChange(row.name);
-      onSelect({
-        type: "googlePlace",
-        placeId: row.placeId,
-        name: row.name,
-        displayName: row.displayName,
-      });
     } else {
       onValueChange(row.name);
     }

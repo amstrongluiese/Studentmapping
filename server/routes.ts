@@ -28,9 +28,12 @@ import {
 import {
   geocodeSchoolPreview,
   lookupSchoolInRegistry,
-  resolveGooglePlaceSchool,
-  suggestGoogleSchoolPlaces,
 } from "./geocodeLookup";
+import multer from "multer";
+import { getMasterDirectory, reloadMasterDirectory } from "./schoolMatcher";
+import { syncExcelToJSON } from "./syncMasterDirectory";
+
+const upload = multer({ dest: "server/uploads/" });
 
 export async function registerRoutes(
   httpServer: Server,
@@ -50,6 +53,27 @@ export async function registerRoutes(
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
       throw err;
+    }
+  });
+
+  // Admin Master Directory Routes
+  app.get("/api/admin/directory", (req, res) => {
+    res.json(getMasterDirectory());
+  });
+
+  app.post("/api/admin/directory/import", upload.single("file"), (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: "No file uploaded" });
+    }
+    
+    try {
+      // Sync excel to JSON and reload memory
+      const schools = syncExcelToJSON(req.file.path);
+      reloadMasterDirectory(schools);
+      res.json({ success: true, count: schools.length, message: `Successfully imported ${schools.length} schools into the master directory.` });
+    } catch (err) {
+      console.error("[directory/import] error:", err);
+      res.status(500).json({ success: false, message: err instanceof Error ? err.message : "Failed to import directory" });
     }
   });
 
@@ -170,7 +194,7 @@ export async function registerRoutes(
   app.get(api.geocode.suggest.path, async (req, res) => {
     const q = String(req.query.q || "").trim();
     if (q.length < 2) {
-      return res.json({ registry: [], places: [], nominatim: [] });
+      return res.json({ registry: [] });
     }
 
     const exactLocal = await lookupSchoolInRegistry(q);
@@ -179,26 +203,7 @@ export async function registerRoutes(
       ? [exactLocal.school, ...registryMatches.filter((school) => school.id !== exactLocal.school.id)]
       : registryMatches;
 
-    const places = exactLocal ? [] : await suggestGoogleSchoolPlaces(q, 6);
-    res.json({ registry, places, nominatim: [] });
-  });
-
-  app.post(api.geocode.resolvePlace.path, async (req, res) => {
-    try {
-      const input = api.geocode.resolvePlace.input.parse(req.body);
-      const result = await resolveGooglePlaceSchool(input.placeId, input.alias);
-      if (!result) {
-        return res.status(404).json({
-          success: false as const,
-          message: "No Google Places details found for this school.",
-        });
-      }
-      res.json(result);
-    } catch (err) {
-      if (err instanceof z.ZodError) return res.status(400).json({ success: false as const, message: err.errors[0].message });
-      if (err instanceof Error) return res.status(500).json({ success: false as const, message: err.message });
-      throw err;
-    }
+    res.json({ registry });
   });
 
   app.get(api.mapping.queue.path, async (_req, res) => {

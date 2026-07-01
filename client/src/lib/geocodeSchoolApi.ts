@@ -27,7 +27,7 @@ export function buildGeocodeRequestBody(input: GeocodeSchoolRequest): { name: st
 }
 
 /**
- * Server-side geocode proxy with registry reuse, Google Geocoding, and Nominatim fallback.
+ * Server-side matching proxy using local database and JSON Master Directory.
  * Returns null on 404 (no match) instead of throwing.
  */
 export async function requestGeocodeSchool(

@@ -62,8 +62,9 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { TableToolbar } from "@/components/ui/table-toolbar";
 import { cn } from "@/lib/utils";
+import { AdminSchoolDirectory } from "./AdminSchoolDirectory";
 
-export type AdminPortalSection = "overview" | "students" | "feed" | "queue" | "registry" | "import-logs" | "settings";
+export type AdminPortalSection = "overview" | "students" | "feed" | "queue" | "registry" | "directory" | "import-logs" | "settings";
 
 export interface AdminPortalWorkspaceProps {
   section: AdminPortalSection;
@@ -113,6 +114,7 @@ function sectionTabs(queueCount: number): { value: AdminPortalSection; label: st
     { value: "feed", label: "Live Student Feed", short: "Feed", icon: <Activity className="h-4 w-4" /> },
     { value: "queue", label: queueLabel, short: queueShort, icon: <ListChecks className="h-4 w-4" /> },
     { value: "registry", label: "School Registry", short: "Registry", icon: <Database className="h-4 w-4" /> },
+    { value: "directory", label: "Master Directory", short: "Directory", icon: <Database className="h-4 w-4" /> },
     { value: "import-logs", label: "Import Logs", short: "Logs", icon: <ClipboardList className="h-4 w-4" /> },
     { value: "settings", label: "Settings", short: "Settings", icon: <Settings2 className="h-4 w-4" /> },
   ];
@@ -965,6 +967,10 @@ export function AdminPortalWorkspace({
           <ScrollArea className="h-full">
             <div className="p-3 sm:p-4">{renderSchoolRegistry()}</div>
           </ScrollArea>
+        </TabsContent>
+
+        <TabsContent value="directory" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+          <AdminSchoolDirectory />
         </TabsContent>
 
         <TabsContent value="import-logs" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">

@@ -72,25 +72,7 @@ const geocodeSchoolResponseSchema = z.object({
   reused: z.boolean().optional(),
 });
 
-const googlePlaceSuggestionSchema = z.object({
-  placeId: z.string(),
-  description: z.string(),
-  mainText: z.string(),
-  secondaryText: z.string(),
-  types: z.array(z.string()),
-});
 
-const resolveGooglePlaceInputSchema = z.object({
-  placeId: z.string().trim().min(1, "Google place_id is required"),
-  alias: z.string().trim().optional(),
-});
-
-const resolveGooglePlaceResponseSchema = z.object({
-  school: z.custom<typeof schools.$inferSelect>(),
-  created: z.boolean(),
-  reused: z.boolean(),
-  displayName: z.string(),
-});
 
 const studentSyncRecordSchema = z.object({
   studentNumber: z.string().trim().min(1),
@@ -283,26 +265,7 @@ export const api = {
       responses: {
         200: z.object({
           registry: z.array(z.custom<typeof schools.$inferSelect>()),
-          places: z.array(googlePlaceSuggestionSchema),
-          nominatim: z.array(
-            z.object({
-              name: z.string(),
-              displayName: z.string(),
-              lat: z.number(),
-              lng: z.number(),
-            }),
-          ),
         }),
-      },
-    },
-    resolvePlace: {
-      method: 'POST' as const,
-      path: '/api/geocode/resolve-place' as const,
-      input: resolveGooglePlaceInputSchema,
-      responses: {
-        200: resolveGooglePlaceResponseSchema,
-        400: geocodeSchoolFailureSchema,
-        404: geocodeSchoolFailureSchema,
       },
     },
   },

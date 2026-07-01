@@ -1,34 +1,17 @@
 import { storage } from "./storage";
-import { geocodeSchoolWithNominatim } from "./geocodeService";
-import { getGooglePlaceDetails, suggestGoogleSchools, type GooglePlaceSuggestion } from "./googlePlacesService";
 import { schoolAliases, schools, type School } from "@shared/schema";
 import { hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
 import { getDb } from "./db";
 import { eq } from "drizzle-orm";
+import { matchSchool, type MasterSchool } from "./schoolMatcher";
 
 export interface GeocodeLookupResult {
   lat: number;
   lng: number;
   displayName: string;
-  source: "registry" | "alias" | "Google Maps" | "Nominatim" | "cache";
+  source: "registry" | "alias" | "master-directory" | "cache";
   schoolId?: number;
   reused: boolean;
-}
-
-export interface NominatimSuggestion {
-  name: string;
-  displayName: string;
-  lat: number;
-  lng: number;
-}
-
-export interface GoogleSchoolSuggestion extends GooglePlaceSuggestion {}
-
-export interface GooglePlaceResolveResult {
-  school: School;
-  created: boolean;
-  reused: boolean;
-  displayName: string;
 }
 
 async function findSchoolByAlias(normalized: string): Promise<School | undefined> {
@@ -45,16 +28,7 @@ async function findSchoolByAlias(normalized: string): Promise<School | undefined
   }
 }
 
-async function findSchoolByPlaceId(placeId: string): Promise<School | undefined> {
-  const [school] = await getDb()
-    .select()
-    .from(schools)
-    .where(eq(schools.placeId, placeId))
-    .limit(1);
-  return school;
-}
-
-async function createAlias(alias: string | undefined, schoolId: number) {
+export async function createAlias(alias: string | undefined, schoolId: number) {
   const aliasNormalized = normalizeSchoolName(alias || "");
   if (!aliasNormalized) return;
 
@@ -83,7 +57,32 @@ export async function lookupSchoolInRegistry(schoolName: string): Promise<{
   return null;
 }
 
-/** Geocode for UI preview only — no database writes. */
+async function syncMasterSchoolToDb(master: MasterSchool, rawName: string): Promise<School> {
+  const normalized = normalizeSchoolName(master.school_name);
+  
+  // Create in database so it gets an integer ID for studentsProcessed foreign key
+  const school = await storage.createSchool({
+    name: master.school_name,
+    normalizedName: normalized,
+    municipality: master.municipality,
+    province: master.province,
+    institutionType: master.school_type,
+    lat: master.latitude || undefined,
+    lng: master.longitude || undefined,
+    verified: true,
+    status: "Verified",
+    source: "Master Directory",
+    studentCount: 0,
+    altitude: null,
+  });
+
+  // Create alias mapping back to the raw name that triggered this match
+  await createAlias(rawName, school.id);
+  
+  return school;
+}
+
+/** Geocode for UI preview and mapping pipeline. */
 export async function geocodeSchoolPreview(
   name: string,
   municipality?: string,
@@ -91,6 +90,7 @@ export async function geocodeSchoolPreview(
   const trimmed = name.trim();
   if (trimmed.length < 2) return null;
 
+  // 1. Try local DB registry/aliases first
   const match = await lookupSchoolInRegistry(trimmed);
   if (match && hasCoordinates(match.school)) {
     return {
@@ -103,112 +103,21 @@ export async function geocodeSchoolPreview(
     };
   }
 
-  const geocoded = await geocodeSchoolWithNominatim(trimmed, municipality);
-  if (!geocoded) return null;
-
-  return {
-    lat: geocoded.lat,
-    lng: geocoded.lng,
-    displayName: geocoded.displayName,
-    source: geocoded.source,
-    reused: false,
-  };
-}
-
-export async function suggestGoogleSchoolPlaces(query: string, limit = 5): Promise<GoogleSchoolSuggestion[]> {
-  const q = query.trim();
-  if (q.length < 2) return [];
-  return suggestGoogleSchools(q, limit);
-}
-
-export async function resolveGooglePlaceSchool(
-  placeId: string,
-  alias?: string,
-): Promise<GooglePlaceResolveResult | null> {
-  const details = await getGooglePlaceDetails(placeId);
-  if (!details) return null;
-
-  const normalized = normalizeSchoolName(details.name);
-  const aliasNormalized = normalizeSchoolName(alias || "");
-  const byPlaceId = await findSchoolByPlaceId(details.placeId);
-  const byName = normalized ? await lookupSchoolInRegistry(details.name) : null;
-  const byAlias = aliasNormalized ? await lookupSchoolInRegistry(alias!) : null;
-  const existing = byPlaceId || byName?.school || byAlias?.school;
-
-  const updates = {
-    name: details.name,
-    normalizedName: normalized,
-    municipality: details.municipality,
-    province: details.province,
-    institutionType: details.types.includes("university") ? "University" : "School",
-    lat: details.lat,
-    lng: details.lng,
-    verified: true,
-    status: "Verified" as const,
-    source: "Google Places",
-    placeId: details.placeId,
-  };
-
-  if (existing) {
-    const school = await storage.updateSchool(existing.id, {
-      ...updates,
-      studentCount: existing.studentCount,
-    });
-    await createAlias(alias, school.id);
-    if (aliasNormalized && aliasNormalized !== normalized) await createAlias(details.name, school.id);
-    return { school, created: false, reused: true, displayName: details.displayName };
+  // 2. Try Master JSON Directory
+  const masterMatch = matchSchool(trimmed);
+  if (masterMatch && masterMatch.latitude && masterMatch.longitude) {
+    const syncedSchool = await syncMasterSchoolToDb(masterMatch, trimmed);
+    
+    return {
+      lat: masterMatch.latitude,
+      lng: masterMatch.longitude,
+      displayName: masterMatch.school_name,
+      source: "master-directory",
+      schoolId: syncedSchool.id,
+      reused: false,
+    };
   }
 
-  const school = await storage.createSchool({
-    ...updates,
-    studentCount: 0,
-    altitude: null,
-  });
-  await createAlias(alias, school.id);
-  return { school, created: true, reused: false, displayName: details.displayName };
-}
-
-/** Nominatim suggestions for autocomplete — no database writes. */
-export async function suggestSchoolsFromNominatim(
-  query: string,
-  limit = 5,
-): Promise<NominatimSuggestion[]> {
-  const q = query.trim();
-  if (q.length < 2) return [];
-
-  const url = new URL("https://nominatim.openstreetmap.org/search");
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("limit", String(limit));
-  url.searchParams.set("countrycodes", "ph");
-  url.searchParams.set("q", `${q}, Laguna, Philippines`);
-
-  const response = await fetch(url, {
-    headers: {
-      "User-Agent": "StudentMappingSystem/1.0 (feeder-school-geocoding)",
-      Accept: "application/json",
-    },
-  });
-
-  if (!response.ok) return [];
-
-  const rows = (await response.json()) as Array<{
-    lat?: string;
-    lon?: string;
-    display_name?: string;
-    name?: string;
-  }>;
-
-  return rows
-    .map((row) => {
-      const lat = Number(row.lat);
-      const lng = Number(row.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-      return {
-        name: row.name || q,
-        displayName: row.display_name || row.name || q,
-        lat,
-        lng,
-      };
-    })
-    .filter((row): row is NominatimSuggestion => row != null);
+  // No match found in the master directory or local DB
+  return null;
 }

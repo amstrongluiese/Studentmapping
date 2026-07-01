@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { geocodeSchoolWithNominatim, primeGeocodeCache } from "./geocodeService";
+import { matchSchool, type MasterSchool } from "./schoolMatcher";
 import { storage } from "./storage";
 import {
   imports,
@@ -145,11 +145,11 @@ async function findSchoolByAlias(normalized: string): Promise<School | undefined
   }
 }
 
-export async function resolveSchoolCoordinates(
+export async function resolveOrGeocodeSchool(
   schoolName: string,
   municipality?: string,
   opts?: { allowNominatim?: boolean; importId?: number },
-): Promise<{ school: School; source: "registry" | "alias" | "nominatim" | "created" }> {
+): Promise<{ school: School; source: "registry" | "alias" | "master-directory" | "created" }> {
   const registryMunicipality = municipality?.trim() || "Laguna";
   const normalized = normalizeSchoolName(schoolName);
   if (!normalized) {
@@ -168,85 +168,76 @@ export async function resolveSchoolCoordinates(
 
   const base = existing || viaAlias;
 
-  if (base && hasCoordinates(base)) {
-    return { school: base, source: base === viaAlias ? "alias" : "registry" };
-  }
+  // Try matching against Master JSON Directory
+  const masterMatch = matchSchool(schoolName);
+  
+  if (masterMatch && masterMatch.latitude && masterMatch.longitude) {
+    if (base) {
+      const updated = await storage.updateSchool(base.id, {
+        lat: masterMatch.latitude,
+        lng: masterMatch.longitude,
+        status: "Auto-Located",
+        source: "Master Directory",
+      });
+      await logMapping("geocode", `Matched ${schoolName} to Master Directory`, {
+        importId: opts?.importId,
+        schoolId: updated.id,
+      });
+      return { school: updated, source: "master-directory" };
+    }
 
-  if (!opts?.allowNominatim) {
-    if (base) return { school: base, source: "registry" };
+    // Insert new from master
     const created = await storage.createSchool({
-      name: schoolName.trim(),
-      normalizedName: normalized,
-      municipality: registryMunicipality,
-      province: "Laguna",
-      institutionType: inferLastSchoolTypeFromName(schoolName) || "Feeder Institution",
-      lat: null,
-      lng: null,
+      name: masterMatch.school_name,
+      normalizedName: normalizeSchoolName(masterMatch.school_name),
+      municipality: masterMatch.municipality || registryMunicipality,
+      province: masterMatch.province || "Laguna",
+      institutionType: masterMatch.school_type || "Feeder Institution",
+      lat: masterMatch.latitude,
+      lng: masterMatch.longitude,
       studentCount: 0,
-      verified: false,
-      status: "Missing Coordinates",
-      source: "GIS Pipeline",
+      verified: true,
+      status: "Verified",
+      source: "Master Directory",
     });
-    return { school: created, source: "created" };
-  }
+    
+    // Create an alias back to the raw name that triggered this match
+    if (normalized !== created.normalizedName) {
+      try {
+        await getDb().insert(schoolAliases).values({ aliasNormalized: normalized, schoolId: created.id });
+      } catch {
+        // Ignore if alias already exists
+      }
+    }
 
-  const geocoded = await geocodeSchoolWithNominatim(schoolName, municipality);
-  if (!geocoded) {
-    if (base) return { school: base, source: "registry" };
-    const created = await storage.createSchool({
-      name: schoolName.trim(),
-      normalizedName: normalized,
-      municipality: registryMunicipality,
-      province: "Laguna",
-      institutionType: inferLastSchoolTypeFromName(schoolName) || "Feeder Institution",
-      lat: null,
-      lng: null,
-      studentCount: 0,
-      verified: false,
-      status: "Missing Coordinates",
-      source: "GIS Pipeline",
-    });
-    await logMapping("geocode_miss", `No geocoding match for ${schoolName}`, {
+    await logMapping("geocode", `Created and matched ${schoolName} via Master Directory`, {
       importId: opts?.importId,
       schoolId: created.id,
     });
-    return { school: created, source: "created" };
+    return { school: created, source: "master-directory" };
   }
 
-  if (base) {
-    const updated = await storage.updateSchool(base.id, {
-      lat: geocoded.lat,
-      lng: geocoded.lng,
-      status: "Auto-Located",
-      source: geocoded.source === "Google Maps" ? "Google Geocoding GIS Pipeline" : "Nominatim GIS Pipeline",
-    });
-    primeGeocodeCache(schoolName, municipality, geocoded.lat, geocoded.lng, geocoded.displayName);
-    await logMapping("geocode", `Geolocated ${schoolName} via ${geocoded.source}`, {
-      importId: opts?.importId,
-      schoolId: updated.id,
-    });
-    return { school: updated, source: "nominatim" };
-  }
-
+  // Not in DB and not in Master Directory -> Missing Coordinates
+  if (base) return { school: base, source: "registry" };
+  
   const created = await storage.createSchool({
     name: schoolName.trim(),
     normalizedName: normalized,
     municipality: registryMunicipality,
     province: "Laguna",
     institutionType: inferLastSchoolTypeFromName(schoolName) || "Feeder Institution",
-    lat: geocoded.lat,
-    lng: geocoded.lng,
+    lat: null,
+    lng: null,
     studentCount: 0,
     verified: false,
-    status: "Auto-Located",
-    source: geocoded.source === "Google Maps" ? "Google Geocoding GIS Pipeline" : "Nominatim GIS Pipeline",
+    status: "Missing Coordinates",
+    source: "GIS Pipeline",
   });
-  primeGeocodeCache(schoolName, municipality, geocoded.lat, geocoded.lng, geocoded.displayName);
-  await logMapping("geocode", `Created and geolocated ${schoolName} via ${geocoded.source}`, {
+  await logMapping("geocode_miss", `No master directory match for ${schoolName}`, {
     importId: opts?.importId,
     schoolId: created.id,
   });
-  return { school: created, source: "nominatim" };
+  return { school: created, source: "created" };
 }
 
 export async function syncStudents(

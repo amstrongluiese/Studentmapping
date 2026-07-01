@@ -3,7 +3,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { api } from "@shared/routes";
 import { requestGeocodeSchoolOrThrow } from "@/lib/geocodeSchoolApi";
-import { resolveGooglePlaceSchool } from "@/lib/googleSchoolSearchApi";
 import type { School as SchoolRecord } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
 import {
@@ -152,35 +151,6 @@ export function SchoolFormDialog({
       } else {
         setGeocodePreview(`${school.name} — select Locate to fetch coordinates`);
       }
-      return;
-    }
-
-    setIsResolvingPlace(true);
-    try {
-      const result = await resolveGooglePlaceSchool(selection.placeId, selection.name);
-      const school = result.school;
-      setSelectedSavedSchoolId(school.id);
-      form.setValue("name", school.name, { shouldDirty: true });
-      form.setValue("municipality", school.municipality || "Laguna", { shouldDirty: true });
-      form.setValue("province", school.province || "Laguna", { shouldDirty: true });
-      form.setValue("institutionType", school.institutionType || "School", { shouldDirty: true });
-      form.setValue("lat", school.lat ?? 14.1667, { shouldDirty: true, shouldValidate: true });
-      form.setValue("lng", school.lng ?? 121.25, { shouldDirty: true, shouldValidate: true });
-      form.setValue("status", "Verified", { shouldDirty: true });
-      form.setValue("source", "Google Places", { shouldDirty: true });
-      setGeocodePreview(result.displayName);
-      void schoolsQuery.refetch();
-      toast({
-        title: result.created ? "School pinned" : "Verified school reused",
-        description: `${school.name} is saved in the local GIS registry.`,
-      });
-    } catch (err) {
-      selectionConfirmedRef.current = false;
-      setSelectedSavedSchoolId(null);
-      const message = err instanceof Error ? err.message : "Unable to verify Google Places school.";
-      toast({ title: "Google Places lookup failed", description: message, variant: "destructive" });
-    } finally {
-      setIsResolvingPlace(false);
     }
   };
 
@@ -257,7 +227,7 @@ export function SchoolFormDialog({
               {initialData ? "Edit Origin School" : "Map New Origin School"}
             </DialogTitle>
             <DialogDescription>
-              Search the local registry first, then Google Places when needed. Schools are not created while you type.
+              Search the local master directory first. Schools are not created while you type.
             </DialogDescription>
           </DialogHeader>
 
@@ -284,7 +254,7 @@ export function SchoolFormDialog({
                       inputClassName="h-10"
                     />
                     <FormDescription className="text-xs">
-                      Use arrow keys, touch, or Enter to select. Google lookup runs only after selection or Locate.
+                      Use arrow keys, touch, or Enter to select.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -411,7 +381,7 @@ export function SchoolFormDialog({
                       Geolocation (on demand)
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Google Places selections are saved locally. Locate previews coordinates until you save.
+                      Locate previews coordinates until you save.
                     </p>
                     {geocodePreview ? (
                       <p className="mt-2 text-xs font-medium text-slate-700">Match: {geocodePreview}</p>
