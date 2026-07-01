@@ -157,8 +157,12 @@ export const DrawingCanvas = ({
     };
 
     if (anim && typeof animatedProjector._getNewPixelOrigin === "function") {
-      const pixelOrigin = animatedProjector._getNewPixelOrigin(anim.center, anim.zoom);
-      return m.project(latLng, anim.zoom).subtract(pixelOrigin);
+      try {
+        const pixelOrigin = animatedProjector._getNewPixelOrigin(anim.center, anim.zoom);
+        return m.project(latLng, anim.zoom).subtract(pixelOrigin);
+      } catch (e) {
+        // Fallback if internal DOM state is invalid (e.g. during HMR)
+      }
     }
 
     return m.latLngToContainerPoint(latLng);
@@ -616,6 +620,9 @@ export const DrawingCanvas = ({
     if (!interactionEnabled || !canvasRef.current) return;
 
     if (event.pointerType === "touch") {
+      if (activePointerIdRef.current == null) {
+        activeTouchPointersRef.current.clear();
+      }
       activeTouchPointersRef.current.add(event.pointerId);
       if (activeTouchPointersRef.current.size > 1) {
         if (activePointerIdRef.current != null) {
@@ -676,6 +683,7 @@ export const DrawingCanvas = ({
         setLeafletDrawGestureSuppression(mapRef.current, false);
         detachActiveWindowPointerListeners();
         releasePointer(event);
+        activePointerIdRef.current = null;
         return;
       }
 
@@ -689,11 +697,50 @@ export const DrawingCanvas = ({
 
     // No drawing mode: leave strokes/shapes fixed. Sticky Notes own their interactions in DrawingLabelLayer.
     if (!drawingRef.current.mode) {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      
+      const handleHit = getHandleAtPoint(coords);
+      if (handleHit) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        activeDragRef.current = {
+          objectId: handleHit.object.id,
+          handle: handleHit.handle,
+          type: "resize",
+          lastPoint: coords,
+        };
+        activePointerIdRef.current = event.pointerId;
+        capturePointer(event);
+        setLeafletDrawGestureSuppression(mapRef.current, true);
+        return;
+      }
+
+      const objectHit = getObjectAtProjectedPoint(coords);
+      if (objectHit) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        drawingRef.current.setSelectedAnnotationId(objectHit.id);
+        activeDragRef.current = {
+          objectId: objectHit.id,
+          handle: "center" as const,
+          type: "move",
+          lastPoint: coords,
+        };
+        activePointerIdRef.current = event.pointerId;
+        capturePointer(event);
+        setLeafletDrawGestureSuppression(mapRef.current, true);
+        dirtyRef.current = true;
+        scheduleRedraw();
+        return;
+      }
+
       drawingRef.current.setSelectedAnnotationId(null);
       dirtyRef.current = true;
       scheduleRedraw();
     }
-  }, [interactionEnabled, drawingPointFromInteraction, shouldUsePointerForDrawing, capturePointer, releasePointer, releaseCapturedPointer, attachActiveWindowPointerListeners, onStrokeActivityChange, scheduleRedraw, markDirtyAndRedraw]);
+  }, [interactionEnabled, drawingPointFromInteraction, shouldUsePointerForDrawing, capturePointer, releasePointer, releaseCapturedPointer, attachActiveWindowPointerListeners, onStrokeActivityChange, scheduleRedraw, markDirtyAndRedraw, getHandleAtPoint, getObjectAtProjectedPoint]);
 
   const handlePointerMove = useCallback((event: PointerEvent) => {
     if (!interactionEnabled || !canvasRef.current) return;

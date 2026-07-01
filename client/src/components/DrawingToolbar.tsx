@@ -5,6 +5,7 @@ import {
   CircleSlash,
   Eraser,
   Minus,
+  MousePointer2,
   Palette,
   Pen,
   RotateCcw,
@@ -56,6 +57,7 @@ const PRESET_COLORS = [
 const toolGroups: Array<{ tools: Array<{ id: DrawingMode; label: string; icon: ReactNode }> }> = [
   {
     tools: [
+      { id: null, label: "Select / Pan", icon: <MousePointer2 className="h-3.5 w-3.5" strokeWidth={1.5} /> },
       { id: "free", label: "Freehand", icon: <FreehandStrokeIcon className="h-3.5 w-3.5" /> },
       { id: "line", label: "Line", icon: <Minus className="h-3.5 w-3.5 rotate-45" strokeWidth={1.5} /> },
       { id: "arrow", label: "Arrow", icon: <ArrowRight className="h-3.5 w-3.5" strokeWidth={1.5} /> },

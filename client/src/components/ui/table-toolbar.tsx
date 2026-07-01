@@ -53,6 +53,8 @@ export function TableToolbar({
       <div className="relative flex-1 min-w-[200px] max-w-sm">
         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <Input
+          name="tableSearch"
+          aria-label={searchPlaceholder || "Search table"}
           placeholder={searchPlaceholder}
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}

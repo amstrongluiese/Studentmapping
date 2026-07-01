@@ -754,7 +754,7 @@ export function AdminPortalWorkspace({
                 <CardTitle className="text-sm font-semibold">Live student feed</CardTitle>
               </CardHeader>
               <div className="min-h-0 flex-1 overflow-auto">
-                <Table>
+                <Table className="min-w-[800px]">
                   <TableHeader className="sticky top-0 z-10 bg-white/90 shadow-[0_1px_0_0_rgb(241_245_249)] backdrop-blur-xl">
                     <TableRow>
                       <TableHead className="w-10 px-4">
@@ -985,8 +985,8 @@ export function AdminPortalWorkspace({
                   <CardTitle className="text-sm font-semibold">Import & sync history</CardTitle>
                   <CardDescription className="text-xs">API runs and GIS pipeline sync history.</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <Table>
+                <CardContent className="overflow-x-auto">
+                  <Table className="min-w-[600px]">
                     <TableHeader>
                       <TableRow>
                         <TableHead className="w-10 px-4">

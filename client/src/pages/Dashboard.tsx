@@ -486,7 +486,6 @@ export default function Dashboard() {
                     programFilters={programFilters}
                     onClose={() => setSelectedCluster(null)}
                     onEditSchool={openEditSchool}
-                    isGlassmorphic={true}
                   />
                 )}
                 <Metric label="Mapped Schools" value={mappedSchools.length} />
@@ -866,8 +865,8 @@ function SchoolRegistry({
       </div>
 
       <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
-        <div className={cn(compact && "overflow-x-auto")}>
-        <Table className={cn(compact && "min-w-[960px] text-xs")}>
+        <div className="overflow-x-auto">
+        <Table className={cn(compact ? "min-w-[960px] text-xs" : "min-w-[800px]")}>
           <TableHeader>
             <TableRow className={cn(compact && "hover:bg-transparent")}>
               <TableHead className="w-10 px-4">
@@ -1294,6 +1293,7 @@ function ReferralProgramWorkspace({
             </Select>
             <Input
               name="candidateFullName"
+              aria-label="Candidate full name"
               className="h-10 bg-slate-50"
               placeholder="Candidate full name"
               value={candidateName}
@@ -1301,6 +1301,7 @@ function ReferralProgramWorkspace({
             />
             <Input
               name="candidateRelationship"
+              aria-label="Relationship to referrer"
               className="h-10 bg-slate-50"
               placeholder="Relationship to referrer"
               value={relationship}
@@ -1308,6 +1309,7 @@ function ReferralProgramWorkspace({
             />
             <Input
               name="candidateContactNumber"
+              aria-label="Contact number"
               className="h-10 bg-slate-50"
               placeholder="Contact number"
               value={contactNumber}
@@ -1315,6 +1317,7 @@ function ReferralProgramWorkspace({
             />
             <Textarea
               name="admissionsNotes"
+              aria-label="Notes for admissions follow-up"
               className="min-h-24 bg-slate-50"
               placeholder="Notes for admissions follow-up"
               value={notes}
@@ -1339,6 +1342,7 @@ function ReferralProgramWorkspace({
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     name="referralSearch"
+                    aria-label="Search referrals"
                     className="h-10 w-full bg-slate-50 pl-9 sm:w-72"
                     placeholder="Search referrals..."
                     value={search}
@@ -1358,7 +1362,7 @@ function ReferralProgramWorkspace({
             </div>
           </CardHeader>
           <div className="max-h-[620px] overflow-auto">
-            <Table>
+            <Table className="min-w-[800px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Candidate</TableHead>
