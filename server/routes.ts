@@ -7,7 +7,7 @@ import {
   imports,
   mappingLogs,
   schoolAliases,
-  schools as schoolsTable,
+  schoolRegistry as schoolsTable,
   studentsProcessed,
   studentsRaw,
 } from "@shared/schema";
@@ -30,7 +30,6 @@ import {
   lookupSchoolInRegistry,
 } from "./geocodeLookup";
 import multer from "multer";
-import { getMasterDirectory, reloadMasterDirectory } from "./schoolMatcher";
 import { syncExcelToJSON } from "./syncMasterDirectory";
 
 const upload = multer({ dest: "server/uploads/" });
@@ -40,15 +39,15 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   // School routes
-  app.get(api.schools.list.path, async (req, res) => {
-    const schoolsList = await storage.getSchools();
+  app.get(api.schoolRegistry.list.path, async (req, res) => {
+    const schoolsList = await storage.listSchoolRegistry();
     res.json(schoolsList);
   });
 
-  app.post(api.schools.import.path, async (req, res) => {
+  app.post(api.schoolRegistry.import.path, async (req, res) => {
     try {
-      const input = api.schools.import.input.parse(req.body);
-      const result = await storage.importSchools(input.schools);
+      const input = api.schoolRegistry.import.input.parse(req.body);
+      const result = await storage.importSchools(input.schoolRegistry as any);
       res.json(result);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -57,11 +56,11 @@ export async function registerRoutes(
   });
 
   // Admin Master Directory Routes
-  app.get("/api/admin/directory", (req, res) => {
-    res.json(getMasterDirectory());
+  app.get("/api/admin/directory", async (req, res) => {
+    res.json(await storage.listSchoolRegistry());
   });
 
-  app.post("/api/admin/directory/import", upload.single("file"), (req, res) => {
+  app.post("/api/admin/directory/import", upload.single("file"), async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
@@ -69,7 +68,7 @@ export async function registerRoutes(
     try {
       // Sync excel to JSON and reload memory
       const schools = syncExcelToJSON(req.file.path);
-      reloadMasterDirectory(schools);
+      await storage.importSchools(schools as any);
       res.json({ success: true, count: schools.length, message: `Successfully imported ${schools.length} schools into the master directory.` });
     } catch (err) {
       console.error("[directory/import] error:", err);
@@ -77,16 +76,16 @@ export async function registerRoutes(
     }
   });
 
-  app.get(api.schools.get.path, async (req, res) => {
-    const school = await storage.getSchool(Number(req.params.id));
+  app.get(api.schoolRegistry.get.path, async (req, res) => {
+    const school = await storage.getSchoolRegistry(Number(req.params.id));
     if (!school) return res.status(404).json({ message: 'School not found' });
     res.json(school);
   });
 
-  app.post(api.schools.create.path, async (req, res) => {
+  app.post(api.schoolRegistry.create.path, async (req, res) => {
     try {
-      const input = api.schools.create.input.parse(req.body);
-      const school = await storage.createSchool(input);
+      const input = api.schoolRegistry.create.input.parse(req.body);
+      const school = await storage.createSchoolRegistry(input);
       res.status(201).json(school);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -94,10 +93,10 @@ export async function registerRoutes(
     }
   });
 
-  app.put(api.schools.update.path, async (req, res) => {
+  app.put(api.schoolRegistry.update.path, async (req, res) => {
     try {
-      const input = api.schools.update.input.parse(req.body);
-      const school = await storage.updateSchool(Number(req.params.id), input);
+      const input = api.schoolRegistry.update.input.parse(req.body);
+      const school = await storage.updateSchoolRegistry(Number(req.params.id), input);
       if (!school) return res.status(404).json({ message: 'School not found' });
       res.json(school);
     } catch (err) {
@@ -106,15 +105,15 @@ export async function registerRoutes(
     }
   });
 
-  app.delete(api.schools.delete.path, async (req, res) => {
-    await storage.deleteSchool(Number(req.params.id));
+  app.delete(api.schoolRegistry.delete.path, async (req, res) => {
+    await storage.deleteSchoolRegistry(Number(req.params.id));
     res.status(204).send();
   });
 
-  app.post(api.schools.batchDelete.path, async (req, res) => {
+  app.post(api.schoolRegistry.batchDelete.path, async (req, res) => {
     try {
-      const input = api.schools.batchDelete.input.parse(req.body);
-      const result = await storage.batchDeleteSchools(input.ids);
+      const input = api.schoolRegistry.batchDelete.input.parse(req.body);
+      const result = await storage.batchDeleteSchoolRegistry(input.ids);
       const message = result.skippedCount > 0 
         ? `Deleted ${result.deletedCount} schools. Skipped ${result.skippedCount} schools because they are actively mapped to students.`
         : `Successfully deleted ${result.deletedCount} schools.`;
@@ -185,7 +184,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get(api.schoolsSearch.search.path, async (req, res) => {
+  app.get(api.schoolRegistry.list.path, async (req, res) => {
     const q = String(req.query.q || "");
     const results = await searchSchools(q);
     res.json(results);
@@ -385,7 +384,7 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
-  await seedDatabase();
+  // await seedDatabase(); // Removed to prevent wiping DB on every boot
   return httpServer;
 }
 
@@ -399,27 +398,26 @@ export async function seedDatabase() {
   await db.delete(schoolsTable);
 
   const testSchools = [
-    { name: "Trimex Colleges", lat: 14.339063, lng: 121.085351, municipality: "Biñan", province: "Laguna" },
-    { name: "Laguna Senior High School", lat: 14.2782, lng: 121.4163, municipality: "Santa Cruz", province: "Laguna" },
-    { name: "Biñan City Senior High School - San Antonio Campus", lat: 14.3227, lng: 121.0793, municipality: "Biñan", province: "Laguna" },
-    { name: "Calamba City Senior High School", lat: 14.2117, lng: 121.1653, municipality: "Calamba", province: "Laguna" },
-    { name: "Pagsanjan Stand-Alone Senior High School", lat: 14.2738, lng: 121.4558, municipality: "Pagsanjan", province: "Laguna" },
+    { schoolName: "Trimex Colleges", latitude: 14.339063, longitude: 121.085351, municipality: "Biñan", province: "Laguna" },
+    { schoolName: "Laguna Senior High School", latitude: 14.2782, longitude: 121.4163, municipality: "Santa Cruz", province: "Laguna" },
+    { schoolName: "Biñan City Senior High School - San Antonio Campus", latitude: 14.3227, longitude: 121.0793, municipality: "Biñan", province: "Laguna" },
+    { schoolName: "Calamba City Senior High School", latitude: 14.2117, longitude: 121.1653, municipality: "Calamba", province: "Laguna" },
+    { schoolName: "Pagsanjan Stand-Alone Senior High School", latitude: 14.2738, longitude: 121.4558, municipality: "Pagsanjan", province: "Laguna" },
   ];
 
   for (const school of testSchools) {
-    await storage.createSchool({
+    await storage.createSchoolRegistry({
       ...school,
-      institutionType: school.name.includes("Colleges") ? "College" : "Senior High School",
-      altitude: null,
-      studentCount: 0,
-      verified: true,
-      status: "Verified",
+      schoolType: school.schoolName.includes("Colleges") ? "College" : "Senior High School",
+      // altitude: null,
+      
+      isActive: true,
       source: "5-School Test Dataset",
     });
   }
 
-  const seededSchools = await storage.getSchools();
-  const schoolByName = new Map(seededSchools.map((school) => [school.name, school]));
+  const seededSchools = await storage.listSchoolRegistry();
+  const schoolByName = new Map(seededSchools.map((school) => [school.schoolName, school]));
   const [importRow] = await db.insert(imports).values({
     source: "5-school-test-dataset",
     status: "completed",
@@ -508,7 +506,7 @@ export async function seedDatabase() {
       admissionType: "Freshman",
       lastSchoolName: student.lastSchoolName,
       lastSchoolType: student.lastSchoolType,
-      schoolId: schoolByName.get(student.lastSchoolName)?.id ?? null,
+      schoolRegistryId: schoolByName.get(student.lastSchoolName)?.id ?? null,
       municipality: student.municipality,
       province: student.province,
       enrollmentStatus: student.enrollmentStatus,

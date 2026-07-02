@@ -6,13 +6,42 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 
 interface MasterSchool {
-  school_id: string;
-  school_name: string;
+  id: number;
+  schoolId: string;
+  schoolName: string;
   municipality: string;
   province: string;
   latitude: number | null;
   longitude: number | null;
-  school_type: string;
+  schoolType: string;
+}
+
+function normalizeSchools(payload: unknown): MasterSchool[] {
+  if (Array.isArray(payload)) {
+    return payload as MasterSchool[];
+  }
+
+  if (payload && typeof payload === "object") {
+    const candidate = payload as {
+      schools?: unknown;
+      data?: unknown;
+      results?: unknown;
+    };
+
+    if (Array.isArray(candidate.schools)) {
+      return candidate.schools as MasterSchool[];
+    }
+
+    if (Array.isArray(candidate.data)) {
+      return candidate.data as MasterSchool[];
+    }
+
+    if (Array.isArray(candidate.results)) {
+      return candidate.results as MasterSchool[];
+    }
+  }
+
+  return [];
 }
 
 export function AdminSchoolDirectory() {
@@ -20,14 +49,22 @@ export function AdminSchoolDirectory() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isUploading, setIsUploading] = useState(false);
 
-  const { data: schools = [], refetch, isLoading } = useQuery<MasterSchool[]>({
+  const { data, refetch, isLoading } = useQuery<unknown>({
     queryKey: ["/api/admin/directory"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/directory", { credentials: "include" });
+      if (!res.ok) {
+        throw new Error("Failed to load school directory");
+      }
+      return res.json();
+    },
   });
 
+  const schools = normalizeSchools(data);
   const filteredSchools = schools.filter(s => 
-    s.school_name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    s.municipality.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.school_id.toLowerCase().includes(searchTerm.toLowerCase())
+    s.schoolName?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    s.municipality?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    s.schoolId?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -140,14 +177,14 @@ export function AdminSchoolDirectory() {
               ) : (
                 filteredSchools.map((school, i) => (
                   <tr key={i} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-6 py-3 whitespace-nowrap text-slate-600 font-mono text-xs">{school.school_id}</td>
-                    <td className="px-6 py-3 font-medium text-slate-800">{school.school_name}</td>
+                    <td className="px-6 py-3 whitespace-nowrap text-slate-600 font-mono text-xs">{school.schoolId}</td>
+                    <td className="px-6 py-3 font-medium text-slate-800">{school.schoolName}</td>
                     <td className="px-6 py-3 text-slate-600">
                       {school.municipality}, {school.province}
                     </td>
                     <td className="px-6 py-3 text-slate-600">
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700">
-                        {school.school_type}
+                        {school.schoolType}
                       </span>
                     </td>
                     <td className="px-6 py-3 text-right">

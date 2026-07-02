@@ -1,13 +1,14 @@
 import Fuse from "fuse.js";
 import * as XLSX from "xlsx";
-import type { School } from "@shared/schema";
+import { type SchoolRegistry } from "@shared/schema";
 import type { SchoolInput } from "@shared/routes";
 import { requestGeocodeSchool } from "@/lib/geocodeSchoolApi";
 import { hasCoordinates, normalizeSchoolName, type SchoolStatus } from "@shared/schoolRegistry";
 
 type UploadRow = Record<string, unknown>;
 
-export interface SchoolImportPreview extends SchoolInput {
+export interface SchoolImportPreview extends Partial<SchoolInput> {
+  schoolName: string;
   rowNumber: number;
   importStatus: SchoolStatus;
   issues: string[];
@@ -23,23 +24,23 @@ export interface ImportProgress {
 }
 
 const HEADER_ALIASES = {
-  name: ["school name", "school_name", "school", "institution", "institution name", "name"],
+  schoolName: ["school name", "school_name", "school", "institution", "institution name", "name"],
   municipality: ["municipality", "city", "town", "location"],
-  institutionType: ["institution type", "institution_type", "type", "school type", "classification"],
-  lat: ["latitude", "lat"],
-  lng: ["longitude", "lng", "long", "lon"],
-  altitude: ["altitude", "elevation"],
-  studentCount: ["student count", "student_count", "enrollees", "total enrollees", "students", "count"],
+  schoolType: ["institution type", "institution_type", "type", "school type", "classification"],
+  latitude: ["latitude", "lat"],
+  longitude: ["longitude", "lng", "long", "lon"],
+  
+  // studentCount: ["student count", "student_count", "enrollees", "total enrollees", "students", "count"],
 };
 
 const IMPORT_SOURCE = "Imported Excel";
 const GEOCODE_CACHE_KEY = "trimex-school-geocode-cache-v1";
 
-export function buildSchoolFuse(schools: School[] = []) {
+export function buildSchoolFuse(schools: SchoolRegistry[] = []) {
   return new Fuse(schools, {
     keys: [
-      { name: "name", weight: 0.7 },
-      { name: "normalizedName", weight: 0.2 },
+      { name: "schoolName", weight: 0.7 },
+      { name: "normalizedSchoolName", weight: 0.2 },
       { name: "municipality", weight: 0.1 },
     ],
     threshold: 0.28,
@@ -49,7 +50,7 @@ export function buildSchoolFuse(schools: School[] = []) {
   });
 }
 
-export function searchSchools(schools: School[] = [], query: string) {
+export function searchSchools(schools: SchoolRegistry[] = [], query: string) {
   const trimmed = query.trim();
   if (!trimmed) return schools;
 
@@ -72,37 +73,36 @@ export async function parseSchoolFile(file: File): Promise<SchoolImportPreview[]
 
 export function prepareSchoolImport(
   rows: SchoolImportPreview[],
-  existingSchools: School[] = [],
+  existingSchools: SchoolRegistry[] = [],
 ): SchoolImportPreview[] {
   const fuse = buildSchoolFuse(existingSchools);
   const seen = new Set<string>();
 
   return rows.map((row) => {
-    const normalizedName = normalizeSchoolName(row.name);
+    const normalizedSchoolName = normalizeSchoolName(row.schoolName || "");
     const issues = [...row.issues];
     const exactExisting = existingSchools.find(
-      (school) => normalizeSchoolName(school.normalizedName || school.name) === normalizedName,
+      (school) => normalizeSchoolName(school.normalizedSchoolName || school.schoolName) === normalizedSchoolName,
     );
-    const fuzzyMatch = exactExisting ? null : fuse.search(row.name)[0];
+    const fuzzyMatch = exactExisting ? null : fuse.search(row.schoolName || "")[0];
     const matchedSchool = exactExisting || fuzzyMatch?.item;
-    const isDuplicateInFile = seen.has(normalizedName);
-    seen.add(normalizedName);
+    const isDuplicateInFile = seen.has(normalizedSchoolName);
+    seen.add(normalizedSchoolName);
 
     if (isDuplicateInFile) {
       issues.push("Duplicate row in upload.");
       return {
         ...row,
-        normalizedName,
-        importStatus: "Duplicate Entry",
-        status: "Duplicate Entry",
+        normalizedSchoolName,
+        importStatus: "Duplicate Entry" as any,
         issues,
       };
     }
 
     if (matchedSchool && (exactExisting || (fuzzyMatch?.score ?? 1) <= 0.22)) {
       const matchedHasCoordinates = hasCoordinates({
-        lat: matchedSchool.lat,
-        lng: matchedSchool.lng,
+        latitude: matchedSchool.latitude,
+        longitude: matchedSchool.longitude,
       });
 
       if (!hasCoordinates(row) && matchedHasCoordinates) {
@@ -113,18 +113,17 @@ export function prepareSchoolImport(
 
       return {
         ...row,
-        normalizedName,
+        normalizedSchoolName,
         municipality: row.municipality || matchedSchool.municipality || "Laguna",
-        institutionType: row.institutionType || matchedSchool.institutionType || "Feeder Institution",
-        lat: row.lat ?? matchedSchool.lat,
-        lng: row.lng ?? matchedSchool.lng,
-        altitude: row.altitude ?? matchedSchool.altitude,
-        verified: row.verified || matchedSchool.verified,
-        status: hasCoordinates(row) || matchedHasCoordinates ? "Verified" : "Missing Coordinates",
-        importStatus: hasCoordinates(row) || matchedHasCoordinates ? "Verified" : "Missing Coordinates",
+        schoolType: row.schoolType || matchedSchool.schoolType || "Feeder Institution",
+        latitude: row.latitude ?? matchedSchool.latitude,
+        longitude: row.longitude ?? matchedSchool.longitude,
+        // altitude: // row.altitude ?? matchedSchool.altitude,
+        isActive: matchedSchool?.isActive ?? true,
+        importStatus: (hasCoordinates(row) || matchedHasCoordinates ? "Verified" : "Missing Coordinates") as any,
         source: matchedHasCoordinates ? "Matched Registry" : row.source,
-        matchedSchoolId: matchedSchool.id,
-        matchedSchoolName: matchedSchool.name,
+        matchedSchoolId: matchedSchool?.id,
+        matchedSchoolName: matchedSchool?.schoolName,
         matchScore: fuzzyMatch?.score,
         issues,
       };
@@ -132,9 +131,9 @@ export function prepareSchoolImport(
 
     return {
       ...row,
-      normalizedName,
-      importStatus: hasCoordinates(row) ? "Verified" : "Missing Coordinates",
-      status: hasCoordinates(row) ? "Verified" : "Missing Coordinates",
+      normalizedSchoolName,
+      importStatus: (hasCoordinates(row) ? "Verified" : "Missing Coordinates") as any,
+      isActive: hasCoordinates(row),
       issues,
     };
   });
@@ -151,30 +150,30 @@ export async function geocodeMissingSchools(
   let completed = 0;
 
   const processed = [...rows];
-  const sessionCache = new Map<string, { lat: number | null; lng: number | null }>();
+  const sessionCache = new Map<string, { latitude: number | null; longitude: number | null }>();
 
   for (const row of missing) {
-    onProgress?.({ completed, total, current: row.name });
+    onProgress?.({ completed, total, current: row.schoolName });
     const index = processed.findIndex((candidate) => candidate.rowNumber === row.rowNumber);
     const cacheKey = getGeocodeCacheKey(row);
     const geocoded = sessionCache.get(cacheKey) || await geocodeSchool(row);
     sessionCache.set(cacheKey, geocoded);
-    const hasGeocodedCoordinates = hasNumber(geocoded.lat) && hasNumber(geocoded.lng);
+    const hasGeocodedCoordinates = hasNumber(geocoded.latitude) && hasNumber(geocoded.longitude);
 
     processed[index] = {
       ...row,
       ...geocoded,
       source: hasGeocodedCoordinates ? "Google/Geocoding Auto-Locate" : row.source,
-      importStatus: hasGeocodedCoordinates ? "Auto-Located" : "Missing Coordinates",
-      status: hasGeocodedCoordinates ? "Auto-Located" : "Missing Coordinates",
-      verified: false,
+      importStatus: (hasGeocodedCoordinates ? "Auto-Located" : "Missing Coordinates") as any,
+      isActive: hasGeocodedCoordinates,
+      // isActive: false,
       issues: hasGeocodedCoordinates
         ? [...row.issues, "Coordinates auto-located with Google Geocoding or fallback geocoder."]
         : [...row.issues, "Coordinates still need review."],
     };
 
     completed += 1;
-    onProgress?.({ completed, total, current: row.name });
+    onProgress?.({ completed, total, current: row.schoolName });
 
     if (completed < total) {
       await sleep(1100);
@@ -213,13 +212,13 @@ async function parseJsonFile(file: File): Promise<UploadRow[]> {
 }
 
 function normalizeUploadRow(row: UploadRow, rowNumber: number): SchoolImportPreview | null {
-  const name = stringValue(getField(row, HEADER_ALIASES.name));
+  const name = stringValue(getField(row, HEADER_ALIASES.schoolName));
   if (!name) return null;
 
-  const lat = numberValue(getField(row, HEADER_ALIASES.lat));
-  const lng = numberValue(getField(row, HEADER_ALIASES.lng));
-  const altitude = numberValue(getField(row, HEADER_ALIASES.altitude));
-  const hasLatLng = typeof lat === "number" && typeof lng === "number";
+  const latitude = numberValue(getField(row, HEADER_ALIASES.latitude));
+  const longitude = numberValue(getField(row, HEADER_ALIASES.longitude));
+  // const altitude = numberValue(getField(row, HEADER_ALIASES.altitude));
+  const hasLatLng = typeof latitude === "number" && typeof longitude === "number";
   const issues: string[] = [];
 
   if (!hasLatLng) {
@@ -228,19 +227,19 @@ function normalizeUploadRow(row: UploadRow, rowNumber: number): SchoolImportPrev
 
   return {
     rowNumber,
-    name,
-    normalizedName: normalizeSchoolName(name),
+    schoolName: name,
+    normalizedSchoolName: normalizeSchoolName(name),
     municipality: stringValue(getField(row, HEADER_ALIASES.municipality)) || "Laguna",
     province: "Laguna",
-    institutionType: stringValue(getField(row, HEADER_ALIASES.institutionType)) || "Feeder Institution",
-    lat: hasLatLng ? lat : null,
-    lng: hasLatLng ? lng : null,
-    altitude: altitude ?? null,
-    studentCount: numberValue(getField(row, HEADER_ALIASES.studentCount)) ?? 0,
-    verified: hasLatLng,
-    status: hasLatLng ? "Verified" : "Missing Coordinates",
+    schoolType: stringValue(getField(row, HEADER_ALIASES.schoolType)) || "Feeder Institution",
+    latitude: hasLatLng ? latitude : null,
+    longitude: hasLatLng ? longitude : null,
+    // altitude: altitude ?? null,
+    // studentCount: numberValue(getField(row, HEADER_ALIASES.studentCount)) ?? 0,
+    // isActive: hasLatLng,
+    isActive: hasLatLng,
     source: IMPORT_SOURCE,
-    importStatus: hasLatLng ? "Verified" : "Missing Coordinates",
+    importStatus: (hasLatLng ? "Verified" : "Missing Coordinates") as any,
     issues,
   };
 }
@@ -272,7 +271,7 @@ function numberValue(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function geocodeSchool(row: SchoolImportPreview): Promise<{ lat: number | null; lng: number | null }> {
+async function geocodeSchool(row: SchoolImportPreview): Promise<{ latitude: number | null; longitude: number | null }> {
   const cache = loadGeocodeCache();
   const cacheKey = getGeocodeCacheKey(row);
   const cached = cache[cacheKey];
@@ -280,20 +279,20 @@ async function geocodeSchool(row: SchoolImportPreview): Promise<{ lat: number | 
 
   try {
     const municipality = row.municipality?.trim() || undefined;
-    const result = await requestGeocodeSchool({ name: row.name, municipality });
+    const result = await requestGeocodeSchool({ schoolName: (row.schoolName || ''), municipality });
     if (!result) {
-      cache[cacheKey] = { lat: null, lng: null };
+      cache[cacheKey] = { latitude: null, longitude: null };
       saveGeocodeCache(cache);
-      return { lat: null, lng: null };
+      return { latitude: null, longitude: null };
     }
-    cache[cacheKey] = { lat: result.lat, lng: result.lng };
+    cache[cacheKey] = { latitude: result.latitude, longitude: result.longitude };
     saveGeocodeCache(cache);
-    return { lat: result.lat, lng: result.lng };
+    return { latitude: result.latitude, longitude: result.longitude };
   } catch (error) {
     console.warn("[geocode] school import lookup failed:", error);
-    cache[cacheKey] = { lat: null, lng: null };
+    cache[cacheKey] = { latitude: null, longitude: null };
     saveGeocodeCache(cache);
-    return { lat: null, lng: null };
+    return { latitude: null, longitude: null };
   }
 }
 
@@ -302,25 +301,25 @@ function sleep(ms: number) {
 }
 
 function getGeocodeCacheKey(row: SchoolImportPreview) {
-  return normalizeSchoolName(`${row.name} ${row.municipality || "Laguna"}`);
+  return normalizeSchoolName(`${row.schoolName} ${row.municipality || "Laguna"}`);
 }
 
 function hasNumber(value: number | null | undefined): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function loadGeocodeCache(): Record<string, { lat: number | null; lng: number | null }> {
+function loadGeocodeCache(): Record<string, { latitude: number | null; longitude: number | null }> {
   if (typeof window === "undefined") return {};
 
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(GEOCODE_CACHE_KEY) || "{}") as Record<string, { lat: number | null; lng: number | null }>;
+    const parsed = JSON.parse(window.localStorage.getItem(GEOCODE_CACHE_KEY) || "{}") as Record<string, { latitude: number | null; longitude: number | null }>;
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
     return {};
   }
 }
 
-function saveGeocodeCache(cache: Record<string, { lat: number | null; lng: number | null }>) {
+function saveGeocodeCache(cache: Record<string, { latitude: number | null; longitude: number | null }>) {
   if (typeof window === "undefined") return;
   const entries = Object.entries(cache).slice(-1000);
   window.localStorage.setItem(GEOCODE_CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));

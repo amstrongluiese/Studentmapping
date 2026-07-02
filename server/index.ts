@@ -7,7 +7,7 @@ import { testDatabaseConnection, initializeDatabase } from "./db";
 
 dotenv.config();
 
-import { loadMasterDirectory } from "./schoolMatcher";
+
 import { syncExcelToJSON } from "./syncMasterDirectory";
 import * as fs from "fs";
 import * as path from "path";
@@ -16,12 +16,9 @@ import * as path from "path";
 const excelPath = path.join(process.cwd(), "Geocoded_Schools_2026.xlsx");
 const jsonPath = path.join(process.cwd(), "server", "data", "schools_directory.json");
 
-if (fs.existsSync(excelPath) && !fs.existsSync(jsonPath)) {
-  console.log("[startup] Generating initial schools_directory.json from Excel...");
-  syncExcelToJSON(excelPath);
-}
+// Removed old sync
 
-loadMasterDirectory();
+// reloadMasterDirectory();
 
 const app = express();
 const httpServer = createServer(app);
@@ -87,8 +84,20 @@ app.use((req, res, next) => {
 
   await testDatabaseConnection();
 
-  const { ensureGisSchema } = await import("./ensureGisSchema");
-  await ensureGisSchema();
+  // const { ensureGisSchema } = await import("./ensureGisSchema");
+  // await ensureGisSchema();
+
+  if (fs.existsSync(excelPath)) {
+    console.log("[startup] Generating initial schools_directory.json from Excel and importing to DB...");
+    const schoolsData = syncExcelToJSON(excelPath);
+    const { storage } = await import("./storage");
+    const count = await storage.listSchoolRegistry();
+    if (count.length === 0) {
+       console.log("[startup] School registry is empty. Importing...");
+       await storage.importSchools(schoolsData as any);
+       console.log("[startup] Imported", schoolsData.length, "schools.");
+    }
+  }
 
   await registerRoutes(httpServer, app);
 

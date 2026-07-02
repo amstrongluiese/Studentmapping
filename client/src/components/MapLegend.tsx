@@ -13,8 +13,8 @@ export function MapLegend({ onClose }: MapLegendProps) {
 
   if (!schools || schools.length === 0) return null;
 
-  const totalStudents = schools.reduce((sum, s) => sum + s.studentCount, 0);
-  const sortedSchools = [...schools].sort((a, b) => b.studentCount - a.studentCount);
+  const totalStudents = schools.reduce((sum, s) => sum + (s as any).studentCount, 0);
+  const sortedSchools = [...schools].sort((a, b) => (b as any).studentCount - (a as any).studentCount);
   const averageEnrollment = Math.round(totalStudents / schools.length);
 
   return (
@@ -56,9 +56,9 @@ export function MapLegend({ onClose }: MapLegendProps) {
                   <div className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold ${i === 0 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'}`}>
                     {i + 1}
                   </div>
-                  <p className="text-xs font-semibold truncate" title={school.name}>{school.name}</p>
+                  <p className="text-xs font-semibold truncate" title={school.schoolName}>{school.schoolName}</p>
                 </div>
-                <p className="text-xs font-bold text-primary ml-2">{school.studentCount}</p>
+                <p className="text-xs font-bold text-primary ml-2">{(school as any).studentCount}</p>
               </div>
             ))}
           </div>

@@ -2,44 +2,42 @@ import * as xlsx from "xlsx";
 import * as fs from "fs";
 import * as path from "path";
 
-export interface MasterSchool {
-  school_id: string;
-  school_name: string;
-  municipality: string;
-  province: string;
-  latitude: number | null;
-  longitude: number | null;
-  school_type: string;
-}
+import { normalizeSchoolName } from "@shared/schoolRegistry";
+import type { InsertSchoolRegistry } from "@shared/schema";
 
 export const DIRECTORY_JSON_PATH = path.join(process.cwd(), "server", "data", "schools_directory.json");
 
-export function parseExcelToJSON(excelFilePath: string): MasterSchool[] {
+export function parseExcelToJSON(excelFilePath: string): InsertSchoolRegistry[] {
   if (!fs.existsSync(excelFilePath)) {
     throw new Error(`Excel file not found at path: ${excelFilePath}`);
   }
 
-  const wb = xlsx.readFile(excelFilePath);
+  const buf = fs.readFileSync(excelFilePath);
+  const wb = xlsx.read(buf, { type: "buffer" });
   const sheetName = wb.SheetNames[0];
   const sheet = wb.Sheets[sheetName];
   const rows: any[] = xlsx.utils.sheet_to_json(sheet);
 
-  const parsed: MasterSchool[] = rows.map((row) => {
+  const parsed: InsertSchoolRegistry[] = rows.map((row) => {
+    const rawName = row["Canonical School Name"]?.toString() || row["DepEd School Name"]?.toString() || "";
     return {
-      school_id: row["Directory ID"]?.toString() || row["DepEd School ID"]?.toString() || "",
-      school_name: row["Canonical School Name"]?.toString() || row["DepEd School Name"]?.toString() || "",
-      municipality: row["Municipality/City"]?.toString() || "Unknown",
-      province: row["Province"]?.toString() || "Unknown",
+      schoolId: row["Directory ID"]?.toString() || row["DepEd School ID"]?.toString() || null,
+      schoolName: rawName,
+      normalizedSchoolName: normalizeSchoolName(rawName),
+      municipality: row["Municipality/City"]?.toString() || "Laguna",
+      province: row["Province"]?.toString() || "Laguna",
       latitude: row["Latitude"] ? parseFloat(row["Latitude"]) : null,
       longitude: row["Longitude"] ? parseFloat(row["Longitude"]) : null,
-      school_type: row["SHS Type"]?.toString() || row["School Category"]?.toString() || "",
+      schoolType: row["SHS Type"]?.toString() || row["School Category"]?.toString() || null,
+      source: "Master Directory 2026",
+      isActive: true,
     };
-  }).filter((school) => school.school_id && school.school_name);
+  }).filter((school) => school.schoolName);
 
   return parsed;
 }
 
-export function syncExcelToJSON(excelFilePath: string): MasterSchool[] {
+export function syncExcelToJSON(excelFilePath: string): InsertSchoolRegistry[] {
   const schools = parseExcelToJSON(excelFilePath);
   
   // Ensure directory exists

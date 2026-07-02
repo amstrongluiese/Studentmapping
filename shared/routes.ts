@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import {
-  insertSchoolSchema,
-  schools,
+  insertSchoolRegistrySchema,
+  schoolRegistry,
   insertReferralSchema,
   referrals,
   students,
@@ -11,14 +11,14 @@ import {
 } from './schema';
 
 const schoolImportSchema = z.object({
-  schools: z.array(insertSchoolSchema).min(1),
+  schoolRegistry: z.array(insertSchoolRegistrySchema).min(1),
 });
 
 const schoolImportResponseSchema = z.object({
   created: z.number(),
   updated: z.number(),
   skipped: z.number(),
-  schools: z.array(z.custom<typeof schools.$inferSelect>()),
+  schoolRegistry: z.array(z.custom<typeof schoolRegistry.$inferSelect>()),
   issues: z.array(z.string()),
 });
 
@@ -64,8 +64,8 @@ const geocodeSchoolFailureSchema = z.object({
 
 const geocodeSchoolResponseSchema = z.object({
   success: z.literal(true).optional(),
-  lat: z.number(),
-  lng: z.number(),
+  latitude: z.number(),
+  longitude: z.number(),
   displayName: z.string(),
   source: z.enum(["Google Maps", "Nominatim", "cache", "registry", "alias"]),
   schoolId: z.number().optional(),
@@ -84,6 +84,10 @@ const studentSyncRecordSchema = z.object({
   municipality: z.string().trim().optional().nullable(),
   province: z.string().trim().optional().nullable(),
   yearLevel: z.string().trim().optional().nullable(),
+  contactNumber: z.string().trim().optional().nullable(),
+  schedule: z.string().trim().optional().nullable(),
+  iskolarNiKap: z.string().trim().optional().nullable(),
+  requirements: z.string().trim().optional().nullable(),
   enrollmentStatus: z.string().trim().optional().nullable(),
   enrollmentDate: z.string().trim().optional().nullable(),
   rawPayload: z.record(z.unknown()).optional(),
@@ -152,11 +156,11 @@ const batchDeleteResponseSchema = z.object({
 });
 
 const verifyMappingInputSchema = z.object({
-  schoolId: z.number(),
-  verified: z.boolean().optional(),
-  lat: z.number().nullable().optional(),
-  lng: z.number().nullable().optional(),
-  name: z.string().trim().optional(),
+  schoolRegistryId: z.number(),
+  isActive: z.boolean().optional(),
+  latitude: z.number().nullable().optional(),
+  longitude: z.number().nullable().optional(),
+  schoolName: z.string().trim().optional(),
   municipality: z.string().trim().optional(),
   createAlias: z.string().trim().optional(),
 });
@@ -175,34 +179,34 @@ export const errorSchemas = {
 };
 
 export const api = {
-  schools: {
+  schoolRegistry: {
     list: {
       method: 'GET' as const,
-      path: '/api/schools' as const,
+      path: '/api/schoolRegistry' as const,
       responses: {
-        200: z.array(z.custom<typeof schools.$inferSelect>()),
+        200: z.array(z.custom<typeof schoolRegistry.$inferSelect>()),
       },
     },
     get: {
       method: 'GET' as const,
-      path: '/api/schools/:id' as const,
+      path: '/api/schoolRegistry/:id' as const,
       responses: {
-        200: z.custom<typeof schools.$inferSelect>(),
+        200: z.custom<typeof schoolRegistry.$inferSelect>(),
         404: errorSchemas.notFound,
       },
     },
     create: {
       method: 'POST' as const,
-      path: '/api/schools' as const,
-      input: insertSchoolSchema,
+      path: '/api/schoolRegistry' as const,
+      input: insertSchoolRegistrySchema,
       responses: {
-        201: z.custom<typeof schools.$inferSelect>(),
+        201: z.custom<typeof schoolRegistry.$inferSelect>(),
         400: errorSchemas.validation,
       },
     },
     import: {
       method: 'POST' as const,
-      path: '/api/schools/import' as const,
+      path: '/api/schoolRegistry/import' as const,
       input: schoolImportSchema,
       responses: {
         200: schoolImportResponseSchema,
@@ -211,17 +215,17 @@ export const api = {
     },
     update: {
       method: 'PUT' as const,
-      path: '/api/schools/:id' as const,
-      input: insertSchoolSchema.partial(),
+      path: '/api/schoolRegistry/:id' as const,
+      input: insertSchoolRegistrySchema.partial(),
       responses: {
-        200: z.custom<typeof schools.$inferSelect>(),
+        200: z.custom<typeof schoolRegistry.$inferSelect>(),
         400: errorSchemas.validation,
         404: errorSchemas.notFound,
       },
     },
     delete: {
       method: 'DELETE' as const,
-      path: '/api/schools/:id' as const,
+      path: '/api/schoolRegistry/:id' as const,
       responses: {
         204: z.void(),
         404: errorSchemas.notFound,
@@ -229,7 +233,7 @@ export const api = {
     },
     batchDelete: {
       method: 'POST' as const,
-      path: '/api/schools/batch-delete' as const,
+      path: '/api/schoolRegistry/batch-delete' as const,
       input: batchDeleteInputSchema,
       responses: {
         200: batchDeleteResponseSchema,
@@ -264,7 +268,7 @@ export const api = {
       path: '/api/geocode/suggest' as const,
       responses: {
         200: z.object({
-          registry: z.array(z.custom<typeof schools.$inferSelect>()),
+          registry: z.array(z.custom<typeof schoolRegistry.$inferSelect>()),
         }),
       },
     },
@@ -282,7 +286,7 @@ export const api = {
       path: '/api/mapping/verify' as const,
       input: verifyMappingInputSchema,
       responses: {
-        200: z.custom<typeof schools.$inferSelect>(),
+        200: z.custom<typeof schoolRegistry.$inferSelect>(),
         400: errorSchemas.validation,
         404: errorSchemas.notFound,
       },
@@ -366,9 +370,9 @@ export const api = {
   schoolsSearch: {
     search: {
       method: 'GET' as const,
-      path: '/api/schools/search' as const,
+      path: '/api/schoolRegistry/search' as const,
       responses: {
-        200: z.array(z.custom<typeof schools.$inferSelect>()),
+        200: z.array(z.custom<typeof schoolRegistry.$inferSelect>()),
       },
     },
   },
@@ -456,8 +460,8 @@ export function buildUrl(path: string, params?: Record<string, string | number>)
   return url;
 }
 
-export type SchoolInput = z.infer<typeof api.schools.create.input>;
-export type SchoolResponse = z.infer<typeof api.schools.create.responses[201]>;
+export type SchoolInput = z.infer<typeof api.schoolRegistry.create.input>;
+export type SchoolResponse = z.infer<typeof api.schoolRegistry.create.responses[201]>;
 
 export type IntegrationPreviewInput = z.infer<typeof api.integrations.preview.input>;
 export type IntegrationPreviewResponse = z.infer<typeof api.integrations.preview.responses[200]>;

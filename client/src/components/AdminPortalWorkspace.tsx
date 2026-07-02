@@ -23,7 +23,7 @@ import {
   UserCircle2,
   Users,
 } from "lucide-react";
-import type { Import, School, StudentProcessed } from "@shared/schema";
+import type { Import, SchoolRegistry as School, StudentProcessed } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
 import { ALL_PROGRAM_FILTER, PROGRAM_CATALOG, normalizeStudentProgramValue, recognizeProgram } from "@shared/programIntelligence";
 import { formatAdmissionLabel, parseStudentNumberTag } from "@/lib/adminPortalUtils";
@@ -63,6 +63,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { TableToolbar } from "@/components/ui/table-toolbar";
 import { cn } from "@/lib/utils";
 import { AdminSchoolDirectory } from "./AdminSchoolDirectory";
+import { SchoolMatchingQueue } from "./SchoolMatchingQueue";
 
 export type AdminPortalSection = "overview" | "students" | "feed" | "queue" | "registry" | "directory" | "import-logs" | "settings";
 
@@ -168,7 +169,6 @@ export function AdminPortalWorkspace({
 
   const [queueSearch, setQueueSearch] = useState("");
   const [queueSelected, setQueueSelected] = useState<Set<number>>(new Set());
-  const [isDeletingQueue, setIsDeletingQueue] = useState(false);
 
   const [logsSearch, setLogsSearch] = useState("");
   const [logsSelected, setLogsSelected] = useState<Set<number>>(new Set());
@@ -197,7 +197,7 @@ export function AdminPortalWorkspace({
   const refreshStudentManagement = () => {
     void queryClient.invalidateQueries({ queryKey: ["/api/gis/overview"] });
     void queryClient.invalidateQueries({ queryKey: ["/api/students/processed"] });
-    void queryClient.invalidateQueries({ queryKey: ["/api/schools"] });
+    void queryClient.invalidateQueries({ queryKey: ["/api/schoolRegistry"] });
   };
 
   const updateSelectedStudentStatus = async (status: string) => {
@@ -330,27 +330,6 @@ export function AdminPortalWorkspace({
     URL.revokeObjectURL(url);
   };
 
-  const deleteQueue = async () => {
-    try {
-      setIsDeletingQueue(true);
-      const res = await apiRequest("POST", "/api/schools/batch-delete", { ids: Array.from(queueSelected) });
-      const data = await res.json();
-      if (data.success) {
-        toast({ title: "Success", description: data.message });
-        setQueueSelected(new Set());
-        void queryClient.invalidateQueries({ queryKey: ["/api/gis/overview"] });
-        void queryClient.invalidateQueries({ queryKey: ["/api/schools"] });
-        void queryClient.invalidateQueries({ queryKey: ["/api/mapping/queue"] });
-      } else {
-        toast({ title: "Delete Error", description: data.message, variant: "destructive" });
-      }
-    } catch (e) {
-      toast({ title: "Delete Failed", description: String(e), variant: "destructive" });
-    } finally {
-      setIsDeletingQueue(false);
-    }
-  };
-
   const deleteLogs = async () => {
     try {
       setIsDeletingLogs(true);
@@ -372,7 +351,7 @@ export function AdminPortalWorkspace({
   };
 
   const overview = useMemo(() => {
-    const verifiedSchools = gisOverview?.verifiedSchools ?? schools.filter((s) => s.verified && hasCoordinates(s)).length;
+    const verifiedSchools = gisOverview?.verifiedSchools ?? schools.filter((s) => s.isActive && hasCoordinates(s)).length;
     const unmappedSchools = gisOverview?.unmappedSchools ?? schools.filter((s) => !hasCoordinates(s)).length;
     const totalStudentsSynced = gisOverview?.totalStudentsSynced ?? processedStudents.length;
     const freshmenCount = gisOverview?.freshmenCount ?? processedStudents.filter((s) => s.admissionType === "Freshman").length;
@@ -401,7 +380,7 @@ export function AdminPortalWorkspace({
   const studentStats = useMemo(() => {
     const active = studentRows.filter((row) => isMapActiveStatus(row.enrollmentStatus)).length;
     const archived = studentRows.filter((row) => row.enrollmentStatus === "Archived").length;
-    const mapped = studentRows.filter((row) => row.schoolId && row.mappingStatus !== "needs_review" && row.mappingStatus !== "pending").length;
+    const mapped = studentRows.filter((row) => row.schoolRegistryId && row.mappingStatus !== "needs_review" && row.mappingStatus !== "pending").length;
     const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return {
       total: studentRows.length,
@@ -456,25 +435,11 @@ export function AdminPortalWorkspace({
           (s) =>
             !hasCoordinates(s) ||
             duplicateIds.has(s.id) ||
-            s.status === "Needs Review" ||
-            s.status === "Missing Coordinates",
+            !s.isActive ||
+            !hasCoordinates(s),
         ),
     [schools, duplicateIds],
   );
-
-  const queueSchoolsFiltered = useMemo(() => {
-    let list = [...queueSchools];
-    if (queueSearch) {
-      const q = queueSearch.toLowerCase();
-      list = list.filter((s) => 
-        s.name.toLowerCase().includes(q) ||
-        (s.municipality && s.municipality.toLowerCase().includes(q)) ||
-        (s.province && s.province.toLowerCase().includes(q)) ||
-        (s.status && s.status.toLowerCase().includes(q))
-      );
-    }
-    return list.sort((a, b) => a.name.localeCompare(b.name));
-  }, [queueSchools, queueSearch]);
 
   const studentsFiltered = useMemo(() => {
     let list = [...processedStudents];
@@ -792,8 +757,8 @@ export function AdminPortalWorkspace({
                       </TableRow>
                     ) : (
                       studentsFiltered.map((st) => {
-                        const matchedSchool = st.schoolId ? schools.find(s => s.id === st.schoolId) : null;
-                        const matchedSchoolName = matchedSchool?.name || null;
+                        const matchedSchool = st.schoolRegistryId ? schools.find(s => s.id === st.schoolRegistryId) : null;
+                        const matchedSchoolName = matchedSchool?.schoolName || null;
 
                         return (
                         <TableRow key={st.id} className="text-xs hover:bg-slate-50/50" data-state={feedSelected.has(st.id) ? "selected" : undefined}>
@@ -845,122 +810,18 @@ export function AdminPortalWorkspace({
         </TabsContent>
 
         <TabsContent value="queue" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-          <ScrollArea className="h-full">
-            <div className="mx-auto max-w-4xl space-y-3 p-3 sm:p-4">
-              <TableToolbar
-                searchQuery={queueSearch}
-                onSearchChange={setQueueSearch}
-                searchPlaceholder="Search queue..."
-                selectedCount={queueSelected.size}
-                onClearSelection={() => setQueueSelected(new Set())}
-                onDelete={deleteQueue}
-                isDeleting={isDeletingQueue}
-                deleteItemName="schools"
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-[11px] text-slate-500">
-                  Unknown schools, low-confidence matches, and missing coordinates. Verify, pin, approve, or merge.
-                </p>
-                <Button size="sm" className="h-8 text-xs" onClick={onAddSchool}>
-                  Add school
-                </Button>
-              </div>
-              {queueSchoolsFiltered.length === 0 ? (
-                <Card className="border-white/70 bg-white/70 shadow-[0_18px_50px_-38px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-                  <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
-                    <CheckCircle2 className="h-8 w-8 text-emerald-500/80" />
-                    <p className="text-sm font-medium text-slate-700">Queue is clear</p>
-                    <p className="text-xs text-slate-500">No schools need review or coordinates.</p>
-                  </CardContent>
-                </Card>
-              ) : (
-                <Card className="overflow-hidden border-white/70 bg-white/70 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.5)] backdrop-blur-xl">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-10 px-4">
-                          <Checkbox 
-                            checked={queueSchoolsFiltered.length > 0 && queueSelected.size === queueSchoolsFiltered.length}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setQueueSelected(new Set(queueSchoolsFiltered.map(s => s.id)));
-                              } else {
-                                setQueueSelected(new Set());
-                              }
-                            }}
-                            aria-label="Select all schools"
-                          />
-                        </TableHead>
-                        <TableHead className="text-[10px] font-semibold uppercase">School</TableHead>
-                        <TableHead className="hidden text-[10px] font-semibold uppercase sm:table-cell">Issue</TableHead>
-                        <TableHead className="text-right text-[10px] font-semibold uppercase">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {queueSchoolsFiltered.map((s) => (
-                        <TableRow key={s.id} className="text-xs" data-state={queueSelected.has(s.id) ? "selected" : undefined}>
-                          <TableCell className="px-4">
-                            <Checkbox 
-                              checked={queueSelected.has(s.id)}
-                              onCheckedChange={(checked) => {
-                                const next = new Set(queueSelected);
-                                if (checked) next.add(s.id);
-                                else next.delete(s.id);
-                                setQueueSelected(next);
-                              }}
-                              aria-label={`Select school ${s.name}`}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <p className="font-medium">{s.name}</p>
-                            <p className="text-[10px] text-muted-foreground">
-                              {s.municipality} · {s.institutionType}
-                            </p>
-                          </TableCell>
-                          <TableCell className="hidden sm:table-cell">
-                            <div className="flex flex-wrap gap-1">
-                              {!hasCoordinates(s) ? (
-                                <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-900">
-                                  No coordinates
-                                </Badge>
-                              ) : null}
-                              {duplicateIds.has(s.id) ? (
-                                <Badge variant="outline" className="border-rose-200 bg-rose-50 text-[10px] text-rose-800">
-                                  Duplicate
-                                </Badge>
-                              ) : null}
-                              {s.status === "Needs Review" ? (
-                                <Badge variant="outline" className="text-[10px]">
-                                  Needs review
-                                </Badge>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex flex-wrap justify-end gap-1">
-                              <Button variant="secondary" size="sm" className="h-7 px-2 text-[11px]" onClick={() => onEditSchool(s)}>
-                                Verify
-                              </Button>
-                              {!hasCoordinates(s) ? (
-                                <Button variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={() => onGeolocateSchool(s)}>
-                                  Pin
-                                </Button>
-                              ) : null}
-                              {duplicateIds.has(s.id) ? (
-                                <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px] text-amber-700" onClick={() => onRemoveDuplicate(s)}>
-                                  Merge
-                                </Button>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </Card>
-              )}
-            </div>
-          </ScrollArea>
+          <SchoolMatchingQueue
+            duplicateIds={duplicateIds}
+            onAddSchool={onAddSchool}
+            onEditSchool={onEditSchool}
+            onGeolocateSchool={onGeolocateSchool}
+            onRemoveDuplicate={onRemoveDuplicate}
+            queueSearch={queueSearch}
+            queueSelected={queueSelected}
+            queueSchools={queueSchools}
+            setQueueSearch={setQueueSearch}
+            setQueueSelected={setQueueSelected}
+          />
         </TabsContent>
 
         <TabsContent value="registry" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
@@ -1178,7 +1039,7 @@ type ManagedStudent = StudentProcessed & {
 
 function enrichStudentRow(student: StudentProcessed, schools: School[]): ManagedStudent {
   const program = recognizeProgram(student.course);
-  const matchedSchool = student.schoolId ? schools.find((school) => school.id === student.schoolId) : undefined;
+  const matchedSchool = student.schoolRegistryId ? schools.find((school) => school.id === student.schoolRegistryId) : undefined;
   return {
     ...student,
     municipality: student.municipality || matchedSchool?.municipality || "Laguna",

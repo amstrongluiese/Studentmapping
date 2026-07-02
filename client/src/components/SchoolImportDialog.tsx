@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { HiOutlineDocumentArrowUp, HiOutlineMapPin, HiOutlineSparkles } from "react-icons/hi2";
 import { AlertCircle, CheckCircle2, FileSpreadsheet, Loader2, UploadCloud } from "lucide-react";
-import type { School } from "@shared/schema";
+import { type SchoolRegistry as School } from "@shared/schema";
 import { useImportSchools } from "@/hooks/use-schools";
 import {
   geocodeMissingSchools,
@@ -240,19 +240,19 @@ export function SchoolImportDialog({ open, onOpenChange, existingSchools }: Scho
                     <div key={row.rowNumber} className="grid gap-3 px-6 py-4 md:grid-cols-[1fr_160px_150px]">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="truncate font-semibold">{row.name}</p>
+                          <p className="truncate font-semibold">{row.schoolName}</p>
                           <span className="text-xs text-muted-foreground">Row {row.rowNumber}</span>
                         </div>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          {row.municipality} · {row.institutionType}
+                          {row.municipality} · {row.schoolType}
                         </p>
                         {row.issues.length > 0 && (
                           <p className="mt-2 text-xs text-muted-foreground">{row.issues.join(" ")}</p>
                         )}
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        <p>{row.lat?.toFixed(5) || "No latitude"}</p>
-                        <p>{row.lng?.toFixed(5) || "No longitude"}</p>
+                        <p>{row.latitude?.toFixed(5) || "No latitude"}</p>
+                        <p>{row.longitude?.toFixed(5) || "No longitude"}</p>
                       </div>
                       <div className="flex items-start justify-start md:justify-end">
                         <span className={cn("rounded-full border px-2.5 py-1 text-xs font-bold", statusTone[row.importStatus])}>

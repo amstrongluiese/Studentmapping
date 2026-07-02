@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { School } from "@shared/schema";
+import { SchoolRegistry as School } from "@shared/schema";
 import { api } from "@shared/routes";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,7 @@ export type SchoolSearchSelection =
 
 type SuggestionRow =
   | { id: string; kind: "registry"; school: School; label: string; sub: string }
-  | { id: string; kind: "custom"; name: string; label: string; sub: string };
+  | { id: string; kind: "custom"; name: string; label: string; sub: string; school?: any };
 
 export interface SchoolNameAutocompleteProps {
   value: string;
@@ -50,7 +50,7 @@ export function SchoolNameAutocomplete({
     if (q.length < 2) return [];
     return existingSchools
       .filter((school) =>
-        school.name.toLowerCase().includes(q) ||
+        school.schoolName.toLowerCase().includes(q) ||
         school.municipality.toLowerCase().includes(q),
       )
       .slice(0, 6)
@@ -58,7 +58,7 @@ export function SchoolNameAutocomplete({
         id: `registry-${school.id}`,
         kind: "registry" as const,
         school,
-        label: school.name,
+        label: school.schoolName,
         sub: [school.municipality, hasCoordinates(school) ? "Has coordinates" : "Needs coordinates"]
           .filter(Boolean)
           .join(" · "),
@@ -96,7 +96,7 @@ export function SchoolNameAutocomplete({
         id: `registry-${school.id}`,
         kind: "registry",
         school,
-        label: school.name,
+        label: school.schoolName,
         sub: [school.municipality, hasCoordinates(school) ? "Has coordinates" : "Needs coordinates"]
           .filter(Boolean)
           .join(" · "),
@@ -154,7 +154,7 @@ export function SchoolNameAutocomplete({
 
   const commitSelection = (row: SuggestionRow) => {
     if (row.kind === "registry") {
-      onValueChange(row.school.name);
+      onValueChange(row.school.schoolName);
       onSelect({ type: "registry", school: row.school });
     } else {
       onValueChange(row.name);

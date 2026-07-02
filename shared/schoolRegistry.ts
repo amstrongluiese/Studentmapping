@@ -25,47 +25,40 @@ const SCHOOL_ABBREVIATIONS: Array<[RegExp, string]> = [
 ];
 
 export function normalizeSchoolName(name: string): string {
-  const compacted = name
-    .toLowerCase()
+  if (!name) return "";
+  
+  return name
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/&/g, " and ")
-    .replace(/[^\w\s.-]/g, " ")
-    .replace(/\./g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return SCHOOL_ABBREVIATIONS.reduce(
-    (current, [pattern, replacement]) => current.replace(pattern, replacement),
-    compacted,
-  )
-    .replace(/\s+/g, " ")
+    .replace(/[\u0300-\u036f]/g, "") // remove diacritics
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "") // remove punctuation
+    .toUpperCase()
+    .replace(/\s+/g, " ") // remove duplicate spaces
     .trim();
 }
 
 export function hasCoordinates(record: {
-  lat?: number | null;
-  lng?: number | null;
-}): record is { lat: number; lng: number } {
+  latitude?: number | null;
+  longitude?: number | null;
+}): record is { latitude: number; longitude: number } {
   return (
-    typeof record.lat === "number" &&
-    Number.isFinite(record.lat) &&
-    typeof record.lng === "number" &&
-    Number.isFinite(record.lng)
+    typeof record.latitude === "number" &&
+    Number.isFinite(record.latitude) &&
+    typeof record.longitude === "number" &&
+    Number.isFinite(record.longitude)
   );
 }
 
 export function getSchoolStatus(record: {
   status?: string | null;
-  verified?: boolean | null;
-  lat?: number | null;
-  lng?: number | null;
+  isActive?: boolean | null;
+  latitude?: number | null;
+  longitude?: number | null;
 }): SchoolStatus {
   if (record.status && SCHOOL_STATUSES.includes(record.status as SchoolStatus)) {
     return record.status as SchoolStatus;
   }
 
-  if (record.verified && hasCoordinates(record)) return "Verified";
+  if (record.isActive && hasCoordinates(record)) return "Verified";
   if (hasCoordinates(record)) return "Needs Review";
   return "Missing Coordinates";
 }

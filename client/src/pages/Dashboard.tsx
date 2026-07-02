@@ -24,7 +24,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { api } from "@shared/routes";
-import type { Referral, ReferralInput, School, Student } from "@shared/schema";
+import type { Referral, ReferralInput, SchoolRegistry, Student } from "@shared/schema";
 import { getSchoolStatus, hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
 import {
   ALL_PROGRAM_FILTER,
@@ -34,9 +34,9 @@ import {
   programFilterIsActive,
   type ProgramAnalytics,
   type ProgramFilters,
-  type ProgramSchool,
 } from "@shared/programIntelligence";
 import { AdminPortalWorkspace, type AdminPortalSection } from "@/components/AdminPortalWorkspace";
+import { AdminSchoolRegistry } from "@/components/AdminSchoolRegistry";
 import { AdmissionsIntegrationHub } from "@/components/AdmissionsIntegrationHub";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme, type ThemePreference } from "@/components/theme-provider";
@@ -160,8 +160,8 @@ export default function Dashboard() {
       setTheme("light");
     }
   }, [theme, setTheme]);
-  const [editingSchool, setEditingSchool] = useState<School | null>(null);
-  const [selectedCoords, setSelectedCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [editingSchool, setEditingSchool] = useState<SchoolRegistry | null>(null);
+  const [selectedCoords, setSelectedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [registrySearch, setRegistrySearch] = useState("");
   const [clearDrawSignal, setClearDrawSignal] = useState(0);
   const [programFilters, setProgramFilters] = usePersistentState<ProgramFilters>(`${STORAGE_PREFIX}:program-filters`, {
@@ -259,38 +259,37 @@ export default function Dashboard() {
     const query = registrySearch.trim().toLowerCase();
     if (!query) return schools;
     return schools.filter((school) =>
-      [school.name, school.municipality, school.institutionType, school.status]
+      [school.schoolName, school.municipality, school.schoolType, school.isActive]
         .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(query)),
+        .some((value) => String(value).toLowerCase().includes(query)),
     );
   }, [registrySearch, schools]);
 
-  const openAddSchool = useCallback((coords?: { lat: number; lng: number }) => {
+  const openAddSchool = useCallback((coords?: { latitude: number; longitude: number }) => {
     setEditingSchool(null);
     setSelectedCoords(coords || null);
     setDialogOpen(true);
   }, []);
 
-  const openEditSchool = useCallback((school: School) => {
+  const openEditSchool = useCallback((school: SchoolRegistry) => {
     setEditingSchool(school);
     setSelectedCoords(null);
     setDialogOpen(true);
   }, []);
 
-  const geolocateSchool = async (school: School) => {
+  const geolocateSchool = async (school: SchoolRegistry) => {
     try {
       const { requestGeocodeSchoolOrThrow } = await import("@/lib/geocodeSchoolApi");
       const municipality = school.municipality?.trim() || undefined;
       const result = await requestGeocodeSchoolOrThrow({
-        name: school.name,
+        schoolName: school.schoolName,
         municipality,
       });
       await updateSchool.mutateAsync({
         id: school.id,
-        lat: result.lat,
-        lng: result.lng,
-        verified: true,
-        status: "Auto-Located",
+        latitude: result.latitude,
+        longitude: result.longitude,
+        isActive: true,
         source: result.source === "Google Maps" ? "Google Geocoding Manual Assist" : "Geocoding Manual Assist",
       });
     } catch (err) {
@@ -299,9 +298,9 @@ export default function Dashboard() {
     }
   };
 
-  const removeDuplicate = async (school: School) => {
+  const removeDuplicate = async (school: SchoolRegistry) => {
     if (!duplicateIds.has(school.id)) return;
-    if (!confirm(`Remove duplicate registry record for ${school.name}?`)) return;
+    if (!confirm(`Remove duplicate registry record for ${school.schoolName}?`)) return;
     await deleteSchool.mutateAsync(school.id);
   };
 
@@ -372,7 +371,7 @@ export default function Dashboard() {
                 </TabsTrigger>
               </TabsList>
             </Tabs>
-            <div className="flex min-w-0 flex-1 justify-end">
+            <div className="relative z-[1700] flex min-w-0 flex-1 justify-end">
               <ThemeToggle />
             </div>
           </div>
@@ -439,6 +438,7 @@ export default function Dashboard() {
                       onEditSchool={openEditSchool}
                     />
                   )}
+                  <Metric label="Total Schools Registered" value={schools.length} />
                   <Metric label="Mapped Schools" value={mappedSchools.length} />
                   <Metric label="Enrollees" value={totalStudents} />
                   <Metric label="Municipalities" value={municipalityCount} />
@@ -488,6 +488,7 @@ export default function Dashboard() {
                     onEditSchool={openEditSchool}
                   />
                 )}
+                <Metric label="Total Schools Registered" value={schools.length} />
                 <Metric label="Mapped Schools" value={mappedSchools.length} />
                 <Metric label="Enrollees" value={totalStudents} />
                 <Metric label="Municipalities" value={municipalityCount} />
@@ -639,7 +640,7 @@ export default function Dashboard() {
             )}
             renderIntegrationControls={() => <AdmissionsIntegrationHub existingSchools={schools} />}
             renderSchoolRegistry={() => (
-              <SchoolRegistry
+              <AdminSchoolRegistry
                 compact
                 duplicateIds={duplicateIds}
                 filteredSchools={filteredSchools}
@@ -685,7 +686,7 @@ export default function Dashboard() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         initialData={editingSchool}
-        defaultCoordinates={selectedCoords}
+        defaultCoordinates={selectedCoords ? { latitude: selectedCoords.latitude, longitude: selectedCoords.longitude } : null}
       />
     </div>
   );
@@ -700,7 +701,7 @@ function SelectedClusterPanel({
   cluster: SchoolCluster;
   programFilters: ProgramFilters;
   onClose: () => void;
-  onEditSchool: (school: School) => void;
+  onEditSchool: (school: SchoolRegistry) => void;
 }) {
   return (
     <div className="rounded-xl border-transparent bg-transparent overflow-hidden flex flex-col mb-1">
@@ -723,14 +724,14 @@ function SelectedClusterPanel({
           <div key={school.id} className="rounded-lg border border-white/30 bg-white/40 p-3 backdrop-blur-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-slate-900">{school.name}</p>
+                <p className="truncate text-sm font-bold text-slate-900">{school.schoolName}</p>
                 <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-600">
                   <MapIcon className="mt-[2px] h-3 w-3 shrink-0" />
                   <span className="leading-snug">{school.municipality || "Laguna"}</span>
                 </p>
                 <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-600">
                   <Layers className="mt-[2px] h-3 w-3 shrink-0" />
-                  <span className="leading-snug">{school.dominantProgram?.collegeName || school.institutionType || "Feeder Institution"}</span>
+                  <span className="leading-snug">{school.dominantProgram?.collegeName || school.schoolType || "Feeder Institution"}</span>
                 </p>
               </div>
               <div className="flex shrink-0 min-w-[3.5rem] flex-col items-center justify-center rounded-lg bg-primary/10 px-2.5 py-1.5 text-center text-primary">
@@ -760,7 +761,7 @@ function SelectedClusterPanel({
               <div className="mt-3 rounded-md border border-white/40 bg-white/50 p-2 shadow-sm">
                 <p className="mb-1 text-[10px] font-bold uppercase text-slate-500">Program Distribution</p>
                 <div className="space-y-1">
-                  {school.programDistribution.slice(0, 5).map((entry) => (
+                  {school.programDistribution.slice(0, 5).map((entry: any) => (
                     <div key={entry.code} className="flex items-center justify-between gap-2 text-[11px]">
                       <span className="flex min-w-0 items-center gap-1.5">
                         <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
@@ -803,14 +804,14 @@ function SchoolRegistry({
 }: {
   compact?: boolean;
   duplicateIds: Set<number>;
-  filteredSchools: School[];
+  filteredSchools: SchoolRegistry[];
   isLoading: boolean;
   registrySearch: string;
   onAdd: () => void;
-  onDelete: (school: School) => void;
-  onEdit: (school: School) => void;
-  onGeolocate: (school: School) => void;
-  onRemoveDuplicate: (school: School) => void;
+  onDelete: (school: SchoolRegistry) => void;
+  onEdit: (school: SchoolRegistry) => void;
+  onGeolocate: (school: SchoolRegistry) => void;
+  onRemoveDuplicate: (school: SchoolRegistry) => void;
   onSearchChange: (value: string) => void;
 }) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -927,38 +928,38 @@ function SchoolRegistry({
                       else next.delete(school.id);
                       setSelectedIds(next);
                     }}
-                    aria-label={`Select school ${school.name}`}
+                    aria-label={`Select school ${school.schoolName}`}
                   />
                 </TableCell>
                 <TableCell className={cn(compact && "max-w-[180px]")}>
-                  <p className={cn("font-semibold", compact && "truncate")}>{school.name}</p>
+                  <p className={cn("font-semibold", compact && "truncate")}>{school.schoolName}</p>
                   {!compact ? (
-                    <p className="text-xs text-muted-foreground">{school.studentCount.toLocaleString()} students</p>
+                    <p className="text-xs text-muted-foreground">{school.schoolType || "Unknown"}</p>
                   ) : (
-                    <p className="truncate text-[10px] text-muted-foreground">{school.institutionType}</p>
+                    <p className="truncate text-[10px] text-muted-foreground">{school.schoolType}</p>
                   )}
                 </TableCell>
                 {compact ? (
                   <>
                     <TableCell className="max-w-[140px]">
                       <span className="block truncate font-mono text-[10px] text-slate-600">
-                        {school.normalizedName || "—"}
+                        {school.normalizedSchoolName || "—"}
                       </span>
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
                       {hasCoordinates(school) ? (
-                        <span className="font-mono text-[10px]">{school.lat!.toFixed(5)}, {school.lng!.toFixed(5)}</span>
+                        <span className="font-mono text-[10px]">{school.latitude!.toFixed(5)}, {school.longitude!.toFixed(5)}</span>
                       ) : (
                         <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-700">Missing</Badge>
                       )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{school.municipality}</TableCell>
                     <TableCell className="whitespace-nowrap text-slate-500">Laguna</TableCell>
-                    <TableCell className="text-right tabular-nums">{school.studentCount.toLocaleString()}</TableCell>
+                    <TableCell className="text-right tabular-nums">—</TableCell>
                     <TableCell className="whitespace-nowrap text-slate-400">— / —</TableCell>
                     <TableCell>
                       <Badge variant="outline" className={cn("text-[10px]", statusTone(school))}>
-                        {school.verified ? "Verified" : registryStatus}
+                        {school.isActive ? "Verified" : registryStatus}
                       </Badge>
                     </TableCell>
                   </>
@@ -966,13 +967,13 @@ function SchoolRegistry({
                   <>
                     <TableCell>
                       {hasCoordinates(school) ? (
-                        <span className="font-mono text-xs">{school.lat!.toFixed(5)}, {school.lng!.toFixed(5)}</span>
+                        <span className="font-mono text-xs">{school.latitude!.toFixed(5)}, {school.longitude!.toFixed(5)}</span>
                       ) : (
                         <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">Missing</Badge>
                       )}
                     </TableCell>
                     <TableCell>{school.municipality}</TableCell>
-                    <TableCell>{school.institutionType}</TableCell>
+                    <TableCell>{school.schoolType}</TableCell>
                     <TableCell>
                       <Badge variant="outline" className={statusTone(school)}>{registryStatus}</Badge>
                     </TableCell>
@@ -1118,7 +1119,7 @@ function SidebarSelect({
   );
 }
 
-function ProgramSchoolList({ schools }: { schools: ProgramSchool[] }) {
+function ProgramSchoolList({ schools }: { schools: any[] }) {
   return (
     <div className="rounded-xl border border-white/50 bg-white/40 p-3 shadow-sm backdrop-blur-md">
       <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">Schools</p>
@@ -1133,7 +1134,7 @@ function ProgramSchoolList({ schools }: { schools: ProgramSchool[] }) {
                 style={{ backgroundColor: school.dominantProgram?.color || "#cbd5e1" }}
               />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-bold text-slate-900">{school.name}</p>
+                <p className="truncate text-xs font-bold text-slate-900">{school.schoolName}</p>
                 <p className="truncate text-[10px] text-slate-500">{school.municipality || "Laguna"} · {school.dominantProgram?.code || "Unknown"}</p>
               </div>
               <div className="shrink-0 text-right">
@@ -1404,6 +1405,7 @@ function ReferralProgramWorkspace({
                       <TableCell>
                         <span className="text-sm">{referral.contactNumber || "No contact"}</span>
                       </TableCell>
+
                       <TableCell>
                         <ReferralStatusBadge status={referral.status} />
                       </TableCell>
@@ -1525,7 +1527,7 @@ function AnalyticsInsightPanel({ analytics }: { analytics: ProgramAnalytics }) {
       <div className="mt-2 space-y-1.5 text-xs">
         <div className="flex items-start justify-between gap-2">
           <span className="shrink-0 text-slate-500">Top Feeder</span>
-          <strong className="min-w-0 truncate text-right text-slate-900">{analytics.topFeederSchool?.name || "None"}</strong>
+          <strong className="min-w-0 truncate text-right text-slate-900">{analytics.topFeederSchoolRegistry?.schoolName || "None"}</strong>
         </div>
         <div className="flex items-start justify-between gap-2">
           <span className="shrink-0 text-slate-500">Top Municipality</span>
@@ -1570,7 +1572,7 @@ function SettingSwitch({ label, checked, onChange }: { label: string; checked: b
   );
 }
 
-function statusTone(school: School) {
+function statusTone(school: SchoolRegistry) {
   const status = getSchoolStatus(school);
   if (status === "Verified") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "Auto-Located") return "border-sky-200 bg-sky-50 text-sky-700";
@@ -1579,10 +1581,10 @@ function statusTone(school: School) {
   return "border-slate-200 bg-slate-50 text-slate-600";
 }
 
-function findDuplicateSchoolIds(schools: School[]) {
-  const byName = new Map<string, School[]>();
+function findDuplicateSchoolIds(schools: SchoolRegistry[]) {
+  const byName = new Map<string, SchoolRegistry[]>();
   schools.forEach((school) => {
-    const key = normalizeSchoolName(school.normalizedName || school.name);
+    const key = normalizeSchoolName(school.normalizedSchoolName || school.schoolName);
     byName.set(key, [...(byName.get(key) || []), school]);
   });
 
@@ -1592,7 +1594,7 @@ function findDuplicateSchoolIds(schools: School[]) {
       .sort((a, b) => {
         if (hasCoordinates(a) && !hasCoordinates(b)) return -1;
         if (!hasCoordinates(a) && hasCoordinates(b)) return 1;
-        return b.studentCount - a.studentCount;
+        return 0;
       })
       .slice(1)
       .forEach((school) => duplicates.add(school.id));
@@ -1600,7 +1602,7 @@ function findDuplicateSchoolIds(schools: School[]) {
   return duplicates;
 }
 
-function sortProgramSchools(schools: ProgramSchool[], sort: string) {
+function sortProgramSchools(schools: any[], sort: string) {
   return schools.slice().sort((a, b) => {
     if (sort === "total-desc") return b.totalStudentCount - a.totalStudentCount;
     if (sort === "name-asc") return a.name.localeCompare(b.name);

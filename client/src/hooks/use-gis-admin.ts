@@ -57,6 +57,12 @@ export function useSyncStudents() {
       lastSchoolType?: string | null;
       studentType?: string | null;
       municipality?: string | null;
+      province?: string | null;
+      yearLevel?: string | null;
+      contactNumber?: string | null;
+      schedule?: string | null;
+      iskolarNiKap?: string | null;
+      requirements?: string | null;
     }> }) => {
       const res = await fetch(api.gis.studentsSync.path, {
         method: api.gis.studentsSync.method,
@@ -75,7 +81,7 @@ export function useSyncStudents() {
       queryClient.invalidateQueries({ queryKey: [api.gis.overview.path] });
       queryClient.invalidateQueries({ queryKey: [api.mapping.queue.path] });
       queryClient.invalidateQueries({ queryKey: [api.gis.importLogs.path] });
-      queryClient.invalidateQueries({ queryKey: [api.schools.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.schoolRegistry.list.path] });
     },
   });
 }
@@ -84,11 +90,11 @@ export function useVerifyMapping() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: {
-      schoolId: number;
-      verified?: boolean;
-      lat?: number | null;
-      lng?: number | null;
-      name?: string;
+      schoolRegistryId: number;
+      isActive?: boolean;
+      latitude?: number | null;
+      longitude?: number | null;
+      schoolName?: string;
       municipality?: string;
       createAlias?: string;
     }) => {
@@ -105,7 +111,7 @@ export function useVerifyMapping() {
       return api.mapping.verify.responses[200].parse(await res.json());
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [api.schools.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.schoolRegistry.list.path] });
       queryClient.invalidateQueries({ queryKey: [api.mapping.queue.path] });
       queryClient.invalidateQueries({ queryKey: [api.gis.processedStudents.path] });
     },

@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { schools, referrals, students, type InsertSchool, type School, type InsertReferral, type Referral, type InsertStudent, type Student } from "@shared/schema";
+import { schoolRegistry, referrals, students, type InsertSchoolRegistry, type SchoolRegistry, type InsertReferral, type Referral, type InsertStudent, type Student } from "@shared/schema";
 import { hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
 import { eq } from "drizzle-orm";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -9,21 +9,17 @@ export interface SchoolImportResult {
   created: number;
   updated: number;
   skipped: number;
-  schools: School[];
+  schools: SchoolRegistry[];
   issues: string[];
 }
 
 export interface IStorage {
-  getSchools(): Promise<School[]>;
-  getSchool(id: number): Promise<School | undefined>;
-  createSchool(school: InsertSchool): Promise<School>;
-  updateSchool(id: number, updates: Partial<InsertSchool>): Promise<School>;
-  deleteSchool(id: number): Promise<void>;
-  importSchools(schools: InsertSchool[]): Promise<SchoolImportResult>;
-
-  getStudents(): Promise<Student[]>;
-  getStudentByNumber(studentNumber: string): Promise<Student | undefined>;
-  getStudentByCode(referralCode: string): Promise<Student | undefined>;
+  listSchoolRegistry(): Promise<SchoolRegistry[]>;
+  getSchoolRegistry(id: number): Promise<SchoolRegistry | undefined>;
+  createSchoolRegistry(school: InsertSchoolRegistry): Promise<SchoolRegistry>;
+  updateSchoolRegistry(id: number, updates: Partial<InsertSchoolRegistry>): Promise<SchoolRegistry>;
+  deleteSchoolRegistry(id: number): Promise<void>;
+  importSchools(schools: InsertSchoolRegistry[]): Promise<SchoolImportResult>;
 
   getStudents(): Promise<Student[]>;
   getStudentByNumber(studentNumber: string): Promise<Student | undefined>;
@@ -37,58 +33,55 @@ export interface IStorage {
   deleteReferral(id: number): Promise<void>;
 
   batchDeleteProcessedStudents(ids: number[]): Promise<{ deletedCount: number; skippedCount: number }>;
-  batchDeleteSchools(ids: number[]): Promise<{ deletedCount: number; skippedCount: number; skippedIds: number[] }>;
+  batchDeleteSchoolRegistry(ids: number[]): Promise<{ deletedCount: number; skippedCount: number; skippedIds: number[] }>;
   batchDeleteImports(ids: number[]): Promise<{ deletedCount: number; skippedCount: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
-  async getSchools(): Promise<School[]> {
-    return await getDb().select().from(schools);
+  async listSchoolRegistry(): Promise<SchoolRegistry[]> {
+    return await getDb().select().from(schoolRegistry);
   }
 
-  async getSchool(id: number): Promise<School | undefined> {
-    const [school] = await getDb().select().from(schools).where(eq(schools.id, id));
+  async getSchoolRegistry(id: number): Promise<SchoolRegistry | undefined> {
+    const [school] = await getDb().select().from(schoolRegistry).where(eq(schoolRegistry.id, id));
     return school;
   }
 
-  async createSchool(school: InsertSchool): Promise<School> {
-    const [newSchool] = await getDb().insert(schools).values(this.prepareSchool(school)).returning();
-    await this.persistLocalRegistry();
+  async createSchoolRegistry(school: InsertSchoolRegistry): Promise<SchoolRegistry> {
+    const [newSchool] = await getDb().insert(schoolRegistry).values(this.prepareSchool(school)).returning();
     return newSchool;
   }
 
-  async updateSchool(id: number, updates: Partial<InsertSchool>): Promise<School> {
-    const [updatedSchool] = await getDb().update(schools)
+  async updateSchoolRegistry(id: number, updates: Partial<InsertSchoolRegistry>): Promise<SchoolRegistry> {
+    const [updatedSchool] = await getDb().update(schoolRegistry)
       .set(this.prepareSchool(updates))
-      .where(eq(schools.id, id))
+      .where(eq(schoolRegistry.id, id))
       .returning();
-    await this.persistLocalRegistry();
     return updatedSchool;
   }
 
-  async deleteSchool(id: number): Promise<void> {
-    await getDb().delete(schools).where(eq(schools.id, id));
-    await this.persistLocalRegistry();
+  async deleteSchoolRegistry(id: number): Promise<void> {
+    await getDb().delete(schoolRegistry).where(eq(schoolRegistry.id, id));
   }
 
-  async importSchools(records: InsertSchool[]): Promise<SchoolImportResult> {
-    const existing = await this.getSchools();
-    const importedSchools: School[] = [];
+  async importSchools(records: InsertSchoolRegistry[]): Promise<SchoolImportResult> {
+    const existing = await this.listSchoolRegistry();
+    const importedSchools: SchoolRegistry[] = [];
     const issues: string[] = [];
     let created = 0;
     let updated = 0;
     let skipped = 0;
 
-    const knownByNormalized = new Map<string, School>();
+    const knownByNormalized = new Map<string, SchoolRegistry>();
     for (const school of existing) {
-      const normalized = normalizeSchoolName(school.normalizedName || school.name);
+      const normalized = normalizeSchoolName(school.normalizedSchoolName || school.schoolName);
       knownByNormalized.set(normalized, school);
     }
 
     const seenInBatch = new Set<string>();
 
     for (const record of records) {
-      const normalized = normalizeSchoolName(record.normalizedName || record.name);
+      const normalized = normalizeSchoolName(record.normalizedSchoolName || record.schoolName);
 
       if (!normalized) {
         skipped += 1;
@@ -98,31 +91,29 @@ export class DatabaseStorage implements IStorage {
 
       if (seenInBatch.has(normalized)) {
         skipped += 1;
-        issues.push(`${record.name} was skipped as a duplicate in the uploaded file.`);
+        issues.push(`${record.schoolName} was skipped as a duplicate in the uploaded file.`);
         continue;
       }
 
       seenInBatch.add(normalized);
       const prepared = this.prepareSchool({
         ...record,
-        normalizedName: normalized,
-      }) as InsertSchool;
+        normalizedSchoolName: normalized,
+      }) as InsertSchoolRegistry;
 
       const match = knownByNormalized.get(normalized);
       if (match) {
-        const updatedSchool = await this.updateSchool(match.id, prepared);
+        const updatedSchool = await this.updateSchoolRegistry(match.id, prepared);
         knownByNormalized.set(normalized, updatedSchool);
         importedSchools.push(updatedSchool);
         updated += 1;
       } else {
-        const newSchool = await this.createSchool(prepared);
+        const newSchool = await this.createSchoolRegistry(prepared);
         knownByNormalized.set(normalized, newSchool);
         importedSchools.push(newSchool);
         created += 1;
       }
     }
-
-    await this.persistLocalRegistry();
 
     return {
       created,
@@ -133,49 +124,20 @@ export class DatabaseStorage implements IStorage {
     };
   }
 
-  private prepareSchool<T extends Partial<InsertSchool>>(school: T): T {
-    const normalizedName = school.name
-      ? normalizeSchoolName(school.normalizedName || school.name)
-      : school.normalizedName;
-    const prepared: Partial<InsertSchool> = {
+  private prepareSchool<T extends Partial<InsertSchoolRegistry>>(school: T): T {
+    const normalizedName = school.schoolName
+      ? normalizeSchoolName(school.normalizedSchoolName || school.schoolName)
+      : school.normalizedSchoolName;
+    const prepared: Partial<InsertSchoolRegistry> = {
       ...school,
-      ...(normalizedName ? { normalizedName } : {}),
+      ...(normalizedName ? { normalizedSchoolName: normalizedName } : {}),
     };
 
     if ("municipality" in school) prepared.municipality = school.municipality?.trim() || "Laguna";
     if ("province" in school) prepared.province = school.province?.trim() || "Laguna";
-    if ("institutionType" in school) prepared.institutionType = school.institutionType?.trim() || "Feeder Institution";
     if ("source" in school) prepared.source = school.source?.trim() || "Manual Entry";
-    if ("status" in school || "lat" in school || "lng" in school) {
-      prepared.status = school.status || (school.lat != null && school.lng != null ? "Needs Review" : "Missing Coordinates");
-    }
 
     return prepared as T;
-  }
-
-  private async persistLocalRegistry() {
-    const registryPath = path.join(process.cwd(), "server", "data", "feeder-school-registry.json");
-    const records = await this.getSchools();
-    const dataset = records
-      .filter(hasCoordinates)
-      .map((school) => ({
-        id: school.id,
-        name: school.name,
-        normalizedName: normalizeSchoolName(school.normalizedName || school.name),
-        latitude: school.lat,
-        longitude: school.lng,
-        municipality: school.municipality,
-        province: school.province,
-        schoolType: school.institutionType,
-        verified: school.verified,
-        status: school.status,
-        studentCount: school.studentCount,
-        source: school.source,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    await mkdir(path.dirname(registryPath), { recursive: true });
-    await writeFile(registryPath, `${JSON.stringify({ updatedAt: new Date().toISOString(), schools: dataset }, null, 2)}\n`, "utf8");
   }
 
   async getStudents(): Promise<Student[]> {
@@ -234,25 +196,24 @@ export class DatabaseStorage implements IStorage {
     return { deletedCount: ids.length, skippedCount: 0 };
   }
 
-  async batchDeleteSchools(ids: number[]): Promise<{ deletedCount: number; skippedCount: number; skippedIds: number[] }> {
+  async batchDeleteSchoolRegistry(ids: number[]): Promise<{ deletedCount: number; skippedCount: number; skippedIds: number[] }> {
     if (ids.length === 0) return { deletedCount: 0, skippedCount: 0, skippedIds: [] };
     
     const { inArray } = await import("drizzle-orm");
-    const { schools, studentsProcessed, schoolAliases, mappingLogs } = await import("@shared/schema");
+    const { schoolRegistry, studentsProcessed, schoolAliases, mappingLogs } = await import("@shared/schema");
     
     const usedSchoolsRaw = await getDb()
-      .select({ schoolId: studentsProcessed.schoolId })
+      .select({ schoolId: studentsProcessed.schoolRegistryId })
       .from(studentsProcessed)
-      .where(inArray(studentsProcessed.schoolId, ids));
+      .where(inArray(studentsProcessed.schoolRegistryId, ids));
       
     const usedIds = new Set(usedSchoolsRaw.map(r => r.schoolId).filter(Boolean) as number[]);
     const safeToDelete = ids.filter(id => !usedIds.has(id));
     
     if (safeToDelete.length > 0) {
-      await getDb().delete(mappingLogs).where(inArray(mappingLogs.schoolId, safeToDelete));
-      await getDb().delete(schoolAliases).where(inArray(schoolAliases.schoolId, safeToDelete));
-      await getDb().delete(schools).where(inArray(schools.id, safeToDelete));
-      await this.persistLocalRegistry();
+      await getDb().delete(mappingLogs).where(inArray(mappingLogs.schoolRegistryId, safeToDelete));
+      await getDb().delete(schoolAliases).where(inArray(schoolAliases.schoolRegistryId, safeToDelete));
+      await getDb().delete(schoolRegistry).where(inArray(schoolRegistry.id, safeToDelete));
     }
     
     return { 

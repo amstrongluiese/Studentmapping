@@ -1,4 +1,4 @@
-import type { School, StudentProcessed } from "./schema";
+import type { SchoolRegistry, StudentProcessed } from "./schema";
 import {
   ALL_PROGRAM_FILTER,
   PROGRAM_CATALOG,
@@ -40,7 +40,7 @@ export const ACTIVE_GIS_STUDENT_STATUSES = new Set(["Active", "Enrolled"]);
 
 export type ProgramRecord = ProgramInfo;
 
-export type ProgramSchool = School & {
+export type ProgramSchoolRegistry = SchoolRegistry & {
   totalStudentCount: number;
   filteredStudentCount: number;
   dominantProgram?: ProgramDistributionEntry;
@@ -51,7 +51,7 @@ export type ProgramSchool = School & {
 export interface ProgramAnalytics {
   totalStudents: number;
   totalSchools: number;
-  topFeederSchool?: ProgramSchool;
+  topFeederSchoolRegistry?: ProgramSchoolRegistry;
   topMunicipality?: { name: string; count: number };
   programDistribution: ProgramDistributionEntry[];
   departmentDistribution: Array<{ department: string; departmentName: string; color: string; count: number }>;
@@ -86,14 +86,14 @@ export function getProgramOptions(processedStudents: StudentProcessed[]) {
 }
 
 export function buildProgramSchools(
-  schools: School[],
+  schools: SchoolRegistry[],
   processedStudents: StudentProcessed[],
   filters: ProgramFilters,
-): ProgramSchool[] {
+): ProgramSchoolRegistry[] {
   const {
-    distributionBySchool,
-    filteredCountBySchool,
-    totalCountBySchool,
+    distributionBySchoolRegistry,
+    filteredCountBySchoolRegistry,
+    totalCountBySchoolRegistry,
   } = buildSchoolProgramDistribution(
     schools,
     processedStudents,
@@ -103,10 +103,10 @@ export function buildProgramSchools(
 
   return schools
     .map((school) => {
-      const programDistribution = Array.from(distributionBySchool.get(school.id)?.values() || [])
+      const programDistribution = Array.from(distributionBySchoolRegistry.get(school.id)?.values() || [])
         .sort((a, b) => b.count - a.count || a.code.localeCompare(b.code));
-      const filteredStudentCount = getFilteredStudentCount(programDistribution, filters) || filteredCountBySchool.get(school.id) || 0;
-      const totalStudentCount = totalCountBySchool.get(school.id) || 0;
+      const filteredStudentCount = getFilteredStudentCount(programDistribution, filters) || filteredCountBySchoolRegistry.get(school.id) || 0;
+      const totalStudentCount = totalCountBySchoolRegistry.get(school.id) || 0;
       const dominantDepartment = getDominantDepartment(programDistribution);
       return {
         ...school,
@@ -122,7 +122,7 @@ export function buildProgramSchools(
 }
 
 export function buildProgramAnalytics(
-  schools: ProgramSchool[],
+  schools: ProgramSchoolRegistry[],
   filters: ProgramFilters = {
     college: ALL_PROGRAM_FILTER,
     program: ALL_PROGRAM_FILTER,
@@ -157,7 +157,7 @@ export function buildProgramAnalytics(
   return {
     totalStudents: schools.reduce((sum, school) => sum + school.filteredStudentCount, 0),
     totalSchools: schools.length,
-    topFeederSchool: schools.slice().sort((a, b) => b.filteredStudentCount - a.filteredStudentCount)[0],
+    topFeederSchoolRegistry: schools.slice().sort((a, b) => b.filteredStudentCount - a.filteredStudentCount)[0],
     topMunicipality: Array.from(municipalityMap.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)[0],
     programDistribution: Array.from(programMap.values()).sort((a, b) => b.count - a.count),
     departmentDistribution: Array.from(departmentMap.values()).sort((a, b) => b.count - a.count),

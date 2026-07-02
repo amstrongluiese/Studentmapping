@@ -86,7 +86,7 @@ export const DrawingCanvas = ({
     type: "move" | "resize";
     objectId: string;
     handle?: "start" | "end" | "nw" | "ne" | "sw" | "se" | "radius";
-    startPoint: DrawingPoint;
+    startPoint?: DrawingPoint;
     lastPoint: DrawingPoint;
   } | null>(null);
 
@@ -724,7 +724,7 @@ export const DrawingCanvas = ({
         drawingRef.current.setSelectedAnnotationId(objectHit.id);
         activeDragRef.current = {
           objectId: objectHit.id,
-          handle: "center" as const,
+          handle: "se" as any,
           type: "move",
           lastPoint: coords,
         };

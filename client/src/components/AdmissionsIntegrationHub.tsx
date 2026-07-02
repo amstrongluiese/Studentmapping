@@ -13,7 +13,7 @@ import {
   GitMerge,
   X,
 } from "lucide-react";
-import type { School } from "@shared/schema";
+import { type SchoolRegistry as School } from "@shared/schema";
 import { api, type IntegrationPreviewInput, type SchoolInput } from "@shared/routes";
 import { requestGeocodeSchool } from "@/lib/geocodeSchoolApi";
 import { hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
@@ -23,7 +23,7 @@ import {
   buildGisSyncRecords,
   collectFields,
   loadImportedAdmissionFingerprints,
-  parseAdmissionsFile,
+  parseAdmissions,
   saveImportedAdmissionFingerprints,
   suggestFieldMappings,
   type AdmissionsPreviewRow,
@@ -204,7 +204,7 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
     setIsLoading(true);
     setFileName(file.name);
     try {
-      const source = await parseAdmissionsFile(file);
+      const source = await parseAdmissions(file);
       hydrateSource(source.records, source.fields, file.name);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to parse admissions file.";
@@ -598,7 +598,7 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
                    const municipality = row.matchedSchool?.municipality || row.municipality || "Laguna";
                    
                    return (
-                     <TableRow key={row.fingerprint} className="text-[13px] hover:bg-slate-50/80 transition-colors border-b border-slate-50">
+                     <TableRow key={`${row.fingerprint}-${row.rowNumber}`} className="text-[13px] hover:bg-slate-50/80 transition-colors border-b border-slate-50">
                        <TableCell className="font-mono text-[12px] text-slate-500 whitespace-nowrap px-6">{row.studentNumber || "—"}</TableCell>
                        <TableCell className="font-medium text-slate-900 whitespace-nowrap">{row.fullName || "—"}</TableCell>
                        <TableCell className="whitespace-nowrap text-slate-600">{row.program || row.strand || "—"}</TableCell>
@@ -607,8 +607,8 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
                        <TableCell className="whitespace-nowrap text-slate-600">{schoolType}</TableCell>
                        <TableCell className="whitespace-nowrap text-slate-600">{municipality}</TableCell>
                        <TableCell className="whitespace-nowrap text-slate-500 text-[12px]">{lastSource}</TableCell>
-                       <TableCell className="whitespace-nowrap text-right px-6">
-                         <Badge variant="outline" className={cn("text-[11px] font-medium tracking-wide shadow-none border-transparent", statusTone(row))}>
+                       <TableCell className="whitespace-nowrap text-right px-6" title={row.issues.join("\n")}>
+                         <Badge variant="outline" className={cn("text-[11px] font-medium tracking-wide shadow-none border-transparent cursor-help", statusTone(row))}>
                            {row.status === "ready" ? "Ready" : row.status === "needsReview" ? "Review" : row.status === "duplicate" ? "Duplicate" : "Blocked"}
                          </Badge>
                        </TableCell>
@@ -633,8 +633,8 @@ async function buildGeocodedSchoolUpdates(
   const groups = new Map<string, { rows: AdmissionsPreviewRow[]; school?: School }>();
 
   rows.forEach((row) => {
-    const school = row.matchedSchool ? existingById.get(row.matchedSchool.id) || row.matchedSchool : undefined;
-    const key = school ? `school:${school.id}` : `new:${normalizeSchoolName(row.feederSchool)}`;
+    const school = row.matchedSchoolRegistry ? existingById.get(row.matchedSchoolRegistry.id) || row.matchedSchoolRegistry : undefined;
+    const key = school ? `school:${school.id}` : `new:${normalizeSchoolName(row.feederSchoolRegistry)}`;
     const group = groups.get(key) || { rows: [], school };
     group.rows.push(row);
     groups.set(key, group);
@@ -646,19 +646,19 @@ async function buildGeocodedSchoolUpdates(
     const first = schoolRows[0];
     const incomingLat = first.lat;
     const incomingLng = first.lng;
-    let lat = school?.lat ?? incomingLat ?? null;
-    let lng = school?.lng ?? incomingLng ?? null;
+    let latitude = school?.latitude ?? incomingLat ?? null;
+    let longitude = school?.longitude ?? incomingLng ?? null;
     let source = school?.source || "Admissions Integration";
-    const name = school?.name || first.feederSchool;
+    const name = school?.schoolName || first.feederSchoolRegistry;
     const municipality =
       first.municipality?.trim() || school?.municipality?.trim() || undefined;
     const savedMunicipality = municipality || "Laguna";
 
-    if (!hasCoordinates({ lat, lng })) {
-      const geocoded = await requestGeocodeSchool({ name, municipality });
+    if (!hasCoordinates({ latitude, longitude })) {
+      const geocoded = await requestGeocodeSchool({ schoolName: name, municipality });
       if (geocoded) {
-        lat = geocoded.lat;
-        lng = geocoded.lng;
+        latitude = geocoded.latitude;
+        longitude = geocoded.longitude;
         source = `${geocoded.source} + Admissions Integration`;
         addEvent("success", `${name} geolocated and saved to the feeder registry.`);
       } else {
@@ -666,19 +666,16 @@ async function buildGeocodedSchoolUpdates(
       }
     }
 
-    const mapped = hasCoordinates({ lat, lng });
+    const mapped = hasCoordinates({ latitude, longitude });
     updates.push({
-      name,
-      normalizedName: normalizeSchoolName(name),
+      schoolName: name,
+      normalizedSchoolName: normalizeSchoolName(name),
       municipality: savedMunicipality,
       province: school?.province || "Laguna",
-      institutionType: school?.institutionType || inferSchoolType(name),
-      lat,
-      lng,
-      altitude: school?.altitude ?? null,
-      studentCount: (school?.studentCount || 0) + schoolRows.length,
-      verified: school?.verified || mapped,
-      status: mapped ? (school?.verified ? "Verified" : "Auto-Located") : "Missing Coordinates",
+      schoolType: school?.schoolType || inferSchoolType(name),
+      latitude,
+      longitude,
+      isActive: school?.isActive || mapped,
       source,
     });
   }
@@ -687,7 +684,7 @@ async function buildGeocodedSchoolUpdates(
 }
 
 function hasIncomingCoordinates(row: AdmissionsPreviewRow) {
-  return hasCoordinates({ lat: row.lat, lng: row.lng });
+  return hasCoordinates({ latitude: row.lat, longitude: row.lng });
 }
 
 function inferSchoolType(name: string) {

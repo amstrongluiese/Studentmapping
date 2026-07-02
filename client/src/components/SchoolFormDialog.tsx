@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { api } from "@shared/routes";
 import { requestGeocodeSchoolOrThrow } from "@/lib/geocodeSchoolApi";
-import type { School as SchoolRecord } from "@shared/schema";
+import { type SchoolRegistry as SchoolRecord } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
 import {
   Dialog,
@@ -36,7 +36,7 @@ interface SchoolFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialData?: SchoolRecord | null;
-  defaultCoordinates?: { lat: number; lng: number } | null;
+  defaultCoordinates?: { latitude: number; longitude: number } | null;
 }
 
 export function SchoolFormDialog({
@@ -56,11 +56,11 @@ export function SchoolFormDialog({
   const [selectedSavedSchoolId, setSelectedSavedSchoolId] = useState<number | null>(null);
   const selectionConfirmedRef = useRef(false);
 
-  const formSchema = api.schools.create.input.extend({
+  const formSchema = api.schoolRegistry.create.input.extend({
     municipality: z.string().trim().min(1, "Municipality is required"),
     institutionType: z.string().trim().min(1, "Institution type is required"),
-    lat: z.coerce.number().min(-90).max(90),
-    lng: z.coerce.number().min(-180).max(180),
+    latitude: z.coerce.number().min(-90).max(90),
+    longitude: z.coerce.number().min(-180).max(180),
     altitude: z.coerce.number().nullable().optional(),
     studentCount: z.coerce.number().int().min(0, "Student count must be 0 or more"),
   });
@@ -68,16 +68,16 @@ export function SchoolFormDialog({
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      name: "",
+      schoolName: "",
       municipality: "Laguna",
       province: "Laguna",
       institutionType: "Feeder Institution",
-      lat: defaultCoordinates?.lat ?? 14.1667,
-      lng: defaultCoordinates?.lng ?? 121.2500,
+      latitude: defaultCoordinates?.latitude ?? 14.1667,
+      longitude: defaultCoordinates?.longitude ?? 121.2500,
       altitude: null,
       studentCount: 0,
-      verified: true,
-      status: "Verified",
+      isActive: true,
+      
       source: "Manual Entry",
     },
   });
@@ -89,44 +89,44 @@ export function SchoolFormDialog({
       setGeocodePreview(null);
       if (initialData) {
         form.reset({
-          name: initialData.name,
+          schoolName: initialData.schoolName,
           municipality: initialData.municipality || "Laguna",
           province: initialData.province || "Laguna",
-          institutionType: initialData.institutionType || "Feeder Institution",
-          lat: initialData.lat ?? 14.1667,
-          lng: initialData.lng ?? 121.2500,
-          altitude: initialData.altitude ?? null,
-          studentCount: initialData.studentCount,
-          verified: initialData.verified ?? true,
-          status: (initialData.status || "Verified") as z.infer<typeof formSchema>["status"],
+          institutionType: initialData.schoolType || "Feeder Institution",
+          latitude: initialData.latitude ?? 14.1667,
+          longitude: initialData.longitude ?? 121.2500,
+          altitude: initialData.id ?? null,
+          studentCount: initialData.id /* no student count */,
+          isActive: initialData.isActive ?? true,
+          
           source: initialData.source || "Manual Entry",
         });
       } else if (defaultCoordinates) {
         form.reset({
-          name: "",
+          schoolName: "",
           municipality: "Laguna",
           province: "Laguna",
           institutionType: "Feeder Institution",
-          lat: defaultCoordinates.lat,
-          lng: defaultCoordinates.lng,
+          latitude: defaultCoordinates.latitude,
+          longitude: defaultCoordinates.longitude,
           altitude: null,
           studentCount: 0,
-          verified: true,
-          status: "Verified",
+          isActive: true,
+          
           source: "Manual Entry",
         });
       } else {
         form.reset({
-          name: "",
+          schoolName: "",
           municipality: "Laguna",
           province: "Laguna",
           institutionType: "Feeder Institution",
-          lat: 14.1667,
-          lng: 121.2500,
+          latitude: 14.1667,
+          longitude: 121.2500,
           altitude: null,
           studentCount: 0,
-          verified: true,
-          status: "Verified",
+          isActive: true,
+          
           source: "Manual Entry",
         });
       }
@@ -139,23 +139,23 @@ export function SchoolFormDialog({
     if (selection.type === "registry") {
       const school = selection.school;
       setSelectedSavedSchoolId(school.id);
-      form.setValue("name", school.name, { shouldDirty: true });
+      form.setValue("schoolName", school.schoolName, { shouldDirty: true });
       form.setValue("municipality", school.municipality || "Laguna", { shouldDirty: true });
       form.setValue("province", school.province || "Laguna", { shouldDirty: true });
-      form.setValue("institutionType", school.institutionType || "Feeder Institution", { shouldDirty: true });
+      form.setValue("institutionType", school.schoolType || "Feeder Institution", { shouldDirty: true });
       if (hasCoordinates(school)) {
-        form.setValue("lat", school.lat!, { shouldDirty: true, shouldValidate: true });
-        form.setValue("lng", school.lng!, { shouldDirty: true, shouldValidate: true });
-        form.setValue("status", school.verified ? "Verified" : "Auto-Located", { shouldDirty: true });
-        setGeocodePreview(school.name);
+        form.setValue("latitude", school.latitude!, { shouldDirty: true, shouldValidate: true });
+        form.setValue("longitude", school.longitude!, { shouldDirty: true, shouldValidate: true });
+        form.setValue("isActive", school.isActive ? true : true, { shouldDirty: true });
+        setGeocodePreview(school.schoolName);
       } else {
-        setGeocodePreview(`${school.name} — select Locate to fetch coordinates`);
+        setGeocodePreview(`${school.schoolName} — select Locate to fetch coordinates`);
       }
     }
   };
 
   const geolocateCurrentSchool = async () => {
-    const name = form.getValues("name")?.trim();
+    const name = form.getValues("schoolName")?.trim();
     const municipality = form.getValues("municipality")?.trim() || undefined;
 
     if (!name || name.length < 2) {
@@ -169,10 +169,10 @@ export function SchoolFormDialog({
 
     setIsGeocoding(true);
     try {
-      const result = await requestGeocodeSchoolOrThrow({ name, municipality });
-      form.setValue("lat", result.lat, { shouldDirty: true, shouldValidate: true });
-      form.setValue("lng", result.lng, { shouldDirty: true, shouldValidate: true });
-      form.setValue("status", "Auto-Located", { shouldDirty: true });
+      const result = await requestGeocodeSchoolOrThrow({ schoolName: name, municipality });
+      form.setValue("latitude", result.latitude, { shouldDirty: true, shouldValidate: true });
+      form.setValue("longitude", result.longitude, { shouldDirty: true, shouldValidate: true });
+      form.setValue("isActive", true, { shouldDirty: true });
       form.setValue("source", result.source === "Google Maps" ? "Google Geocoding Manual Assist" : "Geocoding Manual Assist", { shouldDirty: true });
       setGeocodePreview(result.displayName);
       selectionConfirmedRef.current = true;
@@ -185,7 +185,7 @@ export function SchoolFormDialog({
   };
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
-    const name = values.name?.trim();
+    const name = values.schoolName?.trim();
     if (!name || name.length < 2) {
       toast({
         title: "School name required",
@@ -199,8 +199,8 @@ export function SchoolFormDialog({
       const payload = {
         ...values,
         name,
-        verified: values.verified ?? true,
-        status: values.status || ("Verified" as const),
+        verified: values.isActive ?? true,
+        isActive: values.isActive || (true as const),
         source: values.source || initialData?.source || "Manual Entry",
       };
       const updateId = initialData?.id ?? selectedSavedSchoolId;
@@ -231,11 +231,11 @@ export function SchoolFormDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <Form {...form}>
+          <Form {...(form as any)}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5 mt-6">
               <FormField
-                control={form.control}
-                name="name"
+                control={form.control as any}
+                name="schoolName"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>School Name</FormLabel>
@@ -263,7 +263,7 @@ export function SchoolFormDialog({
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <FormField
-                  control={form.control}
+                  control={form.control as any}
                   name="municipality"
                   render={({ field }) => (
                     <FormItem>
@@ -280,7 +280,7 @@ export function SchoolFormDialog({
                 />
 
                 <FormField
-                  control={form.control}
+                  control={form.control as any}
                   name="province"
                   render={({ field }) => (
                     <FormItem>
@@ -297,7 +297,7 @@ export function SchoolFormDialog({
                 />
 
                 <FormField
-                  control={form.control}
+                  control={form.control as any}
                   name="institutionType"
                   render={({ field }) => (
                     <FormItem>
@@ -316,8 +316,8 @@ export function SchoolFormDialog({
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <FormField
-                  control={form.control}
-                  name="lat"
+                  control={form.control as any}
+                  name="latitude"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Latitude</FormLabel>
@@ -333,8 +333,8 @@ export function SchoolFormDialog({
                 />
 
                 <FormField
-                  control={form.control}
-                  name="lng"
+                  control={form.control as any}
+                  name="longitude"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Longitude</FormLabel>
@@ -350,7 +350,7 @@ export function SchoolFormDialog({
                 />
 
                 <FormField
-                  control={form.control}
+                  control={form.control as any}
                   name="altitude"
                   render={({ field }) => (
                     <FormItem>
@@ -401,7 +401,7 @@ export function SchoolFormDialog({
               </div>
 
               <FormField
-                control={form.control}
+                control={form.control as any}
                 name="studentCount"
                 render={({ field }) => (
                   <FormItem>

@@ -1,4 +1,4 @@
-import type { School, StudentProcessed } from "./schema";
+import type { SchoolRegistry, StudentProcessed } from "./schema";
 import { normalizeSchoolName } from "./schoolRegistry";
 
 export const ALL_PROGRAM_FILTER = "all";
@@ -299,18 +299,18 @@ export function getProgramDistribution(
 }
 
 export function buildSchoolProgramDistribution(
-  schools: School[],
+  schools: SchoolRegistry[],
   processedStudents: StudentProcessed[],
   filters: ProgramFilters,
   isActiveStudent: (student: StudentProcessed) => boolean,
 ) {
-  const distributionBySchool = new Map<number, Map<string, ProgramDistributionEntry>>();
-  const filteredCountBySchool = new Map<number, number>();
-  const totalCountBySchool = new Map<number, number>();
-  const schoolByNormalizedName = new Map<string, School>();
+  const distributionBySchoolRegistry = new Map<number, Map<string, ProgramDistributionEntry>>();
+  const filteredCountBySchoolRegistry = new Map<number, number>();
+  const totalCountBySchoolRegistry = new Map<number, number>();
+  const schoolByNormalizedName = new Map<string, SchoolRegistry>();
 
   for (const school of schools) {
-    const normalized = normalizeSchoolName(school.normalizedName || school.name);
+    const normalized = normalizeSchoolName(school.normalizedSchoolName || school.schoolName);
     if (normalized && !schoolByNormalizedName.has(normalized)) {
       schoolByNormalizedName.set(normalized, school);
     }
@@ -320,21 +320,21 @@ export function buildSchoolProgramDistribution(
     const school = schoolByNormalizedName.get(normalizeSchoolName(student.lastSchoolName));
     if (!school) continue;
 
-    totalCountBySchool.set(school.id, (totalCountBySchool.get(school.id) || 0) + 1);
+    totalCountBySchoolRegistry.set(school.id, (totalCountBySchoolRegistry.get(school.id) || 0) + 1);
     const info = getProgramInfo(student.course);
     const entry = toDistributionEntry(info);
     const matchesFilter = distributionMatchesProgramFilters(entry, filters);
     logProgramRecognitionAudit(student.course, filters, matchesFilter);
     if (!matchesFilter) continue;
 
-    const schoolMap = distributionBySchool.get(school.id) || new Map<string, ProgramDistributionEntry>();
+    const schoolMap = distributionBySchoolRegistry.get(school.id) || new Map<string, ProgramDistributionEntry>();
     const current = schoolMap.get(entry.code) || { ...entry, count: 0 };
     schoolMap.set(entry.code, { ...current, count: current.count + 1 });
-    distributionBySchool.set(school.id, schoolMap);
-    filteredCountBySchool.set(school.id, (filteredCountBySchool.get(school.id) || 0) + 1);
+    distributionBySchoolRegistry.set(school.id, schoolMap);
+    filteredCountBySchoolRegistry.set(school.id, (filteredCountBySchoolRegistry.get(school.id) || 0) + 1);
   }
 
-  return { distributionBySchool, filteredCountBySchool, totalCountBySchool };
+  return { distributionBySchoolRegistry, filteredCountBySchoolRegistry, totalCountBySchoolRegistry };
 }
 
 export function programMatchesFilters(info: ProgramInfo | undefined, filters: ProgramFilters) {

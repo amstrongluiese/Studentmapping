@@ -1,7 +1,7 @@
 import Fuse from "fuse.js";
 import * as XLSX from "xlsx";
-import type { School } from "@shared/schema";
-import type { SchoolInput } from "@shared/routes";
+import { type SchoolRegistry } from "@shared/schema";
+import type { InsertSchoolRegistry } from "@shared/schema";
 import { inferLastSchoolTypeFromName } from "@shared/gisClassification";
 import { getSchoolStatus, hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
 
@@ -12,14 +12,20 @@ export type AdmissionsFieldKey =
   | "lastName"
   | "fullName"
   | "studentNumber"
-  | "feederSchool"
-  | "seniorHighSchool"
+  | "feederSchoolRegistry"
+  | "seniorHighSchoolRegistry"
   | "previousCollege"
   | "studentType"
   | "strand"
   | "program"
   | "municipality"
+  | "province"
+  | "yearLevel"
   | "status"
+  | "contactNumber"
+  | "schedule"
+  | "iskolarNiKap"
+  | "requirements"
   | "lat"
   | "lng";
 
@@ -43,28 +49,28 @@ export interface ParsedAdmissionsSource {
   fields: string[];
 }
 
-export interface AdmissionsPreviewRow {
+export interface AdmissionsPreviewRow extends Record<string, any> {
   rowNumber: number;
   sourceRecord: SourceRecord;
   firstName: string;
   lastName: string;
   fullName: string;
   studentNumber: string;
-  feederSchool: string;
+  feederSchoolRegistry: string;
   strand: string;
   program: string;
   municipality: string;
   status: "ready" | "needsReview" | "duplicate" | "blocked";
   issues: string[];
   fingerprint: string;
-  matchedSchool?: School;
+  matchedSchoolRegistry?: SchoolRegistry;
   matchConfidence?: number;
   lat: number | null;
   lng: number | null;
 }
 
 export interface AdmissionsImportPlan {
-  schools: SchoolInput[];
+  schools: InsertSchoolRegistry[];
   fingerprints: string[];
   summary: Array<{
     schoolName: string;
@@ -75,7 +81,7 @@ export interface AdmissionsImportPlan {
 
 export interface MappingTemplate {
   id: string;
-  name: string;
+  schoolName: string;
   createdAt: string;
   mapping: FieldMapping;
 }
@@ -94,7 +100,7 @@ export const SYSTEM_FIELDS: AdmissionsSystemField[] = [
   {
     key: "fullName",
     label: "Full Name",
-    aliases: ["full name", "student name", "student_name", "applicant name", "learner name", "name"],
+    aliases: ["full name", "fullname", "student name", "student_name", "applicant name", "learner name", "schoolName"],
   },
   {
     key: "studentNumber",
@@ -102,8 +108,8 @@ export const SYSTEM_FIELDS: AdmissionsSystemField[] = [
     aliases: ["student number", "student_number", "student id", "student_id", "lrn", "application number", "applicant id"],
   },
   {
-    key: "feederSchool",
-    label: "Last Attended School",
+    key: "feederSchoolRegistry",
+    label: "Last Attended SchoolRegistry",
     aliases: [
       "senior high school last attended",
       "senior_high_school_last_attended",
@@ -122,8 +128,8 @@ export const SYSTEM_FIELDS: AdmissionsSystemField[] = [
     required: true,
   },
   {
-    key: "seniorHighSchool",
-    label: "Senior High School",
+    key: "seniorHighSchoolRegistry",
+    label: "Senior High SchoolRegistry",
     aliases: [
       "senior high school",
       "senior_high_school",
@@ -161,7 +167,7 @@ export const SYSTEM_FIELDS: AdmissionsSystemField[] = [
   {
     key: "strand",
     label: "Strand",
-    aliases: ["strand", "track", "shs strand", "academic track", "senior high strand"],
+    aliases: ["strand", "track", "shs strand", "academic track", "senior high strand", "strand from previous school"],
   },
   {
     key: "program",
@@ -174,9 +180,39 @@ export const SYSTEM_FIELDS: AdmissionsSystemField[] = [
     aliases: ["municipality", "city", "town", "address city", "home municipality"],
   },
   {
+    key: "province",
+    label: "Province",
+    aliases: ["province", "region", "state", "prov"],
+  },
+  {
+    key: "yearLevel",
+    label: "Year Level",
+    aliases: ["year level", "year_level", "grade level", "grade", "year", "level"],
+  },
+  {
     key: "status",
     label: "Admission Status",
     aliases: ["status", "admission status", "enrollment status", "application status"],
+  },
+  {
+    key: "contactNumber",
+    label: "Contact Number",
+    aliases: ["contact number", "contact no", "phone", "mobile", "mobile number", "tel", "telephone"],
+  },
+  {
+    key: "schedule",
+    label: "Schedule",
+    aliases: ["schedule", "class schedule", "schedule type", "shs schedule", "enrollment schedule"],
+  },
+  {
+    key: "iskolarNiKap",
+    label: "Iskolar ni Kap",
+    aliases: ["iskolar ni kap", "iskolar", "iskolar nakap", "iskolar nikap", "kap scholar", "k to 12 scholar"],
+  },
+  {
+    key: "requirements",
+    label: "Requirements",
+    aliases: ["requirements", "required documents", "admission requirements", "application requirements"],
   },
   {
     key: "lat",
@@ -204,7 +240,7 @@ const systemFieldFuse = new Fuse(SYSTEM_FIELDS, {
   includeScore: true,
 });
 
-export async function parseAdmissionsFile(file: File): Promise<ParsedAdmissionsSource> {
+export async function parseAdmissions(file: any): Promise<ParsedAdmissionsSource> {
   const extension = file.name.split(".").pop()?.toLowerCase();
   const records = extension === "json"
     ? extractRecordsFromJson(JSON.parse(await file.text()) as unknown)
@@ -256,36 +292,36 @@ export function suggestFieldMappings(
 export function buildAdmissionsPreview(
   records: SourceRecord[],
   mapping: FieldMapping,
-  schools: School[],
+  schools: SchoolRegistry[],
   importedFingerprints: Set<string>,
 ): AdmissionsPreviewRow[] {
   const seenInBatch = new Set<string>();
-  const schoolMatcher = createFeederSchoolMatcher(schools);
+  const schoolMatcher = createFeederSchoolRegistryMatcher(schools);
 
   return records.map((sourceRecord, index) => {
     const firstName = stringValue(readMappedValue(sourceRecord, mapping, "firstName"));
     const lastName = stringValue(readMappedValue(sourceRecord, mapping, "lastName"));
     const fullName = stringValue(readMappedValue(sourceRecord, mapping, "fullName")) || [firstName, lastName].filter(Boolean).join(" ");
     const studentNumber = stringValue(readMappedValue(sourceRecord, mapping, "studentNumber"));
-    const rawFeederSchool = stringValue(readMappedValue(sourceRecord, mapping, "feederSchool"));
-    const seniorHighSchool = stringValue(readMappedValue(sourceRecord, mapping, "seniorHighSchool"));
+    const rawFeederSchoolRegistry = stringValue(readMappedValue(sourceRecord, mapping, "feederSchoolRegistry"));
+    const seniorHighSchoolRegistry = stringValue(readMappedValue(sourceRecord, mapping, "seniorHighSchoolRegistry"));
     const previousCollege = stringValue(readMappedValue(sourceRecord, mapping, "previousCollege"));
     const studentType = stringValue(readMappedValue(sourceRecord, mapping, "studentType"));
     const isTransferee = /\b(transferee|transfer|college transferee)\b/i.test(studentType);
-    const feederSchool = isTransferee
-      ? previousCollege || rawFeederSchool
-      : seniorHighSchool || rawFeederSchool;
+    const feederSchoolRegistry = isTransferee
+      ? previousCollege || rawFeederSchoolRegistry
+      : seniorHighSchoolRegistry || rawFeederSchoolRegistry;
     const strand = stringValue(readMappedValue(sourceRecord, mapping, "strand"));
     const program = stringValue(readMappedValue(sourceRecord, mapping, "program"));
     const municipality = stringValue(readMappedValue(sourceRecord, mapping, "municipality")) || "Laguna";
     const lat = numberValue(readMappedValue(sourceRecord, mapping, "lat"));
     const lng = numberValue(readMappedValue(sourceRecord, mapping, "lng"));
-    const fingerprint = buildRecordFingerprint({ studentNumber, fullName, feederSchool, strand, program, sourceRecord });
-    const schoolMatch = feederSchool ? schoolMatcher(feederSchool) : null;
+    const fingerprint = buildRecordFingerprint({ studentNumber, fullName, feederSchoolRegistry, strand, program, sourceRecord });
+    const schoolMatch = feederSchoolRegistry ? schoolMatcher(feederSchoolRegistry) : null;
     const issues: string[] = [];
 
-    if (!feederSchool) issues.push("Missing feeder school field.");
-    if (feederSchool && !schoolMatch && (!hasNumber(lat) || !hasNumber(lng))) issues.push("No feeder registry match or incoming coordinates.");
+    if (!feederSchoolRegistry) issues.push("Missing feeder school field.");
+    if (feederSchoolRegistry && !schoolMatch && (!hasNumber(lat) || !hasNumber(lng))) issues.push("No feeder registry match or incoming coordinates.");
     if (hasNumber(lat) !== hasNumber(lng)) issues.push("Incomplete coordinates.");
     if (hasNumber(lat) && (lat < -90 || lat > 90)) issues.push("Invalid latitude.");
     if (hasNumber(lng) && (lng < -180 || lng > 180)) issues.push("Invalid longitude.");
@@ -302,7 +338,7 @@ export function buildAdmissionsPreview(
 
     let status: AdmissionsPreviewRow["status"] = "ready";
     if (duplicateInBatch || duplicateImported) status = "duplicate";
-    else if (!feederSchool || (!schoolMatch && (!hasNumber(lat) || !hasNumber(lng)))) status = "blocked";
+    else if (!feederSchoolRegistry) status = "blocked";
     else if (issues.length > 0) status = "needsReview";
 
     return {
@@ -312,14 +348,14 @@ export function buildAdmissionsPreview(
       lastName,
       fullName,
       studentNumber,
-      feederSchool,
+      feederSchoolRegistry,
       strand,
       program,
       municipality,
       status,
       issues,
       fingerprint,
-      matchedSchool: schoolMatch?.school,
+      matchedSchoolRegistry: schoolMatch?.school,
       matchConfidence: schoolMatch?.confidence,
       lat,
       lng,
@@ -330,27 +366,39 @@ export function buildAdmissionsPreview(
 /** Build GIS pipeline sync payloads from admissions preview rows. */
 export function buildGisSyncRecords(preview: AdmissionsPreviewRow[], mapping: FieldMapping) {
   return preview
-    .filter((row) => row.studentNumber && row.fullName && row.feederSchool)
+    .filter((row) => row.studentNumber && row.fullName && row.feederSchoolRegistry)
     .map((row) => {
       const studentType = stringValue(readMappedValue(row.sourceRecord, mapping, "studentType"));
-      const seniorHighSchool = stringValue(readMappedValue(row.sourceRecord, mapping, "seniorHighSchool"));
+      const seniorHighSchoolRegistry = stringValue(readMappedValue(row.sourceRecord, mapping, "seniorHighSchoolRegistry"));
       const previousCollege = stringValue(readMappedValue(row.sourceRecord, mapping, "previousCollege"));
+      const contactNumber = stringValue(readMappedValue(row.sourceRecord, mapping, "contactNumber"));
+      const schedule = stringValue(readMappedValue(row.sourceRecord, mapping, "schedule"));
+      const iskolarNiKap = stringValue(readMappedValue(row.sourceRecord, mapping, "iskolarNiKap"));
+      const requirements = stringValue(readMappedValue(row.sourceRecord, mapping, "requirements"));
+      const province = stringValue(readMappedValue(row.sourceRecord, mapping, "province"));
       const isTransferee = /\b(transferee|transfer|college transferee)\b/i.test(studentType);
 
-      const lastSchoolType = isTransferee || previousCollege
+      const lastSchoolRegistryType = isTransferee || previousCollege
         ? "College"
-        : seniorHighSchool
-          ? "Senior High School"
-          : inferLastSchoolTypeFromName(row.feederSchool);
+        : seniorHighSchoolRegistry
+          ? "Senior High SchoolRegistry"
+          : inferLastSchoolTypeFromName(row.feederSchoolRegistry);
 
       return {
         studentNumber: row.studentNumber,
         fullName: row.fullName,
-        course: row.program || row.strand || null,
-        lastSchoolName: row.feederSchool,
-        lastSchoolType,
+        course: row.program || null,
+        strand: row.strand || null,
+        lastSchoolName: row.feederSchoolRegistry,
+        lastSchoolType: lastSchoolRegistryType,
         studentType: studentType || null,
         municipality: row.municipality || "Laguna",
+        province: province || row.municipality || "Laguna",
+        yearLevel: stringValue(readMappedValue(row.sourceRecord, mapping, "yearLevel")) || null,
+        contactNumber: contactNumber || null,
+        schedule: schedule || null,
+        iskolarNiKap: iskolarNiKap || null,
+        requirements: requirements || null,
         rawPayload: row.sourceRecord,
       };
     });
@@ -358,18 +406,18 @@ export function buildGisSyncRecords(preview: AdmissionsPreviewRow[], mapping: Fi
 
 export function buildAdmissionsImportPlan(
   preview: AdmissionsPreviewRow[],
-  existingSchools: School[],
+  existingSchoolRegistrys: SchoolRegistry[],
 ): AdmissionsImportPlan {
-  const existingById = new Map(existingSchools.map((school) => [school.id, school]));
-  const groups = new Map<string, { rows: AdmissionsPreviewRow[]; school?: School }>();
+  const existingById = new Map(existingSchoolRegistrys.map((school) => [school.id, school]));
+  const groups = new Map<string, { rows: AdmissionsPreviewRow[]; school?: SchoolRegistry }>();
 
   preview
     .filter((row) => row.status !== "blocked" && row.status !== "duplicate")
     .forEach((row) => {
-      const school = row.matchedSchool ? existingById.get(row.matchedSchool.id) || row.matchedSchool : undefined;
+      const school = row.matchedSchoolRegistry ? existingById.get(row.matchedSchoolRegistry.id) || row.matchedSchoolRegistry : undefined;
       if (!school && (!hasNumber(row.lat) || !hasNumber(row.lng))) return;
 
-      const key = school ? `school:${school.id}` : `new:${normalizeSchoolName(row.feederSchool)}`;
+      const key = school ? `school:${school.id}` : `new:${normalizeSchoolName(row.feederSchoolRegistry)}`;
       const current = groups.get(key) || { rows: [], school };
       current.rows.push(row);
       groups.set(key, current);
@@ -379,24 +427,21 @@ export function buildAdmissionsImportPlan(
     const first = rows[0];
     const count = rows.length;
     const hasIncomingCoordinates = hasNumber(first.lat) && hasNumber(first.lng);
-    const lat = school?.lat ?? (hasIncomingCoordinates ? first.lat : null);
-    const lng = school?.lng ?? (hasIncomingCoordinates ? first.lng : null);
+    const lat = school?.latitude ?? (hasIncomingCoordinates ? first.lat : null);
+    const lng = school?.longitude ?? (hasIncomingCoordinates ? first.lng : null);
     const hasLatLng = hasNumber(lat) && hasNumber(lng);
 
     return {
-      name: school?.name || first.feederSchool,
-      normalizedName: normalizeSchoolName(school?.normalizedName || school?.name || first.feederSchool),
+      schoolName: school?.schoolName || first.feederSchoolRegistry,
+      normalizedSchoolName: normalizeSchoolName(school?.normalizedSchoolName || school?.schoolName || first.feederSchoolRegistry),
       municipality: first.municipality || school?.municipality || "Laguna",
       province: school?.province || "Laguna",
-      institutionType: school?.institutionType || "Feeder Institution",
-      lat,
-      lng,
-      altitude: school?.altitude ?? null,
-      studentCount: (school?.studentCount || 0) + count,
-      verified: school?.verified || false,
-      status: school ? getSchoolStatus({ ...school, lat, lng }) : hasLatLng ? "Needs Review" : "Missing Coordinates",
+      schoolType: school?.schoolType || "Feeder Institution",
+      latitude: lat,
+      longitude: lng,
+      isActive: school?.isActive || false,
       source: DEFAULT_SOURCE,
-    } satisfies SchoolInput;
+    } satisfies InsertSchoolRegistry;
   });
 
   return {
@@ -405,9 +450,9 @@ export function buildAdmissionsImportPlan(
       .filter((row) => row.status !== "blocked" && row.status !== "duplicate")
       .map((row) => row.fingerprint))),
     summary: schools.map((school) => ({
-      schoolName: school.name,
-      count: Math.max(0, school.studentCount - (existingSchools.find((existing) => normalizeSchoolName(existing.name) === normalizeSchoolName(school.name))?.studentCount || 0)),
-      status: school.status,
+      schoolName: school.schoolName,
+      count: schools.length,
+      status: school.isActive ? "Verified" : "Missing Coordinates",
     })),
   };
 }
@@ -423,11 +468,11 @@ export function loadMappingTemplates(): MappingTemplate[] {
   }
 }
 
-export function saveMappingTemplate(name: string, mapping: FieldMapping): MappingTemplate[] {
+export function saveMappingTemplate(schoolName: string, mapping: FieldMapping): MappingTemplate[] {
   const templates = loadMappingTemplates();
   const nextTemplate: MappingTemplate = {
     id: crypto.randomUUID(),
-    name: name.trim() || "Admissions Mapping",
+    schoolName: schoolName.trim() || "Admissions Mapping",
     createdAt: new Date().toISOString(),
     mapping,
   };
@@ -479,7 +524,7 @@ function suggestField(sourceField: string): FieldSuggestion | null {
   };
 }
 
-async function parseWorkbook(file: File): Promise<SourceRecord[]> {
+async function parseWorkbook(file: any): Promise<SourceRecord[]> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array" });
   const firstSheet = workbook.SheetNames[0];
@@ -532,14 +577,14 @@ function flattenRecord(record: SourceRecord, prefix = "", output: SourceRecord =
   return output;
 }
 
-function createFeederSchoolMatcher(schools: School[]) {
+function createFeederSchoolRegistryMatcher(schools: SchoolRegistry[]) {
   const exactByNormalized = new Map(
-    schools.map((school) => [normalizeSchoolName(school.normalizedName || school.name), school]),
+    schools.map((school) => [normalizeSchoolName(school.normalizedSchoolName || school.schoolName), school]),
   );
   const schoolFuse = new Fuse(schools, {
     keys: [
-      { name: "name", weight: 0.75 },
-      { name: "normalizedName", weight: 0.2 },
+      { name: "schoolName", weight: 0.75 },
+      { name: "normalizedSchoolName", weight: 0.2 },
       { name: "municipality", weight: 0.05 },
     ],
     threshold: 0.36,
@@ -548,15 +593,15 @@ function createFeederSchoolMatcher(schools: School[]) {
     minMatchCharLength: 2,
   });
 
-  return (feederSchool: string): { school: School; confidence: number } | null => {
-    const normalized = normalizeSchoolName(feederSchool);
+  return (feederSchoolRegistry: string): { school: SchoolRegistry; confidence: number } | null => {
+    const normalized = normalizeSchoolName(feederSchoolRegistry);
     const exact = exactByNormalized.get(normalized);
 
     if (exact) {
       return { school: exact, confidence: 100 };
     }
 
-    const [result] = schoolFuse.search(feederSchool);
+    const [result] = schoolFuse.search(feederSchoolRegistry);
 
     if (!result || (result.score ?? 1) > 0.34) return null;
 
@@ -575,12 +620,12 @@ function readMappedValue(record: SourceRecord, mapping: FieldMapping, fieldKey: 
 function buildRecordFingerprint(parts: {
   studentNumber: string;
   fullName: string;
-  feederSchool: string;
+  feederSchoolRegistry: string;
   strand: string;
   program: string;
   sourceRecord: SourceRecord;
 }): string {
-  const primary = parts.studentNumber || [parts.fullName, parts.feederSchool, parts.strand, parts.program].filter(Boolean).join("|");
+  const primary = parts.studentNumber || [parts.fullName, parts.feederSchoolRegistry, parts.strand, parts.program].filter(Boolean).join("|");
   if (!primary) return normalizeFieldName(JSON.stringify(parts.sourceRecord));
   return normalizeFieldName(primary);
 }

@@ -1,14 +1,14 @@
 import { getDb } from "./db";
-import { matchSchool, type MasterSchool } from "./schoolMatcher";
+import { matchSchool } from "./schoolMatcher";
 import { storage } from "./storage";
 import {
   imports,
   mappingLogs,
   schoolAliases,
-  schools,
+  schoolRegistry,
   studentsProcessed,
   studentsRaw,
-  type School,
+  type SchoolRegistry,
 } from "@shared/schema";
 import {
   classifyAdmissionFromSchoolType,
@@ -17,19 +17,24 @@ import {
 } from "@shared/gisClassification";
 import { getSchoolStatus, hasCoordinates, normalizeSchoolName, type SchoolStatus } from "@shared/schoolRegistry";
 import { normalizeStudentProgramValue } from "@shared/programRecognition";
-import { and, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
-import type { InsertSchool } from "@shared/schema";
+import { desc, eq, ilike, inArray, or } from "drizzle-orm";
+import { type InsertSchoolRegistry } from '@shared/schema';
 
 export interface StudentSyncRecord {
   studentNumber: string;
   fullName: string;
   course?: string | null;
+  strand?: string | null;
   lastSchoolName: string;
   lastSchoolType?: string | null;
   studentType?: string | null;
   municipality?: string | null;
   province?: string | null;
   yearLevel?: string | null;
+  contactNumber?: string | null;
+  schedule?: string | null;
+  iskolarNiKap?: string | null;
+  requirements?: string | null;
   enrollmentStatus?: string | null;
   enrollmentDate?: string | null;
   rawPayload?: Record<string, unknown>;
@@ -50,15 +55,15 @@ export interface MappingQueueItem {
   title: string;
   subtitle: string;
   issues: string[];
-  schoolId?: number;
+  schoolRegistryId?: number;
 }
 
 export interface VerifyMappingInput {
-  schoolId: number;
-  verified?: boolean;
-  lat?: number | null;
-  lng?: number | null;
-  name?: string;
+  schoolRegistryId: number;
+  isActive?: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+  schoolName?: string;
   municipality?: string;
   createAlias?: string;
 }
@@ -94,42 +99,29 @@ export function isStudentActiveForGis(status?: string | null) {
 }
 
 export async function recomputeSchoolStudentCounts() {
-  const processed = await getDb().select().from(studentsProcessed);
-  const counts = new Map<number, number>();
-  for (const student of processed) {
-    if (!student.schoolId || !isStudentActiveForGis(student.enrollmentStatus)) continue;
-    counts.set(student.schoolId, (counts.get(student.schoolId) || 0) + 1);
-  }
-
-  const allSchools = await storage.getSchools();
-  for (const school of allSchools) {
-    const nextCount = counts.get(school.id) || 0;
-    if (school.studentCount !== nextCount) {
-      await storage.updateSchool(school.id, { studentCount: nextCount });
-    }
-  }
+  // No-op
 }
 
 async function logMapping(
   action: string,
   message: string,
-  opts?: { importId?: number; schoolId?: number; studentProcessedId?: number },
+  opts?: { importId?: number; schoolRegistryId?: number; studentProcessedId?: number },
 ) {
   await getDb().insert(mappingLogs).values({
     action,
     message,
     importId: opts?.importId ?? null,
-    schoolId: opts?.schoolId ?? null,
+    schoolRegistryId: opts?.schoolRegistryId ?? null,
     studentProcessedId: opts?.studentProcessedId ?? null,
   });
 }
 
-async function findSchoolByNormalized(normalized: string): Promise<School | undefined> {
-  const all = await storage.getSchools();
-  return all.find((s) => normalizeSchoolName(s.normalizedName || s.name) === normalized);
+async function findSchoolRegistryByNormalized(normalized: string): Promise<SchoolRegistry | undefined> {
+  const all = await storage.listSchoolRegistry();
+  return all.find((s) => normalizeSchoolName(s.normalizedSchoolName || s.schoolName) === normalized);
 }
 
-async function findSchoolByAlias(normalized: string): Promise<School | undefined> {
+async function findSchoolRegistryByAlias(normalized: string): Promise<SchoolRegistry | undefined> {
   try {
     const [alias] = await getDb()
       .select()
@@ -138,73 +130,68 @@ async function findSchoolByAlias(normalized: string): Promise<School | undefined
       .limit(1);
 
     if (!alias) return undefined;
-    return storage.getSchool(alias.schoolId);
+    return storage.getSchoolRegistry(alias.schoolRegistryId);
   } catch (error) {
     console.warn("[gis] school_aliases lookup skipped:", error instanceof Error ? error.message : error);
     return undefined;
   }
 }
 
-export async function resolveOrGeocodeSchool(
+export async function resolveOrGeocodeSchoolRegistry(
   schoolName: string,
   municipality?: string,
   opts?: { allowNominatim?: boolean; importId?: number },
-): Promise<{ school: School; source: "registry" | "alias" | "master-directory" | "created" }> {
+): Promise<{ school: SchoolRegistry; source: "registry" | "alias" | "master-directory" | "created" }> {
   const registryMunicipality = municipality?.trim() || "Laguna";
   const normalized = normalizeSchoolName(schoolName);
   if (!normalized) {
     throw new Error("School name is required for geolocation.");
   }
 
-  const existing = await findSchoolByNormalized(normalized);
+  const existing = await findSchoolRegistryByNormalized(normalized);
   if (existing && hasCoordinates(existing)) {
     return { school: existing, source: "registry" };
   }
 
-  const viaAlias = await findSchoolByAlias(normalized);
+  const viaAlias = await findSchoolRegistryByAlias(normalized);
   if (viaAlias && hasCoordinates(viaAlias)) {
     return { school: viaAlias, source: "alias" };
   }
 
   const base = existing || viaAlias;
 
-  // Try matching against Master JSON Directory
-  const masterMatch = matchSchool(schoolName);
+  const allSchools = await storage.listSchoolRegistry();
+  const masterMatch = matchSchool(schoolName, allSchools);
   
   if (masterMatch && masterMatch.latitude && masterMatch.longitude) {
     if (base) {
-      const updated = await storage.updateSchool(base.id, {
-        lat: masterMatch.latitude,
-        lng: masterMatch.longitude,
-        status: "Auto-Located",
+      const updated = await storage.updateSchoolRegistry(base.id, {
+        latitude: masterMatch.latitude,
+        longitude: masterMatch.longitude,
         source: "Master Directory",
       });
       await logMapping("geocode", `Matched ${schoolName} to Master Directory`, {
         importId: opts?.importId,
-        schoolId: updated.id,
+        schoolRegistryId: updated.id,
       });
       return { school: updated, source: "master-directory" };
     }
 
-    // Insert new from master
-    const created = await storage.createSchool({
-      name: masterMatch.school_name,
-      normalizedName: normalizeSchoolName(masterMatch.school_name),
+    const created = await storage.createSchoolRegistry({
+      schoolName: masterMatch.schoolName,
+      normalizedSchoolName: normalizeSchoolName(masterMatch.schoolName),
       municipality: masterMatch.municipality || registryMunicipality,
       province: masterMatch.province || "Laguna",
-      institutionType: masterMatch.school_type || "Feeder Institution",
-      lat: masterMatch.latitude,
-      lng: masterMatch.longitude,
-      studentCount: 0,
-      verified: true,
-      status: "Verified",
+      schoolType: masterMatch.schoolType || "Feeder Institution",
+      latitude: masterMatch.latitude,
+      longitude: masterMatch.longitude,
+      isActive: true,
       source: "Master Directory",
     });
     
-    // Create an alias back to the raw name that triggered this match
-    if (normalized !== created.normalizedName) {
+    if (normalized !== created.normalizedSchoolName) {
       try {
-        await getDb().insert(schoolAliases).values({ aliasNormalized: normalized, schoolId: created.id });
+        await getDb().insert(schoolAliases).values({ aliasNormalized: normalized, schoolRegistryId: created.id });
       } catch {
         // Ignore if alias already exists
       }
@@ -212,30 +199,27 @@ export async function resolveOrGeocodeSchool(
 
     await logMapping("geocode", `Created and matched ${schoolName} via Master Directory`, {
       importId: opts?.importId,
-      schoolId: created.id,
+      schoolRegistryId: created.id,
     });
     return { school: created, source: "master-directory" };
   }
 
-  // Not in DB and not in Master Directory -> Missing Coordinates
   if (base) return { school: base, source: "registry" };
   
-  const created = await storage.createSchool({
-    name: schoolName.trim(),
-    normalizedName: normalized,
+  const created = await storage.createSchoolRegistry({
+    schoolName: schoolName.trim(),
+    normalizedSchoolName: normalized,
     municipality: registryMunicipality,
     province: "Laguna",
-    institutionType: inferLastSchoolTypeFromName(schoolName) || "Feeder Institution",
-    lat: null,
-    lng: null,
-    studentCount: 0,
-    verified: false,
-    status: "Missing Coordinates",
+    schoolType: inferLastSchoolTypeFromName(schoolName) || "Feeder Institution",
+    latitude: null,
+    longitude: null,
+    isActive: false,
     source: "GIS Pipeline",
   });
   await logMapping("geocode_miss", `No master directory match for ${schoolName}`, {
     importId: opts?.importId,
-    schoolId: created.id,
+    schoolRegistryId: created.id,
   });
   return { school: created, source: "created" };
 }
@@ -246,7 +230,7 @@ export async function syncStudents(
 ): Promise<StudentSyncResult> {
   const [importRow] = await getDb()
     .insert(imports)
-    .values({ source, status: "running", importedCount: 0, failedCount: 0 })
+    .values({ source, importedCount: 0, failedCount: 0 })
     .returning();
 
   let processed = 0;
@@ -286,26 +270,33 @@ export async function syncStudents(
           studentNumber: record.studentNumber.trim(),
           fullName: record.fullName.trim(),
           course: record.course?.trim() || null,
+          strand: record.strand?.trim() || null,
           lastSchoolName,
           lastSchoolType,
           studentType: record.studentType?.trim() || null,
           municipality,
+          province,
+          yearLevel: record.yearLevel?.trim() || null,
+          contactNumber: record.contactNumber?.trim() || null,
+          schedule: record.schedule?.trim() || null,
+          iskolarNiKap: record.iskolarNiKap?.trim() || null,
+          requirements: record.requirements?.trim() || null,
           rawPayload: record.rawPayload ? JSON.stringify(record.rawPayload) : null,
         })
         .returning();
 
-      const resolved = await resolveSchoolCoordinates(lastSchoolName, municipality, {
+      const resolved = await resolveOrGeocodeSchoolRegistry(lastSchoolName, municipality, {
         allowNominatim: true,
         importId: importRow.id,
       });
 
-      if (resolved.source === "nominatim" || resolved.source === "created") {
-        if (resolved.source === "nominatim") schoolsGeocoded += 1;
+      if (resolved.source === "alias" || resolved.source === "created") {
+        if (resolved.source === "alias") schoolsGeocoded += 1;
         if (resolved.source === "created") schoolsCreated += 1;
       }
 
       const mappingStatus = hasCoordinates(resolved.school)
-        ? resolved.school.verified
+        ? resolved.school.isActive
           ? "verified"
           : "mapped"
         : "needs_review";
@@ -322,13 +313,18 @@ export async function syncStudents(
         studentNumber,
         fullName: record.fullName.trim(),
         course: normalizeStudentProgramValue(record.course),
+        strand: record.strand?.trim() || null,
         admissionType,
         lastSchoolName,
         lastSchoolType,
-        schoolId: resolved.school.id,
+        schoolRegistryId: resolved.school.id,
         municipality,
         province,
         yearLevel: record.yearLevel?.trim() || null,
+        contactNumber: record.contactNumber?.trim() || null,
+        schedule: record.schedule?.trim() || null,
+        iskolarNiKap: record.iskolarNiKap?.trim() || null,
+        requirements: record.requirements?.trim() || null,
         enrollmentStatus,
         enrollmentDate,
         importedSource: normalizeImportedSource(source),
@@ -360,7 +356,6 @@ export async function syncStudents(
   await getDb()
     .update(imports)
     .set({
-      status: failed > 0 ? "completed_with_errors" : "completed",
       importedCount: processed,
       failedCount: failed,
       completedAt: new Date(),
@@ -371,8 +366,6 @@ export async function syncStudents(
   await logMapping("import_complete", `Synced ${processed} students (${source})`, {
     importId: importRow.id,
   });
-
-  await recomputeSchoolStudentCounts();
 
   return {
     importId: importRow.id,
@@ -385,7 +378,6 @@ export async function syncStudents(
 }
 
 export async function getProcessedStudents(limit = 500) {
-  await recomputeSchoolStudentCounts();
   return getDb()
     .select()
     .from(studentsProcessed)
@@ -399,11 +391,16 @@ export async function updateProcessedStudent(
     studentNumber?: string;
     fullName?: string;
     course?: string | null;
+    strand?: string | null;
     lastSchoolName?: string;
     lastSchoolType?: string | null;
     municipality?: string;
     province?: string;
     yearLevel?: string | null;
+    contactNumber?: string | null;
+    schedule?: string | null;
+    iskolarNiKap?: string | null;
+    requirements?: string | null;
     enrollmentStatus?: string;
     enrollmentDate?: string | null;
   },
@@ -422,11 +419,16 @@ export async function updateProcessedStudent(
   if (updates.studentNumber) updateValues.studentNumber = updates.studentNumber.trim();
   if (updates.fullName) updateValues.fullName = updates.fullName.trim();
   if (updates.course !== undefined) updateValues.course = normalizeStudentProgramValue(updates.course);
+  if (updates.strand !== undefined) updateValues.strand = updates.strand?.trim() || null;
   if (updates.lastSchoolName) updateValues.lastSchoolName = updates.lastSchoolName.trim();
   if (updates.lastSchoolType !== undefined) updateValues.lastSchoolType = updates.lastSchoolType?.trim() || null;
   if (updates.municipality) updateValues.municipality = updates.municipality.trim();
   if (updates.province) updateValues.province = updates.province.trim();
   if (updates.yearLevel !== undefined) updateValues.yearLevel = updates.yearLevel?.trim() || null;
+  if (updates.contactNumber !== undefined) updateValues.contactNumber = updates.contactNumber?.trim() || null;
+  if (updates.schedule !== undefined) updateValues.schedule = updates.schedule?.trim() || null;
+  if (updates.iskolarNiKap !== undefined) updateValues.iskolarNiKap = updates.iskolarNiKap?.trim() || null;
+  if (updates.requirements !== undefined) updateValues.requirements = updates.requirements?.trim() || null;
   if (updates.enrollmentStatus) {
     updateValues.enrollmentStatus = nextStatus;
     updateValues.archivedAt = nextStatus === "Archived" ? new Date() : null;
@@ -439,7 +441,6 @@ export async function updateProcessedStudent(
     .where(eq(studentsProcessed.id, id))
     .returning();
 
-  await recomputeSchoolStudentCounts();
   return updated;
 }
 
@@ -454,35 +455,34 @@ export async function batchUpdateProcessedStudentStatus(ids: number[], status: s
       processedAt: new Date(),
     })
     .where(inArray(studentsProcessed.id, ids));
-  await recomputeSchoolStudentCounts();
   return { updatedCount: ids.length };
 }
 
 export async function getMappingQueue(): Promise<MappingQueueItem[]> {
   const items: MappingQueueItem[] = [];
-  const allSchools = await storage.getSchools();
-  const byNormalized = new Map<string, School[]>();
+  const allSchools = await storage.listSchoolRegistry();
+  const byNormalized = new Map<string, SchoolRegistry[]>();
 
   for (const school of allSchools) {
-    const key = normalizeSchoolName(school.normalizedName || school.name);
+    const key = normalizeSchoolName(school.normalizedSchoolName || school.schoolName);
     byNormalized.set(key, [...(byNormalized.get(key) || []), school]);
   }
 
   for (const school of allSchools) {
     const issues: string[] = [];
     if (!hasCoordinates(school)) issues.push("Missing coordinates");
-    if (!school.verified) issues.push("Needs verification");
-    const dupes = byNormalized.get(normalizeSchoolName(school.normalizedName || school.name)) || [];
+    if (!school.isActive) issues.push("Needs verification");
+    const dupes = byNormalized.get(normalizeSchoolName(school.normalizedSchoolName || school.schoolName)) || [];
     if (dupes.length > 1) issues.push("Possible duplicate");
 
     if (issues.length > 0) {
       items.push({
         kind: "school",
         id: school.id,
-        title: school.name,
-        subtitle: `${school.municipality} · ${school.institutionType}`,
+        title: school.schoolName,
+        subtitle: `${school.municipality} · ${school.schoolType}`,
         issues,
-        schoolId: school.id,
+        schoolRegistryId: school.id,
       });
     }
   }
@@ -506,7 +506,7 @@ export async function getMappingQueue(): Promise<MappingQueueItem[]> {
       title: student.fullName,
       subtitle: `${student.studentNumber} · ${student.lastSchoolName}`,
       issues: [student.mappingStatus === "pending" ? "Pending school link" : "Needs review"],
-      schoolId: student.schoolId ?? undefined,
+      schoolRegistryId: student.schoolRegistryId ?? undefined,
     });
   }
 
@@ -515,50 +515,44 @@ export async function getMappingQueue(): Promise<MappingQueueItem[]> {
 
 export async function searchSchools(query: string, limit = 25) {
   const q = query.trim();
-  if (!q) return storage.getSchools();
+  if (!q) return storage.listSchoolRegistry();
 
   const pattern = `%${q}%`;
   return getDb()
     .select()
-    .from(schools)
+    .from(schoolRegistry)
     .where(
       or(
-        ilike(schools.name, pattern),
-        ilike(schools.normalizedName, pattern),
-        ilike(schools.municipality, pattern),
+        ilike(schoolRegistry.schoolName, pattern),
+        ilike(schoolRegistry.normalizedSchoolName, pattern),
+        ilike(schoolRegistry.municipality, pattern),
       ),
     )
     .limit(limit);
 }
 
 export async function verifySchoolMapping(input: VerifyMappingInput) {
-  const school = await storage.getSchool(input.schoolId);
+  const school = await storage.getSchoolRegistry(input.schoolRegistryId);
   if (!school) throw new Error("School not found");
 
-  const updates: Partial<InsertSchool> = {};
-  if (input.name?.trim()) updates.name = input.name.trim();
+  const updates: Partial<InsertSchoolRegistry> = {};
+  if (input.schoolName?.trim()) updates.schoolName = input.schoolName.trim();
   if (input.municipality?.trim()) updates.municipality = input.municipality.trim();
-  if (input.lat != null && input.lng != null) {
-    updates.lat = input.lat;
-    updates.lng = input.lng;
-    primeGeocodeCache(input.name || school.name, input.municipality || school.municipality, input.lat, input.lng);
+  if (input.latitude != null && input.longitude != null) {
+    updates.latitude = input.latitude;
+    updates.longitude = input.longitude;
   }
-  if (input.verified != null) {
-    updates.verified = input.verified;
-    const nextStatus: SchoolStatus =
-      input.verified && hasCoordinates({ ...school, ...updates })
-        ? "Verified"
-        : getSchoolStatus({ ...school, ...updates });
-    updates.status = nextStatus;
+  if (input.isActive != null) {
+    updates.isActive = input.isActive;
   }
 
-  const updated = await storage.updateSchool(input.schoolId, updates);
+  const updated = await storage.updateSchoolRegistry(input.schoolRegistryId, updates);
 
   if (input.createAlias?.trim()) {
     const aliasNorm = normalizeSchoolName(input.createAlias);
     if (aliasNorm) {
       try {
-        await getDb().insert(schoolAliases).values({ aliasNormalized: aliasNorm, schoolId: updated.id });
+        await getDb().insert(schoolAliases).values({ aliasNormalized: aliasNorm, schoolRegistryId: updated.id });
       } catch {
         // alias already exists
       }
@@ -567,10 +561,10 @@ export async function verifySchoolMapping(input: VerifyMappingInput) {
 
   await getDb()
     .update(studentsProcessed)
-    .set({ mappingStatus: updated.verified ? "verified" : "mapped" })
-    .where(eq(studentsProcessed.schoolId, updated.id));
+    .set({ mappingStatus: updated.isActive ? "verified" : "mapped" })
+    .where(eq(studentsProcessed.schoolRegistryId, updated.id));
 
-  await logMapping("verify", `Verified school ${updated.name}`, { schoolId: updated.id });
+  await logMapping("verify", `Verified school ${updated.schoolName}`, { schoolRegistryId: updated.id });
 
   return updated;
 }
@@ -584,18 +578,17 @@ export async function getMappingLogs(limit = 100) {
 }
 
 export async function getGisOverviewStats() {
-  await recomputeSchoolStudentCounts();
   const processed = await getDb().select().from(studentsProcessed);
   const activeProcessed = processed.filter((s) => isStudentActiveForGis(s.enrollmentStatus));
   const freshmen = activeProcessed.filter((s) => s.admissionType === "Freshman").length;
   const transferees = activeProcessed.filter((s) => s.admissionType === "Transferee").length;
-  const allSchools = await storage.getSchools();
+  const allSchools = await storage.listSchoolRegistry();
 
   return {
     totalStudentsSynced: activeProcessed.length,
     freshmenCount: freshmen,
     transfereeCount: transferees,
-    verifiedSchools: allSchools.filter((s) => s.verified && hasCoordinates(s)).length,
+    verifiedSchools: allSchools.filter((s) => s.isActive && hasCoordinates(s)).length,
     unmappedSchools: allSchools.filter((s) => !hasCoordinates(s)).length,
   };
 }

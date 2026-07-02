@@ -8,24 +8,24 @@ import { useToast } from "@/hooks/use-toast";
 
 export function useSchools() {
   return useQuery({
-    queryKey: [api.schools.list.path],
+    queryKey: [api.schoolRegistry.list.path],
     queryFn: async () => {
-      const res = await fetch(api.schools.list.path, { credentials: "include" });
+      const res = await fetch(api.schoolRegistry.list.path, { credentials: "include" });
       if (!res.ok) throw new Error('Failed to fetch schools');
-      return api.schools.list.responses[200].parse(await res.json());
+      return api.schoolRegistry.list.responses[200].parse(await res.json());
     },
   });
 }
 
 export function useSchool(id: number) {
   return useQuery({
-    queryKey: [api.schools.get.path, id],
+    queryKey: [api.schoolRegistry.get.path, id],
     queryFn: async () => {
-      const url = buildUrl(api.schools.get.path, { id });
+      const url = buildUrl(api.schoolRegistry.get.path, { id });
       const res = await fetch(url, { credentials: "include" });
       if (res.status === 404) return null;
       if (!res.ok) throw new Error('Failed to fetch school');
-      return api.schools.get.responses[200].parse(await res.json());
+      return api.schoolRegistry.get.responses[200].parse(await res.json());
     },
     enabled: !!id,
   });
@@ -37,9 +37,9 @@ export function useCreateSchool() {
   
   return useMutation({
     mutationFn: async (data: SchoolInput) => {
-      const validated = api.schools.create.input.parse(data);
-      const res = await fetch(api.schools.create.path, {
-        method: api.schools.create.method,
+      const validated = api.schoolRegistry.create.input.parse(data);
+      const res = await fetch(api.schoolRegistry.create.path, {
+        method: api.schoolRegistry.create.method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validated),
         credentials: "include",
@@ -49,10 +49,10 @@ export function useCreateSchool() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || 'Failed to create school mapping');
       }
-      return api.schools.create.responses[201].parse(await res.json());
+      return api.schoolRegistry.create.responses[201].parse(await res.json());
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [api.schools.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.schoolRegistry.list.path] });
       toast({
         title: "Success",
         description: "School mapped successfully.",
@@ -74,10 +74,10 @@ export function useUpdateSchool() {
 
   return useMutation({
     mutationFn: async ({ id, ...updates }: { id: number } & Partial<SchoolInput>) => {
-      const validated = api.schools.update.input.parse(updates);
-      const url = buildUrl(api.schools.update.path, { id });
+      const validated = api.schoolRegistry.update.input.parse(updates);
+      const url = buildUrl(api.schoolRegistry.update.path, { id });
       const res = await fetch(url, {
-        method: api.schools.update.method,
+        method: api.schoolRegistry.update.method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validated),
         credentials: "include",
@@ -87,10 +87,10 @@ export function useUpdateSchool() {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.message || 'Failed to update school mapping');
       }
-      return api.schools.update.responses[200].parse(await res.json());
+      return api.schoolRegistry.update.responses[200].parse(await res.json());
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [api.schools.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.schoolRegistry.list.path] });
       toast({
         title: "Updated",
         description: "School mapping updated successfully.",
@@ -112,9 +112,9 @@ export function useDeleteSchool() {
 
   return useMutation({
     mutationFn: async (id: number) => {
-      const url = buildUrl(api.schools.delete.path, { id });
+      const url = buildUrl(api.schoolRegistry.delete.path, { id });
       const res = await fetch(url, { 
-        method: api.schools.delete.method, 
+        method: api.schoolRegistry.delete.method, 
         credentials: "include" 
       });
       
@@ -124,7 +124,7 @@ export function useDeleteSchool() {
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [api.schools.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.schoolRegistry.list.path] });
       toast({
         title: "Deleted",
         description: "School mapping removed.",
@@ -146,9 +146,9 @@ export function useImportSchools() {
 
   return useMutation({
     mutationFn: async (schools: SchoolInput[]) => {
-      const validated = api.schools.import.input.parse({ schools });
-      const res = await fetch(api.schools.import.path, {
-        method: api.schools.import.method,
+      const validated = api.schoolRegistry.import.input.parse({ schoolRegistry: schools });
+      const res = await fetch(api.schoolRegistry.import.path, {
+        method: api.schoolRegistry.import.method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validated),
         credentials: "include",
@@ -159,10 +159,10 @@ export function useImportSchools() {
         throw new Error(errorData.message || 'Failed to import school registry');
       }
 
-      return api.schools.import.responses[200].parse(await res.json());
+      return api.schoolRegistry.import.responses[200].parse(await res.json());
     },
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: [api.schools.list.path] });
+      queryClient.invalidateQueries({ queryKey: [api.schoolRegistry.list.path] });
       toast({
         title: "Import complete",
         description: `${result.created} created, ${result.updated} updated, ${result.skipped} skipped.`,
