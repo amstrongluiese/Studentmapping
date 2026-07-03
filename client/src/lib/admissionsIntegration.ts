@@ -60,7 +60,7 @@ export interface AdmissionsPreviewRow extends Record<string, any> {
   strand: string;
   program: string;
   municipality: string;
-  status: "ready" | "needsReview" | "duplicate" | "blocked";
+  status: "matched" | "unmatched" | "duplicate" | "blocked";
   issues: string[];
   fingerprint: string;
   matchedSchoolRegistry?: SchoolRegistry;
@@ -294,6 +294,7 @@ export function buildAdmissionsPreview(
   mapping: FieldMapping,
   schools: SchoolRegistry[],
   importedFingerprints: Set<string>,
+  manualMatches: Record<string, SchoolRegistry> = {},
 ): AdmissionsPreviewRow[] {
   const seenInBatch = new Set<string>();
   const schoolMatcher = createFeederSchoolRegistryMatcher(schools);
@@ -317,7 +318,11 @@ export function buildAdmissionsPreview(
     const lat = numberValue(readMappedValue(sourceRecord, mapping, "lat"));
     const lng = numberValue(readMappedValue(sourceRecord, mapping, "lng"));
     const fingerprint = buildRecordFingerprint({ studentNumber, fullName, feederSchoolRegistry, strand, program, sourceRecord });
-    const schoolMatch = feederSchoolRegistry ? schoolMatcher(feederSchoolRegistry) : null;
+    
+    let schoolMatch = feederSchoolRegistry ? schoolMatcher(feederSchoolRegistry) : null;
+    if (feederSchoolRegistry && manualMatches[feederSchoolRegistry]) {
+      schoolMatch = { school: manualMatches[feederSchoolRegistry], confidence: 100 };
+    }
     const issues: string[] = [];
 
     if (!feederSchoolRegistry) issues.push("Missing feeder school field.");
@@ -336,10 +341,10 @@ export function buildAdmissionsPreview(
       issues.push("Matched feeder exists but still needs coordinates before map pinning.");
     }
 
-    let status: AdmissionsPreviewRow["status"] = "ready";
+    let status: AdmissionsPreviewRow["status"] = "matched";
     if (duplicateInBatch || duplicateImported) status = "duplicate";
     else if (!feederSchoolRegistry) status = "blocked";
-    else if (issues.length > 0) status = "needsReview";
+    else if (!schoolMatch) status = "unmatched";
 
     return {
       rowNumber: index + 1,

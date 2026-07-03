@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { matchSchool } from "./schoolMatcher";
+import { SchoolMatchingEngine } from "./schoolMatcher";
 import { storage } from "./storage";
 import {
   imports,
@@ -126,7 +126,7 @@ async function findSchoolRegistryByAlias(normalized: string): Promise<SchoolRegi
     const [alias] = await getDb()
       .select()
       .from(schoolAliases)
-      .where(eq(schoolAliases.aliasNormalized, normalized))
+      .where(eq(schoolAliases.normalizedAlias, normalized))
       .limit(1);
 
     if (!alias) return undefined;
@@ -161,7 +161,9 @@ export async function resolveOrGeocodeSchoolRegistry(
   const base = existing || viaAlias;
 
   const allSchools = await storage.listSchoolRegistry();
-  const masterMatch = matchSchool(schoolName, allSchools);
+  const matcher = new SchoolMatchingEngine(allSchools, []);
+  const matchResult = matcher.match(schoolName);
+  const masterMatch = matchResult.status === "matched" ? matchResult.school : null;
   
   if (masterMatch && masterMatch.latitude && masterMatch.longitude) {
     if (base) {
@@ -191,7 +193,7 @@ export async function resolveOrGeocodeSchoolRegistry(
     
     if (normalized !== created.normalizedSchoolName) {
       try {
-        await getDb().insert(schoolAliases).values({ aliasNormalized: normalized, schoolRegistryId: created.id });
+        await getDb().insert(schoolAliases).values({ aliasName: schoolName, normalizedAlias: normalized, schoolRegistryId: created.id });
       } catch {
         // Ignore if alias already exists
       }
@@ -552,7 +554,7 @@ export async function verifySchoolMapping(input: VerifyMappingInput) {
     const aliasNorm = normalizeSchoolName(input.createAlias);
     if (aliasNorm) {
       try {
-        await getDb().insert(schoolAliases).values({ aliasNormalized: aliasNorm, schoolRegistryId: updated.id });
+        await getDb().insert(schoolAliases).values({ aliasName: input.createAlias.trim(), normalizedAlias: aliasNorm, schoolRegistryId: updated.id });
       } catch {
         // alias already exists
       }
@@ -591,4 +593,49 @@ export async function getGisOverviewStats() {
     verifiedSchools: allSchools.filter((s) => s.isActive && hasCoordinates(s)).length,
     unmappedSchools: allSchools.filter((s) => !hasCoordinates(s)).length,
   };
+}
+
+export async function getGisMapData(scholarshipsFilter?: string[], programsFilter?: string[]) {
+  const db = await getDb();
+  
+  const allSchools = await db.select().from(schoolRegistry).where(eq(schoolRegistry.isActive, true));
+  const students = await db.select().from(studentsProcessed).where(
+    inArray(studentsProcessed.enrollmentStatus, ACTIVE_GIS_STUDENT_STATUSES)
+  );
+
+  const schoolsMap = new Map(allSchools.map(s => [s.id, {
+    schoolRegistryId: s.id,
+    schoolName: s.schoolName,
+    municipality: s.municipality,
+    province: s.province,
+    latitude: s.latitude,
+    longitude: s.longitude,
+    totalStudents: 0,
+    scholarships: {} as Record<string, number>,
+    programs: {} as Record<string, number>
+  }]));
+
+  for (const student of students) {
+    if (!student.schoolRegistryId) continue;
+    const schoolAgg = schoolsMap.get(student.schoolRegistryId);
+    if (!schoolAgg) continue;
+
+    const scholarship = (student.iskolarNiKap || "None").trim();
+    const rawProgram = (student.course || "Unknown").trim();
+    const programInfo = normalizeStudentProgramValue(rawProgram);
+    const program = programInfo ? programInfo : rawProgram;
+
+    if (scholarshipsFilter && scholarshipsFilter.length > 0) {
+      if (!scholarshipsFilter.includes(scholarship)) continue;
+    }
+    if (programsFilter && programsFilter.length > 0) {
+      if (!programsFilter.includes(program)) continue;
+    }
+
+    schoolAgg.totalStudents++;
+    schoolAgg.scholarships[scholarship] = (schoolAgg.scholarships[scholarship] || 0) + 1;
+    schoolAgg.programs[program] = (schoolAgg.programs[program] || 0) + 1;
+  }
+
+  return Array.from(schoolsMap.values()).filter(s => s.totalStudents > 0);
 }

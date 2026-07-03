@@ -35,6 +35,7 @@ import { useImportSchools } from "@/hooks/use-schools";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
+import { UnmatchedSchoolsQueue } from "./UnmatchedSchoolsQueue";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -130,6 +131,7 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
   const [autoSyncSheets, setAutoSyncSheets] = useState(false);
   const [autoSyncFile, setAutoSyncFile] = useState(false);
   const [importedFingerprints, setImportedFingerprints] = useState<Set<string>>(() => loadImportedAdmissionFingerprints());
+  const [manualMatches, setManualMatches] = useState<Record<string, School>>({});
 
   console.log("[DEBUG] Render state:", { 
     recordsLength: records.length, 
@@ -151,24 +153,20 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
   }, [sourceMode, autoSyncApi, autoSyncSheets]);
 
   const preview = useMemo(
-    () => buildAdmissionsPreview(records, fieldMapping, existingSchools, importedFingerprints),
-    [existingSchools, fieldMapping, importedFingerprints, records],
+    () => buildAdmissionsPreview(records, fieldMapping, existingSchools, importedFingerprints, manualMatches),
+    [existingSchools, fieldMapping, importedFingerprints, records, manualMatches],
   );
 
   const summary = useMemo(() => {
     const matched = preview.filter((row) => row.matchedSchool).length;
     const feederRows = preview.filter((row) => row.feederSchool && row.status !== "duplicate").length;
     const duplicates = preview.filter((row) => row.status === "duplicate").length;
-    const needsGeocode = preview.filter((row) => row.feederSchool && !row.matchedSchool && !hasIncomingCoordinates(row)).length;
-    const ready = feederRows - duplicates;
-
     return {
       total: preview.length,
       matched,
-      ready: Math.max(0, ready),
+      ready: Math.max(0, matched),
       duplicates,
-      needsGeocode,
-      progress: preview.length ? Math.round((ready / preview.length) * 100) : 0,
+      progress: preview.length ? Math.round((matched / preview.length) * 100) : 0,
     };
   }, [preview]);
 
@@ -176,6 +174,13 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
     () => Object.entries(fieldMapping).filter(([, value]) => value !== "ignore"),
     [fieldMapping],
   );
+
+  const unmatchedSchoolNames = useMemo(() => {
+    const names = preview
+      .filter((row) => row.status === "unmatched" && row.feederSchoolRegistry)
+      .map((row) => row.feederSchoolRegistry);
+    return Array.from(new Set(names));
+  }, [preview]);
 
   const addEvent = useCallback((tone: ImportEvent["tone"], message: string) => {
     setEvents((current) => [{ id: crypto.randomUUID(), tone, message }, ...current].slice(0, 6));
@@ -274,47 +279,69 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
     setFieldMapping((current) => ({ ...current, [sourceField]: target as FieldMapping[string] }));
   };
 
+  const [importProgress, setImportProgress] = useState<{ total: number; processed: number; matched: number; unmatched: number; errors: number; percentage: number; isProcessing: boolean } | null>(null);
+
   const applyToGis = async () => {
-    const usableRows = preview.filter((row) => row.feederSchool && row.status !== "duplicate");
-    if (usableRows.length === 0) {
-      toast({
-        title: "No admissions rows ready",
-        description: "Connect a source with a Last Attended School or Senior High School field first.",
-        variant: "destructive",
-      });
+    if (records.length === 0) {
+      toast({ title: "No records", description: "There are no records to process.", variant: "destructive" });
       return;
     }
 
     setIsApplying(true);
     try {
-      const schools = await buildGeocodedSchoolUpdates(usableRows, existingSchools, addEvent);
-      await importSchools.mutateAsync(schools);
-
-      const syncRecords = buildGisSyncRecords(usableRows, fieldMapping);
-      if (syncRecords.length > 0) {
-        const syncResult = await syncStudents.mutateAsync({
-          source: "admissions_integration",
-          records: syncRecords,
-        });
-        addEvent(
-          "success",
-          `GIS pipeline synced ${syncResult.processed.toLocaleString()} students (${syncResult.schoolsGeocoded} schools geocoded).`,
-        );
-      }
-      const nextFingerprints = new Set(importedFingerprints);
-      usableRows.forEach((row) => nextFingerprints.add(row.fingerprint));
-      saveImportedAdmissionFingerprints(nextFingerprints);
-      setImportedFingerprints(nextFingerprints);
-      addEvent("success", `${usableRows.length.toLocaleString()} admissions rows updated ${schools.length.toLocaleString()} feeder school markers.`);
-      toast({
-        title: "GIS map updated",
-        description: "Feeder school counts, coordinates, and markers are now refreshed.",
+      // 1. Start the import session
+      const startRes = await fetch("/api/imports/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ totalRecords: records.length }),
       });
+      if (!startRes.ok) throw new Error("Failed to start import session");
+
+      // 2. Chunk records into batches of 100
+      const batchSize = 100;
+      for (let i = 0; i < records.length; i += batchSize) {
+        const batch = records.slice(i, i + batchSize);
+        await fetch("/api/imports/batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ records: batch }),
+        });
+      }
+
+      // 3. Poll for progress
+      const pollProgress = () => {
+        const interval = setInterval(async () => {
+          try {
+            const res = await fetch("/api/imports/progress");
+            const data = await res.json();
+            setImportProgress(data);
+
+            if (!data.isProcessing && data.percentage === 100) {
+              clearInterval(interval);
+              setIsApplying(false);
+              addEvent("success", `Successfully processed ${data.total} records.`);
+              toast({ title: "Import complete", description: `Processed ${data.total} records seamlessly in the background.` });
+              
+              // Move imported fingerprints
+              const nextFingerprints = new Set(importedFingerprints);
+              preview.forEach(row => nextFingerprints.add(row.fingerprint));
+              saveImportedAdmissionFingerprints(nextFingerprints);
+              setImportedFingerprints(nextFingerprints);
+            }
+          } catch (e) {
+            console.error("Progress polling error", e);
+          }
+        }, 1000);
+      };
+      
+      pollProgress();
+      addEvent("success", `Queued ${records.length} records for background processing.`);
+      toast({ title: "Import started", description: "Processing records in the background." });
+
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to apply GIS updates.";
       addEvent("error", message);
-      toast({ title: "GIS update failed", description: message, variant: "destructive" });
-    } finally {
+      toast({ title: "Import failed", description: message, variant: "destructive" });
       setIsApplying(false);
     }
   };
@@ -329,7 +356,7 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
           <div className="flex items-center gap-2">
             <Badge variant="secondary" className="bg-slate-100 text-slate-600 font-medium hover:bg-slate-200/80 rounded-md shadow-none">Rows: {summary.total}</Badge>
             <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 font-medium hover:bg-emerald-100/80 rounded-md shadow-none">Ready: {summary.ready}</Badge>
-            <Badge variant="secondary" className="bg-amber-50 text-amber-700 font-medium hover:bg-amber-100/80 rounded-md shadow-none">Geocode: {summary.needsGeocode}</Badge>
+            <Badge variant="secondary" className="bg-amber-50 text-amber-700 font-medium hover:bg-amber-100/80 rounded-md shadow-none">Unmatched: {summary.total - summary.matched - summary.duplicates}</Badge>
             {summary.duplicates > 0 && <Badge variant="secondary" className="bg-rose-50 text-rose-700 font-medium hover:bg-rose-100/80 rounded-md shadow-none">Dupes: {summary.duplicates}</Badge>}
           </div>
         </div>
@@ -342,12 +369,29 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
               <GitMerge className="h-3.5 w-3.5" />
               Field Mapping {mappedFields.length > 0 && <Badge variant="secondary" className="ml-0.5 h-4 min-w-4 rounded-full px-1 text-[10px] font-semibold bg-teal-100 text-teal-700">{mappedFields.length}</Badge>}
            </Button>
-           <Button size="sm" className="h-8 gap-2 px-4 text-[13px] font-medium shadow-sm" disabled={isApplying || summary.ready === 0} onClick={applyToGis}>
+           <Button size="sm" className="h-8 gap-2 px-4 text-[13px] font-medium shadow-sm" disabled={isApplying || records.length === 0} onClick={applyToGis}>
              {isApplying ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPinned className="h-3.5 w-3.5" />}
-             Apply to GIS
+             {isApplying ? "Processing..." : "Import Batch"}
            </Button>
         </div>
       </div>
+      
+      {/* Import Progress Overlay */}
+      {importProgress && importProgress.isProcessing && (
+        <div className="px-6 py-4 bg-slate-50 border-b border-slate-200">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-sm font-medium text-slate-700">Importing {importProgress.total} records...</span>
+            <span className="text-sm font-bold text-slate-900">{importProgress.percentage}%</span>
+          </div>
+          <Progress value={importProgress.percentage} className="h-2" />
+          <div className="flex gap-4 mt-3 text-xs text-slate-500">
+            <span>Processed: {importProgress.processed}</span>
+            <span className="text-emerald-600">Matched: {importProgress.matched}</span>
+            <span className="text-amber-600">Unmatched: {importProgress.unmatched}</span>
+            {importProgress.errors > 0 && <span className="text-rose-600">Errors: {importProgress.errors}</span>}
+          </div>
+        </div>
+      )}
 
       {/* 2. Source & Connection Row */}
       <div className="flex shrink-0 flex-col gap-4 border-b border-slate-100 px-6 py-4">
@@ -565,6 +609,26 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
         </DialogContent>
       </Dialog>
 
+      {unmatchedSchoolNames.length > 0 && (
+        <div className="px-6 pb-6 w-full">
+          <UnmatchedSchoolsQueue
+            unmatchedSchoolNames={unmatchedSchoolNames}
+            manualMatches={manualMatches}
+            existingSchools={existingSchools}
+            onResolveMatch={(name, school) => {
+              setManualMatches(prev => {
+                if (!school) {
+                  const next = { ...prev };
+                  delete next[name];
+                  return next;
+                }
+                return { ...prev, [name]: school };
+              });
+            }}
+          />
+        </div>
+      )}
+
       {/* 4. Full-bleed Table */}
       <div className="flex min-h-0 flex-1 flex-col w-full bg-transparent">
          <div className="overflow-auto flex-1 w-full">
@@ -609,7 +673,7 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
                        <TableCell className="whitespace-nowrap text-slate-500 text-[12px]">{lastSource}</TableCell>
                        <TableCell className="whitespace-nowrap text-right px-6" title={row.issues.join("\n")}>
                          <Badge variant="outline" className={cn("text-[11px] font-medium tracking-wide shadow-none border-transparent cursor-help", statusTone(row))}>
-                           {row.status === "ready" ? "Ready" : row.status === "needsReview" ? "Review" : row.status === "duplicate" ? "Duplicate" : "Blocked"}
+                           {row.status === "matched" ? "Matched" : row.status === "unmatched" ? "Unmatched" : row.status === "duplicate" ? "Duplicate" : "Blocked"}
                          </Badge>
                        </TableCell>
                      </TableRow>
@@ -624,68 +688,9 @@ export function AdmissionsIntegrationHub({ existingSchools }: AdmissionsIntegrat
   );
 }
 
-async function buildGeocodedSchoolUpdates(
-  rows: AdmissionsPreviewRow[],
-  existingSchools: School[],
-  addEvent: (tone: ImportEvent["tone"], message: string) => void,
-): Promise<SchoolInput[]> {
-  const existingById = new Map(existingSchools.map((school) => [school.id, school]));
-  const groups = new Map<string, { rows: AdmissionsPreviewRow[]; school?: School }>();
 
-  rows.forEach((row) => {
-    const school = row.matchedSchoolRegistry ? existingById.get(row.matchedSchoolRegistry.id) || row.matchedSchoolRegistry : undefined;
-    const key = school ? `school:${school.id}` : `new:${normalizeSchoolName(row.feederSchoolRegistry)}`;
-    const group = groups.get(key) || { rows: [], school };
-    group.rows.push(row);
-    groups.set(key, group);
-  });
 
-  const updates: SchoolInput[] = [];
 
-  for (const { rows: schoolRows, school } of Array.from(groups.values())) {
-    const first = schoolRows[0];
-    const incomingLat = first.lat;
-    const incomingLng = first.lng;
-    let latitude = school?.latitude ?? incomingLat ?? null;
-    let longitude = school?.longitude ?? incomingLng ?? null;
-    let source = school?.source || "Admissions Integration";
-    const name = school?.schoolName || first.feederSchoolRegistry;
-    const municipality =
-      first.municipality?.trim() || school?.municipality?.trim() || undefined;
-    const savedMunicipality = municipality || "Laguna";
-
-    if (!hasCoordinates({ latitude, longitude })) {
-      const geocoded = await requestGeocodeSchool({ schoolName: name, municipality });
-      if (geocoded) {
-        latitude = geocoded.latitude;
-        longitude = geocoded.longitude;
-        source = `${geocoded.source} + Admissions Integration`;
-        addEvent("success", `${name} geolocated and saved to the feeder registry.`);
-      } else {
-        addEvent("warning", `${name} needs manual coordinate review.`);
-      }
-    }
-
-    const mapped = hasCoordinates({ latitude, longitude });
-    updates.push({
-      schoolName: name,
-      normalizedSchoolName: normalizeSchoolName(name),
-      municipality: savedMunicipality,
-      province: school?.province || "Laguna",
-      schoolType: school?.schoolType || inferSchoolType(name),
-      latitude,
-      longitude,
-      isActive: school?.isActive || mapped,
-      source,
-    });
-  }
-
-  return updates;
-}
-
-function hasIncomingCoordinates(row: AdmissionsPreviewRow) {
-  return hasCoordinates({ latitude: row.lat, longitude: row.lng });
-}
 
 function inferSchoolType(name: string) {
   const normalized = normalizeSchoolName(name);
@@ -695,8 +700,8 @@ function inferSchoolType(name: string) {
 }
 
 function statusTone(row: AdmissionsPreviewRow) {
-  if (row.status === "ready") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (row.status === "needsReview") return "border-amber-200 bg-amber-50 text-amber-700";
+  if (row.status === "matched") return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  if (row.status === "unmatched") return "border-amber-200 bg-amber-50 text-amber-700";
   if (row.status === "duplicate") return "border-slate-200 bg-slate-50 text-slate-500";
   return "border-rose-200 bg-rose-50 text-rose-700";
 }

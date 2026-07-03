@@ -3,7 +3,7 @@ import { schoolAliases } from "@shared/schema";
 import { hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
 import { getDb } from "./db";
 import { eq } from "drizzle-orm";
-import { matchSchool } from "./schoolMatcher";
+import { SchoolMatchingEngine } from "./schoolMatcher";
 import { type SchoolRegistry as DbSchoolRegistry } from "@shared/schema";
 
 export interface GeocodeLookupResult {
@@ -20,7 +20,7 @@ async function findSchoolByAlias(normalized: string): Promise<DbSchoolRegistry |
     const [alias] = await getDb()
       .select()
       .from(schoolAliases)
-      .where(eq(schoolAliases.aliasNormalized, normalized))
+      .where(eq(schoolAliases.normalizedAlias, normalized))
       .limit(1);
     if (!alias) return undefined;
     return storage.getSchoolRegistry(alias.schoolRegistryId);
@@ -29,12 +29,12 @@ async function findSchoolByAlias(normalized: string): Promise<DbSchoolRegistry |
   }
 }
 
-export async function createAlias(alias: string | undefined, schoolRegistryId: number) {
-  const aliasNormalized = normalizeSchoolName(alias || "");
-  if (!aliasNormalized) return;
+export async function createAlias(aliasName: string | undefined, schoolRegistryId: number) {
+  const normalizedAlias = normalizeSchoolName(aliasName || "");
+  if (!normalizedAlias || !aliasName) return;
 
   try {
-    await getDb().insert(schoolAliases).values({ aliasNormalized, schoolRegistryId });
+    await getDb().insert(schoolAliases).values({ aliasName, normalizedAlias, schoolRegistryId });
   } catch {
     // Existing aliases are expected in a local-first search cache.
   }

@@ -155,6 +155,21 @@ const batchDeleteResponseSchema = z.object({
   message: z.string(),
 });
 
+const mapDataInputSchema = z.object({
+  scholarships: z.union([z.string(), z.array(z.string())]).optional(),
+  programs: z.union([z.string(), z.array(z.string())]).optional(),
+});
+
+export const mapDataResponseSchema = z.array(z.object({
+  schoolRegistryId: z.number(),
+  schoolName: z.string(),
+  latitude: z.number().nullable(),
+  longitude: z.number().nullable(),
+  totalStudents: z.number(),
+  scholarships: z.record(z.string(), z.number()),
+  programs: z.record(z.string(), z.number()),
+}));
+
 const verifyMappingInputSchema = z.object({
   schoolRegistryId: z.number(),
   isActive: z.boolean().optional(),
@@ -293,6 +308,14 @@ export const api = {
     },
   },
   gis: {
+    mapData: {
+      method: 'GET' as const,
+      path: '/api/gis/map-data' as const,
+      input: mapDataInputSchema,
+      responses: {
+        200: mapDataResponseSchema,
+      },
+    },
     studentsSync: {
       method: 'POST' as const,
       path: '/api/students/sync' as const,
@@ -474,3 +497,4 @@ export type StudentResponse = z.infer<typeof api.students.register.responses[201
 
 export type ReferralInput = z.infer<typeof api.referrals.create.input>;
 export type ReferralResponse = z.infer<typeof api.referrals.create.responses[201]>;
+export type MapDataResponse = z.infer<typeof api.gis.mapData.responses[200]>;

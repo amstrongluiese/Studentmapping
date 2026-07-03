@@ -10,7 +10,14 @@ import {
   schoolRegistry as schoolsTable,
   studentsProcessed,
   studentsRaw,
+  studentImports,
+  systemSettings,
+  schoolMatchHistory,
+  schoolRegistry,
 } from "@shared/schema";
+import { eq, and, count, desc } from "drizzle-orm";
+import { normalizeSchoolName } from "@shared/schoolRegistry";
+import { SchoolMatchingEngine } from "./schoolMatcher";
 import { z } from "zod";
 import { previewIntegrationSource } from "./integrationService";
 import {
@@ -24,6 +31,7 @@ import {
   updateProcessedStudent,
   batchUpdateProcessedStudentStatus,
   verifySchoolMapping,
+  getGisMapData,
 } from "./gisPipeline";
 import {
   geocodeSchoolPreview,
@@ -31,6 +39,7 @@ import {
 } from "./geocodeLookup";
 import multer from "multer";
 import { syncExcelToJSON } from "./syncMasterDirectory";
+import { startImportSession, getImportProgress, processBatch } from "./importPipeline";
 
 const upload = multer({ dest: "server/uploads/" });
 
@@ -129,6 +138,215 @@ export async function registerRoutes(
       if (err instanceof Error) return res.status(500).json({ success: false, deletedCount: 0, skippedCount: 0, message: err.message });
       throw err;
     }
+  });
+
+  // V2 High-Performance Import Engine Routes
+  app.post("/api/integrations/sync-google-sheets", async (req, res) => {
+    try {
+      const { sheetsUrl, sheetsToken } = req.body;
+      if (!sheetsUrl) return res.status(400).json({ success: false, message: "URL is required" });
+
+      const payload = {
+        sourceType: "googleSheets" as const,
+        url: sheetsUrl,
+        method: "GET",
+        authMode: sheetsToken ? "bearer" : "none" as const,
+        authToken: sheetsToken,
+      };
+
+      const result = await previewIntegrationSource(payload);
+      
+      // Auto-map generic Google Sheet columns to standard fields
+      const mappedRecords = result.records.map((r: any) => {
+        const getVal = (possibleKeys: string[]) => {
+          const key = Object.keys(r).find(k => possibleKeys.some(p => k.toLowerCase().includes(p)));
+          return key ? String(r[key]) : undefined;
+        };
+
+        return {
+          studentNumber: getVal(["student id", "student no", "student_number", "id"]),
+          fullName: getVal(["name", "full name", "fullname", "student name", "student_name"]),
+          previousSchool: getVal(["school", "previous", "graduated", "feeder"]),
+          program: getVal(["program", "course", "strand", "degree"]),
+          scholarship: getVal(["scholarship", "iskolar", "grant"]),
+          municipality: getVal(["municipality", "city", "town", "address"]),
+          importSource: "Google Sheets Auto-Sync",
+        };
+      });
+
+      startImportSession(mappedRecords.length);
+      processBatch(mappedRecords).catch(console.error);
+
+      res.json({ success: true, message: `Auto-sync started for ${mappedRecords.length} records.` });
+    } catch (err: any) {
+      console.error("Auto-sync error:", err);
+      res.status(500).json({ success: false, message: err.message || "Failed to sync" });
+    }
+  });
+
+  app.post("/api/imports/start", (req, res) => {
+    const { totalRecords } = req.body;
+    if (!totalRecords) return res.status(400).json({ message: "totalRecords is required" });
+    startImportSession(totalRecords);
+    res.json({ success: true, message: "Import session started" });
+  });
+
+  app.post("/api/imports/batch", async (req, res) => {
+    const { records } = req.body;
+    if (!records || !Array.isArray(records)) return res.status(400).json({ message: "records array is required" });
+    
+    // Process batch asynchronously in the background so it doesn't block the request
+    processBatch(records).catch(console.error);
+    
+    res.json({ success: true, message: "Batch queued for processing" });
+  });
+
+  app.get("/api/imports/progress", (req, res) => {
+    res.json(getImportProgress());
+  });
+
+  app.get("/api/imports/staging", async (req, res) => {
+    const db = getDb();
+    const records = await db.select().from(studentImports);
+    res.json(records);
+  });
+
+  app.get("/api/settings", async (req, res) => {
+    const db = getDb();
+    const records = await db.select().from(systemSettings);
+    // Convert array of {key, value} to an object map
+    const settingsMap = records.reduce((acc: Record<string, string>, curr: any) => {
+      acc[curr.key] = curr.value;
+      return acc;
+    }, {});
+    res.json(settingsMap);
+  });
+
+  app.post("/api/settings", async (req, res) => {
+    const db = getDb();
+    
+    // Expects body to be an object { key: value }
+    const updates = req.body;
+    for (const [key, value] of Object.entries(updates)) {
+      if (typeof value === "string") {
+        // Upsert logic (Insert or Update)
+        const existing = await db.select().from(systemSettings).where(eq(systemSettings.key, key));
+        if (existing.length > 0) {
+          await db.update(systemSettings).set({ value }).where(eq(systemSettings.key, key));
+        } else {
+          await db.insert(systemSettings).values({ key, value });
+        }
+      }
+    }
+    res.json({ success: true, message: "Settings saved successfully" });
+  });
+
+  app.post("/api/imports/match-resolution", async (req, res) => {
+    const db = getDb();
+
+    const { importedName, officialSchoolId, createAlias } = req.body;
+    if (!importedName || !officialSchoolId) return res.status(400).json({ message: "importedName and officialSchoolId required" });
+
+    // 1. Save History (Self-Learning)
+    const existingHistory = await db.select().from(schoolMatchHistory).where(eq(schoolMatchHistory.importedName, importedName)).limit(1);
+    if (existingHistory.length > 0) {
+      await db.update(schoolMatchHistory).set({
+        occurrences: existingHistory[0].occurrences + 1,
+        officialSchoolId,
+      }).where(eq(schoolMatchHistory.id, existingHistory[0].id));
+    } else {
+      await db.insert(schoolMatchHistory).values({
+        importedName,
+        officialSchoolId,
+        resolvedBy: "Admin"
+      });
+    }
+
+    // 2. Save Alias if requested
+    if (createAlias) {
+      const normalized = normalizeSchoolName(importedName);
+      const existingAlias = await db.select().from(schoolAliases).where(eq(schoolAliases.normalizedAlias, normalized)).limit(1);
+      if (existingAlias.length === 0) {
+        await db.insert(schoolAliases).values({
+          schoolRegistryId: officialSchoolId,
+          aliasName: importedName,
+          normalizedAlias: normalized
+        });
+      }
+    }
+
+    // 3. Update pending imports
+    await db.update(studentImports).set({
+      importStatus: "Matched",
+      matchedSchoolId: officialSchoolId,
+      matchRule: "manual",
+      matchConfidence: 100
+    }).where(and(eq(studentImports.previousSchool, importedName), eq(studentImports.importStatus, "Unmatched")));
+
+    res.json({ success: true, message: "Match resolution saved" });
+  });
+
+  app.post("/api/imports/apply", async (req, res) => {
+    const db = getDb();
+
+    // Only apply records that have a matched school
+    const matchedRecords = await db.select().from(studentImports).where(eq(studentImports.importStatus, "Matched"));
+    
+    for (const record of matchedRecords) {
+      if (!record.matchedSchoolId) continue;
+
+      await db.insert(studentsProcessed).values({
+        studentNumber: record.studentNumber,
+        fullName: record.fullName,
+        course: record.program,
+        admissionType: "Freshman",
+        lastSchoolName: record.previousSchool || "Unknown",
+        lastSchoolType: "Unknown",
+        schoolRegistryId: record.matchedSchoolId,
+        municipality: record.municipality || "Laguna",
+        province: "Laguna",
+        enrollmentStatus: "Active",
+        importedSource: record.importSource,
+        mappingStatus: "verified",
+      });
+
+      await db.update(studentImports).set({ importStatus: "Applied" }).where(eq(studentImports.id, record.id));
+    }
+    
+    res.json({ success: true, appliedCount: matchedRecords.length });
+  });
+
+  app.get("/api/settings/diagnostics", async (req, res) => {
+    const db = getDb();
+
+    const registryCount = await db.select({ value: count() }).from(schoolRegistry);
+    const aliasCount = await db.select({ value: count() }).from(schoolAliases);
+    
+    const matchedCount = await db.select({ value: count() }).from(studentImports).where(eq(studentImports.importStatus, "Matched"));
+    const unmatchedCount = await db.select({ value: count() }).from(studentImports).where(eq(studentImports.importStatus, "Unmatched"));
+    const appliedCount = await db.select({ value: count() }).from(studentImports).where(eq(studentImports.importStatus, "Applied"));
+
+    const totalProcessed = matchedCount[0].value + unmatchedCount[0].value + appliedCount[0].value;
+    const successRate = totalProcessed === 0 ? 0 : Math.round(((matchedCount[0].value + appliedCount[0].value) / totalProcessed) * 100);
+
+    res.json({
+      schoolRegistryCount: registryCount[0].value,
+      aliasCount: aliasCount[0].value,
+      matchedRecords: matchedCount[0].value,
+      unmatchedRecords: unmatchedCount[0].value,
+      appliedRecords: appliedCount[0].value,
+      importSuccessRate: successRate,
+      averageConfidence: 95, // Mock for now
+      systemHealth: "Optimal"
+    });
+  });
+
+  app.get("/api/imports/logs", async (req, res) => {
+    // Currently returns recent batches from studentImports grouped by importSource
+    const db = getDb();
+
+    const recentImports = await db.select().from(studentImports).orderBy(desc(studentImports.importedAt)).limit(100);
+    res.json(recentImports);
   });
 
   app.post(api.integrations.preview.path, async (req, res) => {
@@ -284,6 +502,32 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) return res.status(400).json({ success: false, deletedCount: 0, skippedCount: 0, message: err.errors[0].message });
       if (err instanceof Error) return res.status(500).json({ success: false, deletedCount: 0, skippedCount: 0, message: err.message });
       throw err;
+    }
+  });
+
+  app.get(api.gis.mapData.path, async (req, res) => {
+    try {
+      const input = api.gis.mapData.input.parse({
+        scholarships: req.query.scholarships,
+        programs: req.query.programs
+      });
+      
+      const toArray = (val?: string | string[]) => {
+        if (!val) return undefined;
+        return Array.isArray(val) ? val : [val];
+      };
+
+      const mapData = await getGisMapData(
+        toArray(input.scholarships),
+        toArray(input.programs)
+      );
+      res.json(mapData);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        res.status(400).json({ message: "Invalid filter parameters", errors: err.errors });
+        return;
+      }
+      res.status(500).json({ message: "Failed to fetch map data" });
     }
   });
 

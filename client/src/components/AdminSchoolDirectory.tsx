@@ -156,7 +156,6 @@ export function AdminSchoolDirectory() {
           <table className="w-full text-sm text-left">
             <thead className="text-xs text-slate-500 bg-slate-50/80 uppercase sticky top-0 z-10 border-b border-slate-200">
               <tr>
-                <th className="px-6 py-3 font-medium">ID</th>
                 <th className="px-6 py-3 font-medium">School Name</th>
                 <th className="px-6 py-3 font-medium">Location</th>
                 <th className="px-6 py-3 font-medium">Type</th>
@@ -166,19 +165,20 @@ export function AdminSchoolDirectory() {
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-slate-500">Loading directory...</td>
+                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">Loading directory...</td>
                 </tr>
               ) : filteredSchools.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-slate-500">
+                  <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
                     No schools found matching "{searchTerm}".
                   </td>
                 </tr>
               ) : (
                 filteredSchools.map((school, i) => (
                   <tr key={i} className="hover:bg-slate-50/50 transition-colors group">
-                    <td className="px-6 py-3 whitespace-nowrap text-slate-600 font-mono text-xs">{school.schoolId}</td>
-                    <td className="px-6 py-3 font-medium text-slate-800">{school.schoolName}</td>
+                    <td className="px-6 py-3">
+                      <div className="font-medium text-slate-800">{school.schoolName}</div>
+                    </td>
                     <td className="px-6 py-3 text-slate-600">
                       {school.municipality}, {school.province}
                     </td>

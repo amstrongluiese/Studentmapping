@@ -251,8 +251,9 @@ function createSchoolIcon(
   });
 }
 
-function escapeHtml(value: string) {
-  return value
+function escapeHtml(value?: string | null) {
+  if (!value) return "";
+  return String(value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -261,10 +262,13 @@ function escapeHtml(value: string) {
 }
 
 function mappedSchools(schools: ProgramSchool[] = []): MappedSchool[] {
-  return schools.filter(
-    (school): school is MappedSchool =>
-      hasCoordinates(school) && ((school as any).filteredStudentCount ?? (school as any).studentCount ?? 0) > 0,
-  );
+  return schools
+    .filter((school) => hasCoordinates(school) && ((school as any).filteredStudentCount ?? (school as any).studentCount ?? 0) > 0)
+    .map((school) => ({
+      ...school,
+      lat: school.latitude,
+      lng: school.longitude,
+    })) as MappedSchool[];
 }
 
 function coerceProgramSchools(schools: School[] = []): ProgramSchool[] {

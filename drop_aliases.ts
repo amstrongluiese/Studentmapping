@@ -1,0 +1,1 @@
+import { db } from "./server/db"; import { sql } from "drizzle-orm"; async function run() { await db.execute(sql`DROP TABLE IF EXISTS school_aliases CASCADE;`); console.log("Dropped"); process.exit(0); } run();

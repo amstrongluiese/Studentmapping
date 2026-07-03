@@ -18,11 +18,13 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings,
   Settings2,
   Trash2,
   UserPlus,
   XCircle,
 } from "lucide-react";
+import { Link } from "wouter";
 import { api } from "@shared/routes";
 import type { Referral, ReferralInput, SchoolRegistry, Student } from "@shared/schema";
 import { getSchoolStatus, hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
@@ -37,7 +39,7 @@ import {
 } from "@shared/programIntelligence";
 import { AdminPortalWorkspace, type AdminPortalSection } from "@/components/AdminPortalWorkspace";
 import { AdminSchoolRegistry } from "@/components/AdminSchoolRegistry";
-import { AdmissionsIntegrationHub } from "@/components/AdmissionsIntegrationHub";
+import { ApiSettingsCenter } from "@/components/ApiSettingsCenter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme, type ThemePreference } from "@/components/theme-provider";
 import MapWrapper, {
@@ -638,7 +640,7 @@ export default function Dashboard() {
                 </SettingsCard>
               </div>
             )}
-            renderIntegrationControls={() => <AdmissionsIntegrationHub existingSchools={schools} />}
+            renderIntegrationControls={() => <ApiSettingsCenter />}
             renderSchoolRegistry={() => (
               <AdminSchoolRegistry
                 compact

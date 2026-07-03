@@ -73,6 +73,23 @@ export const studentsRaw = pgTable("students_raw", {
   syncedAt: timestamp("synced_at").notNull().defaultNow(),
 });
 
+/** Staging area for imported students before they become official records. */
+export const studentImports = pgTable("student_imports", {
+  id: serial("id").primaryKey(),
+  studentNumber: text("student_number").notNull(),
+  fullName: text("full_name").notNull(),
+  previousSchool: text("previous_school"),
+  program: text("program"),
+  scholarship: text("scholarship"),
+  municipality: text("municipality").notNull().default("Laguna"),
+  importedAt: timestamp("imported_at").notNull().defaultNow(),
+  importSource: text("import_source").notNull(),
+  importStatus: text("import_status").notNull().default("Pending"), // Pending, Matched, Unmatched, Applied
+  matchedSchoolId: integer("matched_school_id").references(() => schoolRegistry.id),
+  matchConfidence: integer("match_confidence"),
+  matchRule: text("match_rule"),
+});
+
 /** Processed GIS student rows linked to feeder schools. */
 export const studentsProcessed = pgTable("students_processed", {
   id: serial("id").primaryKey(),
@@ -105,8 +122,9 @@ export const studentsProcessed = pgTable("students_processed", {
 /** Alternate normalized names → canonical school registry entry. */
 export const schoolAliases = pgTable("school_aliases", {
   id: serial("id").primaryKey(),
-  aliasNormalized: text("alias_normalized").notNull().unique(),
   schoolRegistryId: integer("school_registry_id").notNull().references(() => schoolRegistry.id),
+  aliasName: text("alias_name").notNull(),
+  normalizedAlias: text("normalized_alias").notNull().unique(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -119,6 +137,25 @@ export const mappingLogs = pgTable("mapping_logs", {
   studentProcessedId: integer("student_processed_id").references(() => studentsProcessed.id),
   message: text("message").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/** Permanent resolution history for matching unmatched schools to official registry */
+export const schoolMatchHistory = pgTable("school_match_history", {
+  id: serial("id").primaryKey(),
+  importedName: text("imported_name").notNull(),
+  officialSchoolId: integer("official_school_id").references(() => schoolRegistry.id),
+  resolvedBy: text("resolved_by").notNull().default("Admin"),
+  occurrences: integer("occurrences").notNull().default(1),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/** Dynamic system configuration and integration secrets */
+export const systemSettings = pgTable("system_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  description: text("description"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const schoolStatusSchema = z.enum([
@@ -152,5 +189,6 @@ export type ReferralInput = z.infer<typeof insertReferralSchema>;
 export type Import = typeof imports.$inferSelect;
 export type StudentRaw = typeof studentsRaw.$inferSelect;
 export type StudentProcessed = typeof studentsProcessed.$inferSelect;
+export type StudentImport = typeof studentImports.$inferSelect;
 export type SchoolAlias = typeof schoolAliases.$inferSelect;
 export type MappingLog = typeof mappingLogs.$inferSelect;

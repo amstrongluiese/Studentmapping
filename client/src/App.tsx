@@ -8,12 +8,14 @@ import { ThemeProvider } from "@/components/theme-provider";
 import NotFound from "@/pages/not-found";
 import Dashboard from "./pages/Dashboard";
 import ReferralClient from "./pages/ReferralClient";
+import StudentManagement from "./pages/StudentManagement";
 
 function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
       <Route path="/referral" component={ReferralClient} />
+      <Route path="/students" component={StudentManagement} />
       <Route component={NotFound} />
     </Switch>
   );
