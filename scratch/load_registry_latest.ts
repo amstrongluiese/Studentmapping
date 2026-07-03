@@ -4,11 +4,13 @@ import xlsx from "xlsx";
 import { sql } from "drizzle-orm";
 import { normalizeSchoolName } from "../shared/schoolRegistry";
 
+import path from "path";
+
 async function loadRegistry() {
   initializeDatabase();
   const db = getDb();
   
-  const filePath = 'C:/Users/PC/Documents/GitHub/Studentmapping/School Masterlist.xlsx';
+  const filePath = path.join(process.cwd(), 'School_Masterlist.xlsx');
   
   console.log("Reading Excel file...");
   let data = [];
