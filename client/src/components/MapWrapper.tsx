@@ -83,7 +83,7 @@ export const DEFAULT_MAP_DISPLAY_SETTINGS: MapDisplaySettings = {
   barangayLabels: false,
   cityLabels: false,
   schoolLabels: true,
-  schoolNameLabels: false,
+  schoolNameLabels: true,
   roads: true,
   clusters: true,
   overlays: true,

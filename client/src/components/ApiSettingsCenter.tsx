@@ -2,16 +2,16 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertCircle, Settings, CheckCircle2, CloudCog, Table } from "lucide-react";
+import { AlertCircle, Settings, CheckCircle2, CloudCog, Table as TableIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { UnmatchedSchoolsQueue } from "./UnmatchedSchoolsQueue";
 import { useSchools } from "@/hooks/use-schools";
 
 export function ApiSettingsCenter() {
-  const { toast } = useToast();
   const queryClient = useQueryClient();
   const { data: schools = [] } = useSchools();
 
@@ -19,8 +19,28 @@ export function ApiSettingsCenter() {
     queryKey: ["/api/settings"],
   });
 
+  const [activeTab, setActiveTab] = useState("sheets");
   const [sheetsUrl, setSheetsUrl] = useState("");
   const [sheetsToken, setSheetsToken] = useState("");
+  
+  // Notification states
+  const [syncNotification, setSyncNotification] = useState<{ type: "success"|"error", message: string } | null>(null);
+  const [mappingNotification, setMappingNotification] = useState<{ type: "success"|"error", message: string } | null>(null);
+
+  // Preview Data State
+  const [previewData, setPreviewData] = useState<{ fields: string[], records: any[] } | null>(null);
+  const [previewPage, setPreviewPage] = useState(1);
+  const previewPageSize = 50;
+
+  const [columnMapping, setColumnMapping] = useState<Record<string, string>>({
+    studentNumber: "",
+    fullName: "",
+    previousSchool: "",
+    strand: "",
+    program: "",
+    scholarship: "",
+    municipality: "",
+  });
 
   useEffect(() => {
     if (settings) {
@@ -40,30 +60,99 @@ export function ApiSettingsCenter() {
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: "Success", description: "Settings saved successfully." });
+      setSyncNotification({ type: "success", message: "Settings saved successfully." });
       queryClient.invalidateQueries({ queryKey: ["/api/settings"] });
+    },
+    onError: (err: any) => {
+      setSyncNotification({ type: "error", message: err.message || "Failed to save settings." });
     }
   });
 
-  const syncSheetsMutation = useMutation({
+  const fetchPreviewMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch("/api/integrations/sync-google-sheets", {
+      const payload = {
+        sourceType: "googleSheets",
+        url: sheetsUrl,
+        method: "GET",
+        authMode: sheetsToken ? "bearer" : "none",
+        authToken: sheetsToken,
+      };
+      const res = await fetch("/api/integrations/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sheetsUrl, sheetsToken })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || "Failed to sync");
+        throw new Error(data.message || "Failed to fetch Google Sheet data.");
       }
       return res.json();
     },
     onSuccess: (data) => {
-      toast({ title: "Sync Started", description: data.message });
-      queryClient.invalidateQueries({ queryKey: ["/api/imports/staging"] });
+      setPreviewData(data);
+      setSyncNotification(null);
+      // Try to auto-guess mapping
+      const guessed: Record<string, string> = { ...columnMapping };
+      const findField = (possibilities: string[]) => data.fields.find((f: string) => possibilities.some(p => f.toLowerCase().includes(p))) || "";
+      guessed.studentNumber = findField(["student id", "student no", "student_number", "id"]);
+      guessed.fullName = findField(["name", "full name", "fullname", "student name", "student_name"]);
+      guessed.previousSchool = findField(["school", "previous", "graduated", "feeder"]);
+      guessed.strand = findField(["strand", "track", "previous school info"]);
+      guessed.program = findField(["program", "course", "strand", "degree"]);
+      guessed.scholarship = findField(["scholarship", "iskolar", "grant"]);
+      guessed.municipality = findField(["municipality", "city", "town", "address"]);
+      
+      setPreviewPage(1);
+      
+      setColumnMapping(guessed);
+      setActiveTab("imported");
     },
     onError: (err: any) => {
-      toast({ title: "Sync Failed", description: err.message, variant: "destructive" });
+      setSyncNotification({ type: "error", message: err.message || "Failed to fetch data." });
+    }
+  });
+
+  const importToStagingMutation = useMutation({
+    mutationFn: async () => {
+      if (!previewData) throw new Error("No data to import.");
+      
+      const mappedRecords = previewData.records.map((r: any) => ({
+        studentNumber: r[columnMapping.studentNumber],
+        fullName: r[columnMapping.fullName],
+        previousSchool: r[columnMapping.previousSchool],
+        strand: r[columnMapping.strand],
+        program: r[columnMapping.program],
+        scholarship: r[columnMapping.scholarship],
+        municipality: r[columnMapping.municipality],
+        importSource: "Google Sheets",
+      }));
+
+      const startRes = await fetch("/api/imports/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ totalRecords: mappedRecords.length })
+      });
+      if (!startRes.ok) throw new Error("Failed to start import session.");
+
+      const batchRes = await fetch("/api/imports/batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ records: mappedRecords })
+      });
+      if (!batchRes.ok) throw new Error("Failed to process batch.");
+      
+      return mappedRecords.length;
+    },
+    onSuccess: (count) => {
+      setMappingNotification({ type: "success", message: `Successfully pushed ${count} records to Staging.` });
+      queryClient.invalidateQueries({ queryKey: ["/api/imports/staging"] });
+      // Switch to unmatched queue if there's an active matching session running
+      setTimeout(() => {
+        setActiveTab("unmatched");
+      }, 1500);
+    },
+    onError: (err: any) => {
+      setMappingNotification({ type: "error", message: err.message || "Failed to import data to staging." });
     }
   });
 
@@ -71,8 +160,14 @@ export function ApiSettingsCenter() {
     queryKey: ["/api/settings/diagnostics"],
   });
 
+  const { data: importProgress } = useQuery<any>({
+    queryKey: ["/api/imports/progress"],
+    refetchInterval: (query) => query.state.data?.isProcessing ? 1000 : false,
+  });
+
   const { data: stagingRecords = [] } = useQuery<any[]>({
     queryKey: ["/api/imports/staging"],
+    refetchInterval: (query) => importProgress?.isProcessing ? 2000 : false,
   });
 
   const unmatchedNames = Array.from(new Set(
@@ -82,7 +177,7 @@ export function ApiSettingsCenter() {
       .filter(Boolean)
   )) as string[];
 
-  const manualMatches = {}; // Local state or resolved matches placeholder
+  const manualMatches = {};
 
   const resolveMatchMutation = useMutation({
     mutationFn: async (payload: { importedName: string; officialSchoolId: number; createAlias: boolean }) => {
@@ -97,47 +192,84 @@ export function ApiSettingsCenter() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/imports/staging"] });
       queryClient.invalidateQueries({ queryKey: ["/api/settings/diagnostics"] });
-      toast({ title: "Success", description: "Match resolution and self-learning rules applied." });
     },
   });
 
   const applyToGis = async () => {
-    if (unmatchedNames.length > 0) {
-      toast({ title: "GIS Validation Failed", description: `${unmatchedNames.length} unmatched schools require review before syncing to GIS.`, variant: "destructive" });
-      return;
-    }
-    
     try {
       const res = await fetch("/api/imports/apply", { method: "POST" });
       const data = await res.json();
-      toast({ title: "Success", description: `Applied ${data.appliedCount} records to GIS map.` });
+      alert(`Applied ${data.appliedCount} records to GIS map.`);
       queryClient.invalidateQueries();
     } catch (e) {
-      toast({ title: "Error", description: "Failed to apply to GIS", variant: "destructive" });
+      alert("Failed to apply to GIS.");
     }
   };
 
-  return (
-    <div className="w-full h-full flex flex-col bg-[#f8fafc]">
-      <div className="p-6 border-b bg-white flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <Settings className="h-5 w-5 text-indigo-600" />
-            API Settings Center V2
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">Control center for data ingestion, tracking, and GIS synchronization</p>
-        </div>
-        <Button onClick={applyToGis} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-          Apply Mapped To GIS
-        </Button>
-      </div>
+  const clearDataMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/admin/clear-data", { method: "POST" });
+      if (!res.ok) throw new Error("Failed to clear data");
+      return res.json();
+    },
+    onSuccess: () => {
+      alert("All imported data and student records have been cleared.");
+      queryClient.invalidateQueries();
+    },
+    onError: (err: any) => {
+      alert(err.message || "Failed to clear data");
+    }
+  });
 
-      <div className="flex-1 overflow-auto p-6">
-        <Tabs defaultValue="sheets" className="w-full">
-          <TabsList className="mb-6 grid w-full grid-cols-6 lg:w-[800px] bg-slate-100 p-1">
-            <TabsTrigger value="sheets" className="text-xs">Google Sheets / API</TabsTrigger>
-            <TabsTrigger value="manual" className="text-xs">Manual Upload</TabsTrigger>
-            <TabsTrigger value="unmatched" className="text-xs relative">
+  const handleClearData = () => {
+    if (confirm("Are you sure you want to clear ALL imported data and student records? This cannot be undone!")) {
+      clearDataMutation.mutate();
+    }
+  };
+
+  const handleMappingChange = (field: string, value: string) => {
+    setColumnMapping(prev => ({ ...prev, [field]: value }));
+  };
+
+  return (
+    <div className="w-full h-full flex flex-col bg-[#f8fafc] p-4 overflow-hidden">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex-1 flex flex-col min-h-0">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-start gap-4 mb-4 shrink-0 bg-white/40 p-2 rounded-xl border border-white/60 shadow-sm backdrop-blur-md">
+          <div className="flex flex-wrap items-center justify-start gap-2 shrink-0">
+            <Button 
+              onClick={handleClearData} 
+              disabled={clearDataMutation.isPending}
+              variant="outline"
+              className="border-rose-200 bg-white/80 text-rose-600 hover:bg-rose-50 hover:text-rose-700 shadow-sm h-9 text-xs transition-colors"
+            >
+              {clearDataMutation.isPending ? "Clearing..." : "Factory Reset"}
+            </Button>
+            
+            <Button 
+              onClick={() => importToStagingMutation.mutate()} 
+              disabled={importToStagingMutation.isPending || !previewData}
+              className="bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm h-9 text-xs transition-colors"
+            >
+              {importToStagingMutation.isPending ? "Pushing..." : "1. Push to Staging"}
+            </Button>
+
+            <Button 
+              onClick={applyToGis} 
+              disabled={stagingRecords.length === 0 || importProgress?.isProcessing}
+              className="bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm h-9 text-xs transition-colors"
+            >
+              {importProgress?.isProcessing 
+                ? `Processing (${importProgress.percentage || 0}%)...` 
+                : "2. Apply to GIS"}
+            </Button>
+          </div>
+
+          <TabsList className="flex flex-wrap w-full lg:max-w-fit h-auto bg-transparent gap-1 justify-start">
+            <TabsTrigger value="sheets" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Google Sheets</TabsTrigger>
+            <TabsTrigger value="manual" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Manual Upload</TabsTrigger>
+            <TabsTrigger value="alignment" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Column Alignment</TabsTrigger>
+            <TabsTrigger value="imported" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Imported Table</TabsTrigger>
+            <TabsTrigger value="unmatched" className="text-xs rounded-lg relative data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">
               Unmatched 
               {unmatchedNames.length > 0 && (
                 <span className="ml-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
@@ -145,20 +277,32 @@ export function ApiSettingsCenter() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="alias" className="text-xs">Alias Manager</TabsTrigger>
-            <TabsTrigger value="logs" className="text-xs">Import Logs</TabsTrigger>
-            <TabsTrigger value="diagnostics" className="text-xs">Diagnostics</TabsTrigger>
+            <TabsTrigger value="alias" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Alias Manager</TabsTrigger>
+            <TabsTrigger value="logs" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Import Logs</TabsTrigger>
+            <TabsTrigger value="diagnostics" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Diagnostics</TabsTrigger>
           </TabsList>
+        </div>
 
-          <TabsContent value="sheets" className="m-0">
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <TabsContent value="sheets" className="m-0 h-full overflow-auto pb-4">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center gap-2"><CloudCog className="h-5 w-5"/> API & Google Sheets</CardTitle>
-                <CardDescription>Connect remote spreadsheets or JSON endpoints to ingest students automatically via GET.</CardDescription>
+                <CardTitle className="flex items-center gap-2"><CloudCog className="h-5 w-5"/> Google Sheets Linkage</CardTitle>
+                <CardDescription>Connect remote spreadsheets to ingest students automatically.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {syncNotification && (
+                  <div className={`p-4 rounded-md flex items-start gap-3 ${syncNotification.type === 'error' ? 'bg-red-50 text-red-900 border border-red-200' : 'bg-green-50 text-green-900 border border-green-200'}`}>
+                    {syncNotification.type === 'error' ? <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" /> : <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />}
+                    <div>
+                      <h4 className="font-semibold text-sm">{syncNotification.type === 'error' ? "Error" : "Success"}</h4>
+                      <p className="text-sm opacity-90">{syncNotification.message}</p>
+                    </div>
+                  </div>
+                )}
+                
                 <div className="grid gap-2">
-                  <label className="text-sm font-medium">Source URL (GET)</label>
+                  <label className="text-sm font-medium">Source URL (Google Sheet)</label>
                   <Input 
                     placeholder="https://docs.google.com/spreadsheets/d/.../export?format=csv" 
                     value={sheetsUrl}
@@ -174,7 +318,7 @@ export function ApiSettingsCenter() {
                     onChange={(e) => setSheetsToken(e.target.value)}
                   />
                 </div>
-                <div className="flex gap-2 mt-4">
+                <div className="flex gap-2 mt-4 items-center">
                   <Button 
                     variant="outline"
                     onClick={() => saveSettingsMutation.mutate({ sheetsUrl, sheetsToken })}
@@ -184,17 +328,117 @@ export function ApiSettingsCenter() {
                   </Button>
                   <Button 
                     className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                    onClick={() => syncSheetsMutation.mutate()}
-                    disabled={syncSheetsMutation.isPending || !sheetsUrl}
+                    onClick={() => fetchPreviewMutation.mutate()}
+                    disabled={fetchPreviewMutation.isPending || !sheetsUrl}
                   >
-                    {syncSheetsMutation.isPending ? "Syncing..." : "Sync Now"}
+                    {fetchPreviewMutation.isPending ? "Fetching..." : "Fetch Sheet Data"}
                   </Button>
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
+          
+          <TabsContent value="alignment" className="m-0 h-full overflow-auto pb-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  <span>Column Alignment</span>
+                  <Button 
+                    onClick={() => importToStagingMutation.mutate()} 
+                    disabled={!previewData || importToStagingMutation.isPending}
+                    className="bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    {importToStagingMutation.isPending ? "Importing..." : "Apply to Staging"}
+                  </Button>
+                </CardTitle>
+                <CardDescription>Align Google Sheet columns with standard fields before pushing to Unmatched staging.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {mappingNotification && (
+                  <div className={`p-4 mb-4 rounded-md flex items-start gap-3 ${mappingNotification.type === 'error' ? 'bg-red-50 text-red-900 border border-red-200' : 'bg-green-50 text-green-900 border border-green-200'}`}>
+                    {mappingNotification.type === 'error' ? <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" /> : <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />}
+                    <div>
+                      <h4 className="font-semibold text-sm">{mappingNotification.type === 'error' ? "Import Failed" : "Import Successful"}</h4>
+                      <p className="text-sm opacity-90">{mappingNotification.message}</p>
+                    </div>
+                  </div>
+                )}
 
-          <TabsContent value="manual" className="m-0">
+                {!previewData ? (
+                  <div className="p-8 text-center text-slate-500 border-2 border-dashed rounded-md">
+                    No data imported yet. Please fetch data from the Google Sheets tab first.
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-md border border-slate-100">
+                      {[
+                        { key: "studentNumber", label: "Student Number" },
+                        { key: "fullName", label: "Full Name" },
+                        { key: "previousSchool", label: "Previous School" },
+                        { key: "strand", label: "Strand / Previous Info" },
+                        { key: "program", label: "Program/Course" },
+                        { key: "scholarship", label: "Scholarship" },
+                        { key: "municipality", label: "Municipality" }
+                      ].map(field => (
+                        <div key={field.key} className="space-y-1">
+                          <label className="text-xs font-semibold text-slate-700">{field.label}</label>
+                          <Select 
+                            value={columnMapping[field.key] || ""} 
+                            onValueChange={(val) => handleMappingChange(field.key, val)}
+                          >
+                            <SelectTrigger className="w-full bg-white h-8 text-xs">
+                              <SelectValue placeholder="Select column..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">-- Skip --</SelectItem>
+                              {previewData.fields.map(f => (
+                                <SelectItem key={f} value={f}>{f}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="imported" className="m-0 flex-1 min-h-0 flex flex-col -mx-4 -mb-4">
+            {!previewData ? (
+              <div className="p-8 m-4 text-center text-slate-500 border-2 border-dashed rounded-md mt-4">
+                No data imported yet. Please fetch data from the Google Sheets tab first.
+              </div>
+            ) : (
+              <div className="flex-1 min-h-0 overflow-auto">
+                <Table className="relative w-full border-collapse">
+                  <TableHeader className="bg-slate-100/80 backdrop-blur-md sticky top-0 z-10">
+                    <TableRow>
+                      {previewData.fields.map((field) => (
+                        <TableHead key={field} className="whitespace-nowrap font-medium text-xs">
+                          {field}
+                        </TableHead>
+                      ))}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {previewData.records.map((record, i) => (
+                      <TableRow key={i}>
+                        {previewData.fields.map((field) => (
+                          <TableCell key={field} className="whitespace-nowrap text-xs py-2">
+                            {record[field] !== undefined ? String(record[field]) : ""}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="manual" className="m-0 h-full overflow-auto pb-4">
             <Card>
               <CardHeader>
                 <CardTitle>Manual Upload</CardTitle>
@@ -202,14 +446,14 @@ export function ApiSettingsCenter() {
               </CardHeader>
               <CardContent>
                 <div className="p-8 border-2 border-dashed border-slate-200 rounded-lg flex flex-col items-center justify-center text-slate-500">
-                  <Table className="h-8 w-8 mb-2 text-slate-400" />
+                  <TableIcon className="h-8 w-8 mb-2 text-slate-400" />
                   <p>Drag and drop files here to upload instantly to Staging.</p>
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="unmatched" className="m-0">
+          <TabsContent value="unmatched" className="m-0 h-full overflow-auto pb-4">
             <UnmatchedSchoolsQueue 
               unmatchedSchoolNames={unmatchedNames}
               manualMatches={manualMatches}
@@ -222,7 +466,7 @@ export function ApiSettingsCenter() {
             />
           </TabsContent>
 
-          <TabsContent value="alias" className="m-0">
+          <TabsContent value="alias" className="m-0 h-full overflow-auto pb-4">
             <Card>
               <CardHeader>
                 <CardTitle>Alias Manager</CardTitle>
@@ -234,7 +478,7 @@ export function ApiSettingsCenter() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="logs" className="m-0">
+          <TabsContent value="logs" className="m-0 h-full overflow-auto pb-4">
             <Card>
               <CardHeader>
                 <CardTitle>Import Logs</CardTitle>
@@ -246,7 +490,7 @@ export function ApiSettingsCenter() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="diagnostics" className="m-0">
+          <TabsContent value="diagnostics" className="m-0 h-full overflow-auto pb-4">
             <Card>
               <CardHeader>
                 <CardTitle>System Diagnostics</CardTitle>
@@ -270,8 +514,8 @@ export function ApiSettingsCenter() {
               </CardContent>
             </Card>
           </TabsContent>
-        </Tabs>
-      </div>
+        </div>
+      </Tabs>
     </div>
   );
 }
@@ -284,3 +528,4 @@ function DiagCard({ label, value, highlight }: { label: string; value: string | 
     </div>
   );
 }
+

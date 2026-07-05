@@ -79,6 +79,8 @@ export const studentImports = pgTable("student_imports", {
   studentNumber: text("student_number").notNull(),
   fullName: text("full_name").notNull(),
   previousSchool: text("previous_school"),
+  strand: text("strand"),
+  admissionType: text("admission_type"),
   program: text("program"),
   scholarship: text("scholarship"),
   municipality: text("municipality").notNull().default("Laguna"),

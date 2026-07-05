@@ -22,6 +22,8 @@ import {
   Trash2,
   UserCircle2,
   Users,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import type { Import, SchoolRegistry as School, StudentProcessed } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
@@ -146,6 +148,7 @@ export function AdminPortalWorkspace({
   onRemoveDuplicate,
 }: AdminPortalWorkspaceProps) {
   const [settingsPanel, setSettingsPanel] = useState<"integrations" | "map">("integrations");
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const { toast } = useToast();
 
   const [feedSearch, setFeedSearch] = useState("");
@@ -485,30 +488,44 @@ export function AdminPortalWorkspace({
         onValueChange={(v) => onSectionChange(v as AdminPortalSection)}
         className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:gap-4 md:p-4"
       >
-        <aside className="shrink-0 rounded-2xl border border-white/50 bg-white/40 p-1.5 shadow-lg backdrop-blur-md md:w-60 md:p-2">
+        <aside className={cn("shrink-0 rounded-2xl border border-white/50 bg-white/40 p-1.5 shadow-lg backdrop-blur-md md:p-2 transition-all duration-300 relative", isSidebarCollapsed ? "md:w-16" : "md:w-60")}>
+          <Button 
+            variant="ghost" 
+            size="icon" 
+            className="hidden md:flex absolute -right-3 top-4 h-6 w-6 rounded-full border border-slate-200 bg-white shadow-sm hover:bg-slate-50 z-10"
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          >
+            {isSidebarCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+          </Button>
           <TabsList
             aria-label="Admin sections"
             className={cn(
               "flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-xl border border-white/40 bg-white/50 p-1 text-muted-foreground shadow-inner shadow-white/50 backdrop-blur-md",
               "md:flex-col md:overflow-visible md:bg-transparent md:p-0 md:shadow-none",
+              isSidebarCollapsed && "md:items-center"
             )}
           >
             {navItems.map(({ value, label, short, icon }) => (
               <TabsTrigger
                 key={value}
                 value={value}
+                title={isSidebarCollapsed ? label : undefined}
                 className={cn(
                   "group relative min-w-max shrink-0 justify-start gap-2 rounded-xl border border-transparent px-3 py-2 text-xs font-semibold text-muted-foreground shadow-none transition-all",
                   "hover:bg-surface hover:text-foreground",
                   "data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_14px_34px_-24px_rgba(123,17,19,0.9)]",
-                  "md:w-full md:min-w-0 md:px-3.5 md:py-2.5",
+                  isSidebarCollapsed ? "md:justify-center md:px-0 md:w-10 md:h-10 md:mx-auto" : "md:w-full md:min-w-0 md:px-3.5 md:py-2.5",
                 )}
               >
-                <span className="grid h-7 w-7 place-items-center rounded-lg bg-surface/80 text-muted-foreground transition-colors group-data-[state=active]:bg-primary-hover group-data-[state=active]:text-white">
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-surface/80 text-muted-foreground transition-colors group-data-[state=active]:bg-primary-hover group-data-[state=active]:text-white">
                   {icon}
                 </span>
-                <span className="sm:hidden">{short}</span>
-                <span className="hidden sm:inline">{label}</span>
+                {!isSidebarCollapsed && (
+                  <>
+                    <span className="sm:hidden">{short}</span>
+                    <span className="hidden sm:inline">{label}</span>
+                  </>
+                )}
               </TabsTrigger>
             ))}
           </TabsList>

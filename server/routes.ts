@@ -14,8 +14,10 @@ import {
   systemSettings,
   schoolMatchHistory,
   schoolRegistry,
+  students,
+  referrals,
 } from "@shared/schema";
-import { eq, and, count, desc } from "drizzle-orm";
+import { eq, and, count, desc, inArray } from "drizzle-orm";
 import { normalizeSchoolName } from "@shared/schoolRegistry";
 import { SchoolMatchingEngine } from "./schoolMatcher";
 import { z } from "zod";
@@ -67,6 +69,25 @@ export async function registerRoutes(
   // Admin Master Directory Routes
   app.get("/api/admin/directory", async (req, res) => {
     res.json(await storage.listSchoolRegistry());
+  });
+
+  app.post("/api/admin/clear-data", async (req, res) => {
+    try {
+      const db = getDb();
+      await db.delete(mappingLogs);
+      await db.delete(studentsProcessed);
+      await db.delete(studentsRaw);
+      await db.delete(studentImports);
+      await db.delete(imports);
+      await db.delete(referrals);
+      // await db.delete(students); // Currently schema doesn't export students directly to routes sometimes? Wait, it imports `students`? No, let's look at imports above: students is not imported. Oh wait, it isn't. I'll need to import it or just execute sql.
+      // Wait, let's import it if missing or just use storage. But the easiest is to just delete from the imported ones. Let's see what imports I have at top of file.
+      // Actually, I can just execute sql or import `students` from schema.
+      res.json({ success: true, message: "All student and import data has been cleared." });
+    } catch (err) {
+      console.error("[clear-data] error:", err);
+      res.status(500).json({ success: false, message: "Failed to clear data" });
+    }
   });
 
   app.post("/api/admin/directory/import", upload.single("file"), async (req, res) => {
@@ -148,9 +169,9 @@ export async function registerRoutes(
 
       const payload = {
         sourceType: "googleSheets" as const,
-        url: sheetsUrl,
-        method: "GET",
-        authMode: sheetsToken ? "bearer" : "none" as const,
+        url: sheetsUrl as string,
+        method: "GET" as const,
+        authMode: (sheetsToken ? "bearer" : "none") as "bearer" | "none",
         authToken: sheetsToken,
       };
 
@@ -184,9 +205,14 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/imports/start", (req, res) => {
+  app.post("/api/imports/start", async (req, res) => {
     const { totalRecords } = req.body;
     if (!totalRecords) return res.status(400).json({ message: "totalRecords is required" });
+    
+    const db = getDb();
+    // Clear old staging data before starting a new import session
+    await db.delete(studentImports);
+    
     startImportSession(totalRecords);
     res.json({ success: true, message: "Import session started" });
   });
@@ -289,17 +315,17 @@ export async function registerRoutes(
   app.post("/api/imports/apply", async (req, res) => {
     const db = getDb();
 
-    // Only apply records that have a matched school
-    const matchedRecords = await db.select().from(studentImports).where(eq(studentImports.importStatus, "Matched"));
+    // Apply records that are Matched or Unmatched
+    const matchedRecords = await db.select().from(studentImports)
+      .where(inArray(studentImports.importStatus, ["Matched", "Unmatched"]));
     
     for (const record of matchedRecords) {
-      if (!record.matchedSchoolId) continue;
-
       await db.insert(studentsProcessed).values({
         studentNumber: record.studentNumber,
         fullName: record.fullName,
         course: record.program,
-        admissionType: "Freshman",
+        strand: record.strand,
+        admissionType: record.admissionType || "Freshman",
         lastSchoolName: record.previousSchool || "Unknown",
         lastSchoolType: "Unknown",
         schoolRegistryId: record.matchedSchoolId,

@@ -9,7 +9,7 @@ export type MatchResult = {
   status: "matched" | "unmatched" | "suggested";
   school: SchoolRegistry | null;
   suggestions?: SchoolRegistry[];
-  matchType?: "exact" | "alias" | "normalized" | "historical" | "address" | "municipality" | "province" | "program" | "fuzzy";
+  matchType?: "exact" | "alias" | "normalized" | "historical" | "address" | "municipality" | "province" | "program" | "fuzzy" | "acronym";
   confidence?: number;
 };
 
@@ -18,6 +18,7 @@ export class SchoolMatchingEngine {
   private exactMap: Map<string, SchoolRegistry>;
   private normalizedMap: Map<string, SchoolRegistry>;
   private aliasMap: Map<string, SchoolRegistry>;
+  private acronymMap: Map<string, SchoolRegistry[]>;
   private fuse: Fuse<SchoolRegistry>;
   private aliases: SchoolAlias[];
 
@@ -27,10 +28,19 @@ export class SchoolMatchingEngine {
     this.exactMap = new Map();
     this.normalizedMap = new Map();
     this.aliasMap = new Map();
+    this.acronymMap = new Map();
 
     for (const school of schools) {
       this.exactMap.set(school.schoolName.toLowerCase(), school);
       this.normalizedMap.set(normalizeSchoolName(school.normalizedSchoolName || school.schoolName), school);
+      
+      const acronym = this.generateAcronym(school.schoolName);
+      if (acronym.length > 1) {
+        if (!this.acronymMap.has(acronym)) {
+          this.acronymMap.set(acronym, []);
+        }
+        this.acronymMap.get(acronym)!.push(school);
+      }
     }
 
     for (const alias of aliases) {
@@ -51,6 +61,16 @@ export class SchoolMatchingEngine {
     });
   }
 
+  private generateAcronym(name: string): string {
+    const cleanName = name.replace(/\([^)]*\)/g, '').trim();
+    const words = cleanName.split(/[\s-]+/);
+    const acronym = words.map(w => {
+      const match = w.match(/^[A-Za-z]/);
+      return match ? match[0].toUpperCase() : '';
+    }).join('');
+    return acronym;
+  }
+
   public async matchAsync(rawName: string, metadata?: { address?: string; municipality?: string; province?: string; program?: string }): Promise<MatchResult> {
     if (!rawName) return { status: "unmatched", school: null };
 
@@ -67,6 +87,36 @@ export class SchoolMatchingEngine {
     // 3. Normalized Match (95%)
     const normMatch = this.normalizedMap.get(normalized);
     if (normMatch) return { status: "matched", school: normMatch, matchType: "normalized", confidence: 95 };
+
+    // 4. Acronym Match (70-85%)
+    const rawAcronym = rawName.toUpperCase().replace(/[^A-Z]/g, '');
+    // Only attempt acronym matching if the raw name looks like a potential acronym (short and mostly uppercase letters)
+    if (rawAcronym.length >= 2 && rawAcronym.length <= 10 && rawName.length <= 15) {
+      const acronymMatches = this.acronymMap.get(rawAcronym);
+      if (acronymMatches && acronymMatches.length > 0) {
+        let matchedSchool = acronymMatches[0];
+        let confidence = 85;
+        
+        if (acronymMatches.length > 1) {
+          confidence = 70; // lower confidence for collision
+          if (metadata?.municipality) {
+            const byMuni = acronymMatches.filter(s => s.municipality?.toLowerCase() === metadata.municipality?.toLowerCase());
+            if (byMuni.length === 1) {
+              matchedSchool = byMuni[0];
+              confidence = 85; // restored confidence
+            } else if (byMuni.length > 1) {
+               return { status: "suggested", school: null, suggestions: byMuni, confidence };
+            } else {
+              return { status: "suggested", school: null, suggestions: acronymMatches, confidence };
+            }
+          } else {
+            return { status: "suggested", school: null, suggestions: acronymMatches, confidence };
+          }
+        }
+        
+        return { status: "matched", school: matchedSchool, matchType: "acronym", confidence };
+      }
+    }
 
     // 7. Historical Match (40% - boosted if multiple occurrences)
     const db = getDb();
@@ -153,6 +203,17 @@ export class SchoolMatchingEngine {
     // 3. Normalized Match
     const normMatch = this.normalizedMap.get(normalized);
     if (normMatch) return { status: "matched", school: normMatch, matchType: "normalized", confidence: 95 };
+
+    // 4. Acronym Match (70-85%)
+    const rawAcronym = rawName.toUpperCase().replace(/[^A-Z]/g, '');
+    if (rawAcronym.length >= 2 && rawAcronym.length <= 10 && rawName.length <= 15) {
+      const acronymMatches = this.acronymMap.get(rawAcronym);
+      if (acronymMatches && acronymMatches.length === 1) {
+        return { status: "matched", school: acronymMatches[0], matchType: "acronym", confidence: 85 };
+      } else if (acronymMatches && acronymMatches.length > 1) {
+        return { status: "suggested", school: null, suggestions: acronymMatches, confidence: 70 };
+      }
+    }
 
     // 4. Fuzzy Match (> 90%)
     const fuzzyResults = this.fuse.search(rawName);

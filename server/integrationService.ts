@@ -3,7 +3,7 @@ import type { IntegrationPreviewInput, IntegrationPreviewResponse } from "@share
 
 type SourceRecord = Record<string, unknown>;
 
-const MAX_PREVIEW_RECORDS = 1000;
+const MAX_PREVIEW_RECORDS = 5000;
 const PREFERRED_ARRAY_KEYS = [
   "data",
   "records",

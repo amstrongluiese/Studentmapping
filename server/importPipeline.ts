@@ -55,6 +55,22 @@ export async function processBatch(records: any[]) {
 
   for (const record of records) {
     try {
+      // Returnee Heuristic
+      const prevSchoolUpper = (record.previousSchool || "").toUpperCase();
+      const strandUpper = (record.strand || "").toUpperCase();
+
+      if (
+        strandUpper.includes("RETURNEE") ||
+        prevSchoolUpper.includes("RETURNEE") ||
+        (prevSchoolUpper.includes("TRIMEX") && strandUpper.includes("2ND COURSER")) ||
+        (prevSchoolUpper.includes("TRIMEX") && strandUpper.includes("2ND-COURSER"))
+      ) {
+        record.previousSchool = "Trimex Colleges";
+        record.admissionType = "Returnee";
+      } else {
+        record.admissionType = "Freshman";
+      }
+
       const matchResult = await matcher.matchAsync(record.previousSchool || "", {
         address: record.address,
         municipality: record.municipality,
@@ -69,6 +85,8 @@ export async function processBatch(records: any[]) {
         studentNumber: record.studentNumber || "N/A",
         fullName: record.fullName || "Unknown",
         previousSchool: record.previousSchool || null,
+        strand: record.strand || null,
+        admissionType: record.admissionType,
         program: record.program || null,
         scholarship: record.scholarship || null,
         municipality: record.municipality || "Laguna",
