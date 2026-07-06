@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SchoolNameAutocomplete } from "./SchoolNameAutocomplete";
-import { CheckCircle2, AlertCircle } from "lucide-react";
+import { CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface UnmatchedSchoolsQueueProps {
   unmatchedSchoolNames: string[];
@@ -20,6 +20,16 @@ export function UnmatchedSchoolsQueue({
   existingSchools,
   onResolveMatch,
 }: UnmatchedSchoolsQueueProps) {
+  const [page, setPage] = useState(1);
+  const itemsPerPage = 50;
+  
+  const totalPages = Math.max(1, Math.ceil(unmatchedSchoolNames.length / itemsPerPage));
+  const safePage = Math.min(page, totalPages);
+
+  const currentItems = useMemo(() => {
+    const start = (safePage - 1) * itemsPerPage;
+    return unmatchedSchoolNames.slice(start, start + itemsPerPage);
+  }, [unmatchedSchoolNames, safePage]);
   if (unmatchedSchoolNames.length === 0) {
     return (
       <Card className="border-emerald-200 bg-emerald-50">
@@ -33,8 +43,8 @@ export function UnmatchedSchoolsQueue({
   }
 
   return (
-    <Card className="border-amber-200 bg-amber-50 shadow-sm mt-4">
-      <CardHeader className="pb-3 border-b border-amber-200/60 bg-amber-100/30">
+    <Card className="border-amber-200 bg-amber-50 shadow-sm flex-1 flex flex-col min-h-0">
+      <CardHeader className="pb-3 border-b border-amber-200/60 bg-amber-100/30 shrink-0">
         <CardTitle className="text-[14px] font-semibold text-amber-900 flex items-center gap-2">
           <AlertCircle className="h-4 w-4 text-amber-600" />
           Unmatched Schools Queue
@@ -43,10 +53,10 @@ export function UnmatchedSchoolsQueue({
           </Badge>
         </CardTitle>
       </CardHeader>
-      <CardContent className="p-0">
-        <ScrollArea className="max-h-[350px]">
+      <CardContent className="p-0 flex-1 flex flex-col min-h-0">
+        <ScrollArea className="flex-1 min-h-0">
           <div className="divide-y divide-amber-100">
-            {unmatchedSchoolNames.map((name) => (
+            {currentItems.map((name) => (
               <UnmatchedSchoolRow
                 key={name}
                 name={name}
@@ -57,6 +67,33 @@ export function UnmatchedSchoolsQueue({
             ))}
           </div>
         </ScrollArea>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between p-3 border-t border-amber-200/60 bg-amber-50 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={safePage === 1}
+              className="h-8 text-xs bg-white text-amber-900 border-amber-200 hover:bg-amber-100"
+            >
+              <ChevronLeft className="h-4 w-4 mr-1" />
+              Previous
+            </Button>
+            <span className="text-xs font-medium text-amber-900">
+              Page {safePage} of {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={safePage === totalPages}
+              className="h-8 text-xs bg-white text-amber-900 border-amber-200 hover:bg-amber-100"
+            >
+              Next
+              <ChevronRight className="h-4 w-4 ml-1" />
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

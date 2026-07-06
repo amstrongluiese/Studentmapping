@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertCircle, Settings, CheckCircle2, CloudCog, Table as TableIcon } from "lucide-react";
+import { AlertCircle, Settings, CheckCircle2, CloudCog, Table as TableIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -10,9 +10,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { UnmatchedSchoolsQueue } from "./UnmatchedSchoolsQueue";
 import { useSchools } from "@/hooks/use-schools";
+import { useToast } from "@/hooks/use-toast";
 
 export function ApiSettingsCenter() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const { data: schools = [] } = useSchools();
 
   const { data: settings } = useQuery<any>({
@@ -25,7 +27,6 @@ export function ApiSettingsCenter() {
   
   // Notification states
   const [syncNotification, setSyncNotification] = useState<{ type: "success"|"error", message: string } | null>(null);
-  const [mappingNotification, setMappingNotification] = useState<{ type: "success"|"error", message: string } | null>(null);
 
   // Preview Data State
   const [previewData, setPreviewData] = useState<{ fields: string[], records: any[] } | null>(null);
@@ -144,15 +145,24 @@ export function ApiSettingsCenter() {
       return mappedRecords.length;
     },
     onSuccess: (count) => {
-      setMappingNotification({ type: "success", message: `Successfully pushed ${count} records to Staging.` });
+      toast({
+        title: "Import Started",
+        description: `Successfully queued ${count} records for importing.`,
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/imports/staging"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/imports/progress"] });
+      
       // Switch to unmatched queue if there's an active matching session running
       setTimeout(() => {
         setActiveTab("unmatched");
       }, 1500);
     },
     onError: (err: any) => {
-      setMappingNotification({ type: "error", message: err.message || "Failed to import data to staging." });
+      toast({
+        title: "Import Failed",
+        description: err.message || "Failed to import data.",
+        variant: "destructive",
+      });
     }
   });
 
@@ -162,7 +172,7 @@ export function ApiSettingsCenter() {
 
   const { data: importProgress } = useQuery<any>({
     queryKey: ["/api/imports/progress"],
-    refetchInterval: (query) => query.state.data?.isProcessing ? 1000 : false,
+    refetchInterval: (query) => query.state.data?.isProcessing ? 1000 : 3000,
   });
 
   const { data: stagingRecords = [] } = useQuery<any[]>({
@@ -199,10 +209,17 @@ export function ApiSettingsCenter() {
     try {
       const res = await fetch("/api/imports/apply", { method: "POST" });
       const data = await res.json();
-      alert(`Applied ${data.appliedCount} records to GIS map.`);
+      toast({
+        title: "Success",
+        description: `Mapped ${data.appliedCount} students successfully.`,
+      });
       queryClient.invalidateQueries();
     } catch (e) {
-      alert("Failed to apply to GIS.");
+      toast({
+        title: "Error",
+        description: "Failed to map students.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -250,7 +267,14 @@ export function ApiSettingsCenter() {
               disabled={importToStagingMutation.isPending || !previewData}
               className="bg-indigo-500 hover:bg-indigo-600 text-white shadow-sm h-9 text-xs transition-colors"
             >
-              {importToStagingMutation.isPending ? "Pushing..." : "1. Push to Staging"}
+              {importToStagingMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                "1. Import Data"
+              )}
             </Button>
 
             <Button 
@@ -258,9 +282,14 @@ export function ApiSettingsCenter() {
               disabled={stagingRecords.length === 0 || importProgress?.isProcessing}
               className="bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm h-9 text-xs transition-colors"
             >
-              {importProgress?.isProcessing 
-                ? `Processing (${importProgress.percentage || 0}%)...` 
-                : "2. Apply to GIS"}
+              {importProgress?.isProcessing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Mapping ({importProgress.percentage || 0}%)...
+                </>
+              ) : (
+                "2. Map Students"
+              )}
             </Button>
           </div>
 
@@ -348,22 +377,19 @@ export function ApiSettingsCenter() {
                     disabled={!previewData || importToStagingMutation.isPending}
                     className="bg-emerald-600 hover:bg-emerald-700"
                   >
-                    {importToStagingMutation.isPending ? "Importing..." : "Apply to Staging"}
+                    {importToStagingMutation.isPending ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Importing...
+                      </>
+                    ) : (
+                      "Import Data"
+                    )}
                   </Button>
                 </CardTitle>
-                <CardDescription>Align Google Sheet columns with standard fields before pushing to Unmatched staging.</CardDescription>
+                <CardDescription>Align Google Sheet columns with standard fields before importing.</CardDescription>
               </CardHeader>
               <CardContent>
-                {mappingNotification && (
-                  <div className={`p-4 mb-4 rounded-md flex items-start gap-3 ${mappingNotification.type === 'error' ? 'bg-red-50 text-red-900 border border-red-200' : 'bg-green-50 text-green-900 border border-green-200'}`}>
-                    {mappingNotification.type === 'error' ? <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" /> : <CheckCircle2 className="w-5 h-5 text-green-600 mt-0.5" />}
-                    <div>
-                      <h4 className="font-semibold text-sm">{mappingNotification.type === 'error' ? "Import Failed" : "Import Successful"}</h4>
-                      <p className="text-sm opacity-90">{mappingNotification.message}</p>
-                    </div>
-                  </div>
-                )}
-
                 {!previewData ? (
                   <div className="p-8 text-center text-slate-500 border-2 border-dashed rounded-md">
                     No data imported yet. Please fetch data from the Google Sheets tab first.
@@ -453,7 +479,7 @@ export function ApiSettingsCenter() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="unmatched" className="m-0 h-full overflow-auto pb-4">
+          <TabsContent value="unmatched" className="m-0 flex-1 min-h-0 flex flex-col pb-4 mt-4">
             <UnmatchedSchoolsQueue 
               unmatchedSchoolNames={unmatchedNames}
               manualMatches={manualMatches}

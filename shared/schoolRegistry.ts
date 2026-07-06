@@ -27,12 +27,25 @@ const SCHOOL_ABBREVIATIONS: Array<[RegExp, string]> = [
 export function normalizeSchoolName(name: string): string {
   if (!name) return "";
   
-  return name
+  let normalized = name
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "") // remove diacritics
-    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "") // remove punctuation
-    .toUpperCase()
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, " ") // replace punctuation with space
+    .toLowerCase()
     .replace(/\s+/g, " ") // remove duplicate spaces
+    .trim();
+
+  // Apply common abbreviations
+  for (const [regex, replacement] of SCHOOL_ABBREVIATIONS) {
+    normalized = normalized.replace(regex, replacement);
+  }
+
+  // Remove common stop words for a tighter match
+  normalized = normalized.replace(/\b(the|of|inc|incorporated|corp|corporation|campus|branch|academy|institute|university|college|school)\b/g, " ");
+
+  return normalized
+    .toUpperCase()
+    .replace(/\s+/g, " ") // clean up spaces again
     .trim();
 }
 
