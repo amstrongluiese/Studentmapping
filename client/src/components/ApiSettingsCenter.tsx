@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -187,6 +187,18 @@ export function ApiSettingsCenter() {
       .filter(Boolean)
   )) as string[];
 
+  const unmatchedSchoolsData = useMemo(() => {
+    const map = new Map<string, string>();
+    stagingRecords
+      .filter((r: any) => r.importStatus === "Unmatched" && r.previousSchool)
+      .forEach((r: any) => {
+        if (!map.has(r.previousSchool)) {
+          map.set(r.previousSchool, r.municipality || "Laguna");
+        }
+      });
+    return Array.from(map.entries()).map(([name, municipality]) => ({ name, municipality }));
+  }, [stagingRecords]);
+
   const manualMatches = {};
 
   const resolveMatchMutation = useMutation({
@@ -249,9 +261,9 @@ export function ApiSettingsCenter() {
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#f8fafc] p-4 overflow-hidden">
+    <div className="w-full h-full flex flex-col p-4 overflow-hidden bg-transparent">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex-1 flex flex-col min-h-0">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-start gap-4 mb-4 shrink-0 bg-white/40 p-2 rounded-xl border border-white/60 shadow-sm backdrop-blur-md">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-start gap-4 mb-[5px] shrink-0 p-1">
           <div className="flex flex-wrap items-center justify-start gap-2 shrink-0">
             <Button 
               onClick={handleClearData} 
@@ -293,12 +305,12 @@ export function ApiSettingsCenter() {
             </Button>
           </div>
 
-          <TabsList className="flex flex-wrap w-full lg:max-w-fit h-auto bg-transparent gap-1 justify-start">
-            <TabsTrigger value="sheets" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Google Sheets</TabsTrigger>
-            <TabsTrigger value="manual" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Manual Upload</TabsTrigger>
-            <TabsTrigger value="alignment" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Column Alignment</TabsTrigger>
-            <TabsTrigger value="imported" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Imported Table</TabsTrigger>
-            <TabsTrigger value="unmatched" className="text-xs rounded-lg relative data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">
+          <TabsList className="inline-flex w-fit max-w-full flex-wrap h-10 bg-white/40 backdrop-blur-md border border-white/40 rounded-xl p-1 gap-1 justify-start items-center shadow-sm">
+            <TabsTrigger value="sheets" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Google Sheets</TabsTrigger>
+            <TabsTrigger value="manual" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Manual Upload</TabsTrigger>
+            <TabsTrigger value="alignment" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Column Alignment</TabsTrigger>
+            <TabsTrigger value="imported" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Imported Table</TabsTrigger>
+            <TabsTrigger value="unmatched" className="flex-none text-xs rounded-lg relative data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">
               Unmatched 
               {unmatchedNames.length > 0 && (
                 <span className="ml-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
@@ -306,9 +318,9 @@ export function ApiSettingsCenter() {
                 </span>
               )}
             </TabsTrigger>
-            <TabsTrigger value="alias" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Alias Manager</TabsTrigger>
-            <TabsTrigger value="logs" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Import Logs</TabsTrigger>
-            <TabsTrigger value="diagnostics" className="text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Diagnostics</TabsTrigger>
+            <TabsTrigger value="alias" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Alias Manager</TabsTrigger>
+            <TabsTrigger value="logs" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Import Logs</TabsTrigger>
+            <TabsTrigger value="diagnostics" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Diagnostics</TabsTrigger>
           </TabsList>
         </div>
 
@@ -479,9 +491,10 @@ export function ApiSettingsCenter() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="unmatched" className="m-0 flex-1 min-h-0 flex flex-col pb-4 mt-4">
+          <TabsContent value="unmatched" className="m-0 flex-1 min-h-0 flex flex-col pb-4 mt-0">
             <UnmatchedSchoolsQueue 
               unmatchedSchoolNames={unmatchedNames}
+              unmatchedSchoolsData={unmatchedSchoolsData}
               manualMatches={manualMatches}
               existingSchools={schools}
               onResolveMatch={(importedName, school) => {

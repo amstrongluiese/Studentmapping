@@ -568,7 +568,7 @@ export default function Dashboard() {
           className={cn(
             "m-0 h-full min-h-0 overflow-hidden p-0 data-[state=inactive]:hidden",
             "transition-[padding] duration-300 ease-out motion-reduce:transition-none",
-            isPresenting ? "pt-3" : "pt-[calc(0.5rem+60px+0.25rem)]",
+            isPresenting ? "pt-0" : "pt-[60px]",
           )}
         >
           <AdminPortalWorkspace

@@ -5,10 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SchoolNameAutocomplete } from "./SchoolNameAutocomplete";
-import { CheckCircle2, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
+import { CheckCircle2, AlertCircle, ChevronLeft, ChevronRight, Download } from "lucide-react";
 
 interface UnmatchedSchoolsQueueProps {
   unmatchedSchoolNames: string[];
+  unmatchedSchoolsData?: { name: string, municipality: string }[];
   manualMatches: Record<string, School>;
   existingSchools: School[];
   onResolveMatch: (schoolName: string, selectedSchool: School | null) => void;
@@ -16,6 +17,7 @@ interface UnmatchedSchoolsQueueProps {
 
 export function UnmatchedSchoolsQueue({
   unmatchedSchoolNames,
+  unmatchedSchoolsData,
   manualMatches,
   existingSchools,
   onResolveMatch,
@@ -42,9 +44,40 @@ export function UnmatchedSchoolsQueue({
     );
   }
 
+  const handleExportCSV = () => {
+    const headers = ["School Name", "Latitude", "Longitude", "Address", "Notes"];
+    
+    const escapeCsv = (str: string) => {
+      const s = String(str || "").replace(/"/g, '""');
+      return `"${s}"`;
+    };
+
+    const schoolsData = unmatchedSchoolsData || unmatchedSchoolNames.map(name => ({ name, municipality: "" }));
+
+    const rows = schoolsData.map(school => [
+      escapeCsv(school.name),
+      "", // Latitude
+      "", // Longitude
+      escapeCsv(school.municipality), // Address
+      ""  // Notes
+    ].join(","));
+
+    const csvContent = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute("href", url);
+    link.setAttribute("download", "Unmatched_Schools_Geocoding.csv");
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <Card className="border-amber-200 bg-amber-50 shadow-sm flex-1 flex flex-col min-h-0">
-      <CardHeader className="pb-3 border-b border-amber-200/60 bg-amber-100/30 shrink-0">
+      <CardHeader className="pb-3 border-b border-amber-200/60 bg-amber-100/30 shrink-0 flex flex-row items-center justify-between">
         <CardTitle className="text-[14px] font-semibold text-amber-900 flex items-center gap-2">
           <AlertCircle className="h-4 w-4 text-amber-600" />
           Unmatched Schools Queue
@@ -52,6 +85,15 @@ export function UnmatchedSchoolsQueue({
             {unmatchedSchoolNames.length} Action Required
           </Badge>
         </CardTitle>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="h-8 gap-2 bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-50 hover:text-emerald-800"
+          onClick={handleExportCSV}
+        >
+          <Download className="h-3.5 w-3.5" />
+          Export to CSV
+        </Button>
       </CardHeader>
       <CardContent className="p-0 flex-1 flex flex-col min-h-0">
         <ScrollArea className="flex-1 min-h-0">

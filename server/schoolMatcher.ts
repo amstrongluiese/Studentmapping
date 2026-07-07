@@ -34,12 +34,15 @@ export class SchoolMatchingEngine {
       this.exactMap.set(school.schoolName.toLowerCase(), school);
       this.normalizedMap.set(normalizeSchoolName(school.normalizedSchoolName || school.schoolName), school);
       
-      const acronym = this.generateAcronym(school.schoolName);
-      if (acronym.length > 1) {
+      const acronyms = this.getAcronyms(school.schoolName, school.municipality);
+      for (const acronym of acronyms) {
         if (!this.acronymMap.has(acronym)) {
           this.acronymMap.set(acronym, []);
         }
-        this.acronymMap.get(acronym)!.push(school);
+        // Avoid duplicate school entries for the same acronym
+        if (!this.acronymMap.get(acronym)!.some(s => s.id === school.id)) {
+          this.acronymMap.get(acronym)!.push(school);
+        }
       }
     }
 
@@ -61,14 +64,22 @@ export class SchoolMatchingEngine {
     });
   }
 
-  private generateAcronym(name: string): string {
+  private getAcronyms(name: string, municipality?: string | null): string[] {
     const cleanName = name.replace(/\([^)]*\)/g, '').trim();
     const words = cleanName.split(/[\s-]+/);
-    const acronym = words.map(w => {
-      const match = w.match(/^[A-Za-z]/);
-      return match ? match[0].toUpperCase() : '';
-    }).join('');
-    return acronym;
+    const getAcr = (wordList: string[]) => wordList.map(w => w.match(/^[A-Za-z]/) ? w.match(/^[A-Za-z]/)![0].toUpperCase() : '').join('');
+
+    const fullAcronym = getAcr(words);
+    
+    const noBranchWords = words.filter(w => {
+      const lower = w.toLowerCase();
+      if (municipality && lower === municipality.toLowerCase()) return false;
+      if (['campus', 'branch'].includes(lower)) return false;
+      return true;
+    });
+    const noBranchAcronym = getAcr(noBranchWords);
+
+    return Array.from(new Set([fullAcronym, noBranchAcronym])).filter(a => a.length > 1);
   }
 
   public async matchAsync(rawName: string, metadata?: { address?: string; municipality?: string; province?: string; program?: string }): Promise<MatchResult> {
@@ -88,30 +99,69 @@ export class SchoolMatchingEngine {
     const normMatch = this.normalizedMap.get(normalized);
     if (normMatch) return { status: "matched", school: normMatch, matchType: "normalized", confidence: 95 };
 
-    // 4. Acronym Match (70-85%)
-    const rawAcronym = rawName.toUpperCase().replace(/[^A-Z]/g, '');
-    // Only attempt acronym matching if the raw name looks like a potential acronym (short and mostly uppercase letters)
-    if (rawAcronym.length >= 2 && rawAcronym.length <= 10 && rawName.length <= 15) {
-      const acronymMatches = this.acronymMap.get(rawAcronym);
-      if (acronymMatches && acronymMatches.length > 0) {
-        let matchedSchool = acronymMatches[0];
-        let confidence = 85;
+    // 4. Acronym Match (70-90%)
+    // Allow inputs like "CGC Binan" or "CGC - Binan"
+    const parts = rawName.split(/[\s-]+/);
+    const potentialAcronym = parts[0].toUpperCase().replace(/[^A-Z]/g, '');
+    const potentialBranch = parts.slice(1).join(' ').trim().toLowerCase();
+
+    // Also consider the entire string as a potential acronym
+    const fullAcronym = rawName.toUpperCase().replace(/[^A-Z]/g, '');
+    
+    // We only try acronym matching if the potential acronym or full acronym looks like one (2-10 chars)
+    const validPotentialAcronym = potentialAcronym.length >= 2 && potentialAcronym.length <= 10;
+    const validFullAcronym = fullAcronym.length >= 2 && fullAcronym.length <= 10 && rawName.length <= 15;
+
+    if (validPotentialAcronym || validFullAcronym) {
+      let matchedSchools: SchoolRegistry[] = [];
+      let usedBranch = false;
+      
+      if (validPotentialAcronym) {
+        const matches = this.acronymMap.get(potentialAcronym) || [];
+        // If there's a branch part, prioritize schools that match the branch
+        if (potentialBranch && matches.length > 0) {
+           const branchMatches = matches.filter(s => {
+             const muni = s.municipality?.toLowerCase() || "";
+             const name = s.schoolName.toLowerCase();
+             return (muni && (muni.includes(potentialBranch) || potentialBranch.includes(muni))) || name.includes(potentialBranch);
+           });
+           if (branchMatches.length > 0) {
+             matchedSchools = branchMatches;
+             usedBranch = true;
+           } else {
+             // We had a branch but it didn't match. We can still consider the acronym matches.
+             matchedSchools = matches;
+           }
+        } else if (matches.length > 0) {
+           matchedSchools = matches;
+        }
+      }
+      
+      if (matchedSchools.length === 0 && validFullAcronym) {
+        matchedSchools = this.acronymMap.get(fullAcronym) || [];
+        usedBranch = false;
+      }
+
+      if (matchedSchools.length > 0) {
+        let confidence = usedBranch ? 90 : 85;
+        let matchedSchool = matchedSchools[0];
         
-        if (acronymMatches.length > 1) {
-          confidence = 70; // lower confidence for collision
-          if (metadata?.municipality) {
-            const byMuni = acronymMatches.filter(s => s.municipality?.toLowerCase() === metadata.municipality?.toLowerCase());
-            if (byMuni.length === 1) {
-              matchedSchool = byMuni[0];
-              confidence = 85; // restored confidence
-            } else if (byMuni.length > 1) {
-               return { status: "suggested", school: null, suggestions: byMuni, confidence };
-            } else {
-              return { status: "suggested", school: null, suggestions: acronymMatches, confidence };
-            }
-          } else {
-            return { status: "suggested", school: null, suggestions: acronymMatches, confidence };
-          }
+        if (matchedSchools.length > 1) {
+           confidence = 70; // lower confidence for collision
+           
+           if (metadata?.municipality) {
+             const byMuni = matchedSchools.filter(s => s.municipality?.toLowerCase() === metadata.municipality?.toLowerCase());
+             if (byMuni.length === 1) {
+               matchedSchool = byMuni[0];
+               confidence = usedBranch ? 90 : 85; // restored confidence
+             } else if (byMuni.length > 1) {
+                return { status: "suggested", school: null, suggestions: byMuni, confidence };
+             } else {
+               return { status: "suggested", school: null, suggestions: matchedSchools, confidence };
+             }
+           } else {
+             return { status: "suggested", school: null, suggestions: matchedSchools, confidence };
+           }
         }
         
         return { status: "matched", school: matchedSchool, matchType: "acronym", confidence };
@@ -204,14 +254,48 @@ export class SchoolMatchingEngine {
     const normMatch = this.normalizedMap.get(normalized);
     if (normMatch) return { status: "matched", school: normMatch, matchType: "normalized", confidence: 95 };
 
-    // 4. Acronym Match (70-85%)
-    const rawAcronym = rawName.toUpperCase().replace(/[^A-Z]/g, '');
-    if (rawAcronym.length >= 2 && rawAcronym.length <= 10 && rawName.length <= 15) {
-      const acronymMatches = this.acronymMap.get(rawAcronym);
-      if (acronymMatches && acronymMatches.length === 1) {
-        return { status: "matched", school: acronymMatches[0], matchType: "acronym", confidence: 85 };
-      } else if (acronymMatches && acronymMatches.length > 1) {
-        return { status: "suggested", school: null, suggestions: acronymMatches, confidence: 70 };
+    // 4. Acronym Match (70-90%)
+    const parts = rawName.split(/[\s-]+/);
+    const potentialAcronym = parts[0].toUpperCase().replace(/[^A-Z]/g, '');
+    const potentialBranch = parts.slice(1).join(' ').trim().toLowerCase();
+    const fullAcronym = rawName.toUpperCase().replace(/[^A-Z]/g, '');
+
+    const validPotentialAcronym = potentialAcronym.length >= 2 && potentialAcronym.length <= 10;
+    const validFullAcronym = fullAcronym.length >= 2 && fullAcronym.length <= 10 && rawName.length <= 15;
+
+    if (validPotentialAcronym || validFullAcronym) {
+      let matchedSchools: SchoolRegistry[] = [];
+      let usedBranch = false;
+      
+      if (validPotentialAcronym) {
+        const matches = this.acronymMap.get(potentialAcronym) || [];
+        if (potentialBranch && matches.length > 0) {
+           const branchMatches = matches.filter(s => {
+             const muni = s.municipality?.toLowerCase() || "";
+             const name = s.schoolName.toLowerCase();
+             return (muni && (muni.includes(potentialBranch) || potentialBranch.includes(muni))) || name.includes(potentialBranch);
+           });
+           if (branchMatches.length > 0) {
+             matchedSchools = branchMatches;
+             usedBranch = true;
+           } else {
+             matchedSchools = matches;
+           }
+        } else if (matches.length > 0) {
+           matchedSchools = matches;
+        }
+      }
+      
+      if (matchedSchools.length === 0 && validFullAcronym) {
+        matchedSchools = this.acronymMap.get(fullAcronym) || [];
+      }
+
+      if (matchedSchools.length > 0) {
+        if (matchedSchools.length === 1) {
+          return { status: "matched", school: matchedSchools[0], matchType: "acronym", confidence: usedBranch ? 90 : 85 };
+        } else {
+          return { status: "suggested", school: null, suggestions: matchedSchools, confidence: 70 };
+        }
       }
     }
 
