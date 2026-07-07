@@ -488,15 +488,15 @@ export function AdminPortalWorkspace({
         onValueChange={(v) => onSectionChange(v as AdminPortalSection)}
         className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:gap-4 md:p-4"
       >
-        <aside className={cn("shrink-0 rounded-2xl border border-white/20 bg-transparent p-1.5 shadow-lg backdrop-blur-xl md:p-2 transition-all duration-300 relative", isSidebarCollapsed ? "md:w-16" : "md:w-60")}>
+        <aside className={cn("shrink-0 h-fit self-start overflow-hidden rounded-2xl border border-white/20 bg-transparent p-1.5 shadow-lg backdrop-blur-xl md:p-2 transition-all duration-300 ease-in-out relative", isSidebarCollapsed ? "md:w-16" : "md:w-60")}>
           <div className={cn("hidden md:flex w-full pt-1 pb-2", isSidebarCollapsed ? "justify-center" : "justify-end px-2")}>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 rounded-lg hover:bg-white/20 text-slate-500 transition-colors"
+              className="h-8 w-8 rounded-lg hover:bg-white/20 text-slate-500 transition-colors border-0 outline-none focus-visible:ring-0 focus:outline-none"
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             >
-              {isSidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              {isSidebarCollapsed ? <ChevronRight className="h-4 w-4" strokeWidth={3} /> : <ChevronLeft className="h-4 w-4" strokeWidth={3} />}
             </Button>
           </div>
           <TabsList
@@ -513,21 +513,22 @@ export function AdminPortalWorkspace({
                 value={value}
                 title={isSidebarCollapsed ? label : undefined}
                 className={cn(
-                  "group relative min-w-max shrink-0 justify-start gap-2 rounded-xl border border-transparent px-3 py-2 text-xs font-semibold text-muted-foreground shadow-none transition-all",
+                  "group relative w-full flex items-center shrink-0 justify-start rounded-xl border border-transparent text-xs font-semibold text-muted-foreground shadow-none transition-all duration-300 ease-in-out",
                   "hover:bg-surface hover:text-foreground",
                   "data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_14px_34px_-24px_rgba(123,17,19,0.9)]",
-                  isSidebarCollapsed ? "md:justify-center md:px-0 md:w-10 md:h-10 md:mx-auto" : "md:w-full md:min-w-0 md:px-3.5 md:py-2.5",
+                  isSidebarCollapsed ? "md:px-2 md:py-2.5 gap-0" : "md:px-3.5 md:py-2.5 gap-2"
                 )}
               >
-                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-transparent text-muted-foreground transition-colors group-data-[state=active]:text-white">
+                <span className={cn("grid h-7 shrink-0 place-items-center rounded-lg bg-transparent text-muted-foreground transition-all duration-300 group-data-[state=active]:text-white", isSidebarCollapsed ? "w-full" : "w-7")}>
                   {icon}
                 </span>
-                {!isSidebarCollapsed && (
-                  <>
-                    <span className="sm:hidden">{short}</span>
-                    <span className="hidden sm:inline">{label}</span>
-                  </>
-                )}
+                <div className={cn(
+                  "flex items-center whitespace-nowrap overflow-hidden transition-all duration-300 ease-in-out",
+                  isSidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[150px] opacity-100"
+                )}>
+                  <span className="sm:hidden">{short}</span>
+                  <span className="hidden sm:inline">{label}</span>
+                </div>
               </TabsTrigger>
             ))}
           </TabsList>
