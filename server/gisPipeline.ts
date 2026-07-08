@@ -379,12 +379,11 @@ export async function syncStudents(
   };
 }
 
-export async function getProcessedStudents(limit = 500) {
+export async function getProcessedStudents() {
   return getDb()
     .select()
     .from(studentsProcessed)
-    .orderBy(desc(studentsProcessed.syncedAt))
-    .limit(limit);
+    .orderBy(desc(studentsProcessed.syncedAt));
 }
 
 export async function updateProcessedStudent(

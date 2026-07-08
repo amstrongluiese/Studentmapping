@@ -137,6 +137,9 @@ export default function Dashboard() {
   const { data: processedStudents = [] } = useProcessedStudents();
   const { data: gisOverview } = useGisOverview();
   const { data: importLogs = [] } = useImportLogs();
+  const { data: enrollmentTargets = [] } = useQuery<{ targetType: string; targetName: string; targetValue: number }[]>({ 
+    queryKey: ["/api/enrollment-targets"] 
+  });
   const updateSchool = useUpdateSchool();
   const deleteSchool = useDeleteSchool();
   const createReferral = useCreateReferral();
@@ -250,6 +253,30 @@ export default function Dashboard() {
   const programAnalytics = useMemo(() => buildProgramAnalytics(programSchools, programFilters), [programFilters, programSchools]);
   const mappedSchools = useMemo(() => programSchools.filter(hasCoordinates), [programSchools]);
   const totalStudents = programAnalytics.totalStudents;
+  
+  const grandTotalStudents = useMemo(() => {
+    // Determine which target to show based on filters
+    let target = 0;
+    
+    if (programFilters.program && programFilters.program !== ALL_PROGRAM_FILTER) {
+      const pTarget = enrollmentTargets.find(t => t.targetType === "Program" && t.targetName === programFilters.program);
+      if (pTarget) target = pTarget.targetValue;
+    } else if (programFilters.college && programFilters.college !== ALL_PROGRAM_FILTER) {
+      const cTarget = enrollmentTargets.find(t => t.targetType === "Department" && t.targetName === programFilters.college);
+      if (cTarget) target = cTarget.targetValue;
+    } else {
+      const oTarget = enrollmentTargets.find(t => t.targetType === "Overall");
+      if (oTarget) target = oTarget.targetValue;
+    }
+
+    if (target > 0) return target;
+
+    // Fallback if no target set
+    return processedStudents.filter(s => {
+      const normalizedStatus = s.enrollmentStatus || "Active";
+      return (normalizedStatus === "Active" || normalizedStatus === "Enrolled" || normalizedStatus === "Officially Enrolled" || normalizedStatus === "OE");
+    }).length;
+  }, [processedStudents, enrollmentTargets, programFilters]);
   const legendOffsetPx = isPresenting || sidebarCollapsed ? 16 : 336;
   const municipalityCount = useMemo(
     () => new Set(programSchools.map((school) => (school.municipality || "").trim()).filter(Boolean)).size,
@@ -442,7 +469,8 @@ export default function Dashboard() {
                   )}
                   <Metric label="Total Schools Registered" value={schools.length} />
                   <Metric label="Mapped Schools" value={mappedSchools.length} />
-                  <Metric label="Enrollees" value={totalStudents} />
+                  <Metric label={programFilterIsActive(programFilters) ? "Filtered Enrollees (GIS)" : "Mapped Enrollees (GIS)"} value={totalStudents} />
+                  <Metric label={programFilterIsActive(programFilters) ? "Filtered Target" : "Overall Target"} value={grandTotalStudents} />
                   <Metric label="Municipalities" value={municipalityCount} />
                   <AnalyticsInsightPanel analytics={programAnalytics} />
                   <div className="rounded-xl border border-white/50 bg-white/40 px-4 py-3 shadow-sm backdrop-blur-md">
@@ -492,7 +520,8 @@ export default function Dashboard() {
                 )}
                 <Metric label="Total Schools Registered" value={schools.length} />
                 <Metric label="Mapped Schools" value={mappedSchools.length} />
-                <Metric label="Enrollees" value={totalStudents} />
+                <Metric label={programFilterIsActive(programFilters) ? "Filtered Enrollees (GIS)" : "Mapped Enrollees (GIS)"} value={totalStudents} />
+                <Metric label={programFilterIsActive(programFilters) ? "Filtered Target" : "Overall Target"} value={grandTotalStudents} />
                 <Metric label="Municipalities" value={municipalityCount} />
                 <AnalyticsInsightPanel analytics={programAnalytics} />
                 <div className="rounded-xl border-b-2 border-b-slate-300/80 bg-white px-4 py-3 shadow-[0_10px_28px_-16px_rgba(15,23,42,0.22)] backdrop-blur-[18px]">

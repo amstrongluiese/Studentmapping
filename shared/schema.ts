@@ -90,6 +90,7 @@ export const studentImports = pgTable("student_imports", {
   matchedSchoolId: integer("matched_school_id").references(() => schoolRegistry.id),
   matchConfidence: integer("match_confidence"),
   matchRule: text("match_rule"),
+  enrollmentStatus: text("enrollment_status").notNull().default("Unknown"),
 });
 
 /** Processed GIS student rows linked to feeder schools. */
@@ -138,7 +139,29 @@ export const mappingLogs = pgTable("mapping_logs", {
   schoolRegistryId: integer("school_registry_id").references(() => schoolRegistry.id),
   studentProcessedId: integer("student_processed_id").references(() => studentsProcessed.id),
   message: text("message").notNull(),
+  details: text("details"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const departments = pgTable("departments", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(), // e.g. 'CCS', 'COE'
+  name: text("name").notNull(), // e.g. 'College of Computer Studies'
+  color: text("color").notNull(),
+  targetValue: integer("target_value").notNull().default(0),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const programs = pgTable("programs", {
+  id: serial("id").primaryKey(),
+  departmentId: integer("department_id").references(() => departments.id).notNull(),
+  code: text("code").notNull().unique(), // e.g. 'BSCS CS'
+  name: text("name").notNull(), // e.g. 'Bachelor of Science in Computer Science'
+  track: text("track"), // Optional
+  level: text("level").notNull().default("Bachelor"),
+  color: text("color").notNull(),
+  targetValue: integer("target_value").notNull().default(0),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 /** Permanent resolution history for matching unmatched schools to official registry */
@@ -194,3 +217,5 @@ export type StudentProcessed = typeof studentsProcessed.$inferSelect;
 export type StudentImport = typeof studentImports.$inferSelect;
 export type SchoolAlias = typeof schoolAliases.$inferSelect;
 export type MappingLog = typeof mappingLogs.$inferSelect;
+export type Department = typeof departments.$inferSelect;
+export type Program = typeof programs.$inferSelect;

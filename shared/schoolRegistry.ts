@@ -40,6 +40,12 @@ export function normalizeSchoolName(name: string): string {
     normalized = normalized.replace(regex, replacement);
   }
 
+  // Fix common merged words or plurals
+  normalized = normalized.replace(/\bhighschool\b/g, "high school");
+  normalized = normalized.replace(/\bcolleges\b/g, "college");
+  normalized = normalized.replace(/\buniversities\b/g, "university");
+  normalized = normalized.replace(/\bacademies\b/g, "academy");
+
   // Remove common stop words for a tighter match
   normalized = normalized.replace(/\b(the|of|inc|incorporated|corp|corporation|campus|branch|academy|institute|university|college|school)\b/g, " ");
 

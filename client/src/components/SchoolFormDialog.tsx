@@ -400,28 +400,6 @@ export function SchoolFormDialog({
                 </div>
               </div>
 
-              <FormField
-                control={form.control as any}
-                name="studentCount"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Enrolled Students from this School</FormLabel>
-                    <div className="relative">
-                      <Users className="absolute left-3 top-3 h-4 w-4 text-primary" />
-                      <FormControl>
-                        <Input
-                          type="number"
-                          min={0}
-                          className="pl-9 border-primary/20 focus-visible:ring-primary/20"
-                          {...field}
-                        />
-                      </FormControl>
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
               <div className="pt-4 flex justify-end gap-3">
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   Cancel

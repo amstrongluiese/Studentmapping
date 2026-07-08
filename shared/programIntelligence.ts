@@ -20,7 +20,8 @@ import {
 export {
   ALL_PROGRAM_FILTER,
   PROGRAM_CATALOG,
-  PROGRAM_COLORS,
+  getFullCatalog,
+  setDynamicCatalog,
   getDepartmentColor,
   getDominantDepartment,
   getFilteredStudentCount,
@@ -36,7 +37,7 @@ export {
   type ProgramInfo,
 } from "./programRecognition";
 
-export const ACTIVE_GIS_STUDENT_STATUSES = new Set(["Active", "Enrolled"]);
+export const ACTIVE_GIS_STUDENT_STATUSES = new Set(["Active", "Enrolled", "Officially Enrolled", "OE"]);
 
 export type ProgramRecord = ProgramInfo;
 

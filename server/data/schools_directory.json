@@ -1538,7 +1538,7 @@
   {
     "schoolId": "SCH-dr-francisco-l-calingasan-memorial-college-407507",
     "schoolName": "Dr. Francisco L. Calingasan Memorial Colleges Foundation",
-    "normalizedSchoolName": "DR FRANCISCO L CALINGASAN MEMORIAL COLLEGES FOUNDATION",
+    "normalizedSchoolName": "DR FRANCISCO L CALINGASAN MEMORIAL FOUNDATION",
     "municipality": "Nasugbu",
     "province": "Batangas",
     "latitude": 14.073,
@@ -1802,7 +1802,7 @@
   {
     "schoolId": "SCH-feapitsat-colleges-inc-409839",
     "schoolName": "FEAPITSAT Colleges, Inc.",
-    "normalizedSchoolName": "FEAPITSAT COLLEGES",
+    "normalizedSchoolName": "FEAPITSAT",
     "municipality": "Laguna",
     "province": "Laguna",
     "latitude": 14.3918445,
@@ -2114,7 +2114,7 @@
   {
     "schoolId": "SCH-icct-colleges-foundation-inc-antipolo-camp-402021",
     "schoolName": "ICCT Colleges Foundation, Inc. - Antipolo Campus",
-    "normalizedSchoolName": "ICCT COLLEGES FOUNDATION ANTIPOLO",
+    "normalizedSchoolName": "ICCT FOUNDATION ANTIPOLO",
     "municipality": "Laguna",
     "province": "Laguna",
     "latitude": 14.5834522,
@@ -2126,7 +2126,7 @@
   {
     "schoolId": "SCH-icct-colleges-foundation-inc-cogeo-campus-404883",
     "schoolName": "ICCT Colleges Foundation, Inc. - Cogeo Campus",
-    "normalizedSchoolName": "ICCT COLLEGES FOUNDATION COGEO",
+    "normalizedSchoolName": "ICCT FOUNDATION COGEO",
     "municipality": "Laguna",
     "province": "Laguna",
     "latitude": 14.625536,
@@ -2138,7 +2138,7 @@
   {
     "schoolId": "SCH-icct-colleges-foundation-inc-angono-campus-405304",
     "schoolName": "ICCT Colleges Foundation, Inc.-Angono Campus",
-    "normalizedSchoolName": "ICCT COLLEGES FOUNDATION ANGONO",
+    "normalizedSchoolName": "ICCT FOUNDATION ANGONO",
     "municipality": "Angono",
     "province": "Rizal",
     "latitude": 14.4796318,
@@ -2150,7 +2150,7 @@
   {
     "schoolId": "SCH-icct-colleges-foundation-inc-binangonan-ca-402257",
     "schoolName": "ICCT Colleges Foundation, Inc.-Binangonan Campus",
-    "normalizedSchoolName": "ICCT COLLEGES FOUNDATION BINANGONAN",
+    "normalizedSchoolName": "ICCT FOUNDATION BINANGONAN",
     "municipality": "Biñan",
     "province": "Rizal",
     "latitude": 14.4796318,
@@ -2162,7 +2162,7 @@
   {
     "schoolId": "SCH-icct-colleges-foundation-inc-cainta-402252",
     "schoolName": "ICCT Colleges Foundation, Inc.-Cainta",
-    "normalizedSchoolName": "ICCT COLLEGES FOUNDATION CAINTA",
+    "normalizedSchoolName": "ICCT FOUNDATION CAINTA",
     "municipality": "Cainta",
     "province": "Rizal",
     "latitude": 14.6177068,
@@ -2174,7 +2174,7 @@
   {
     "schoolId": "SCH-icct-colleges-foundation-inc-san-mateo-cam-402258",
     "schoolName": "ICCT Colleges Foundation, Inc.-San Mateo Campus",
-    "normalizedSchoolName": "ICCT COLLEGES FOUNDATION SAN MATEO",
+    "normalizedSchoolName": "ICCT FOUNDATION SAN MATEO",
     "municipality": "San Mateo",
     "province": "Rizal",
     "latitude": 14.6993561,
@@ -2186,7 +2186,7 @@
   {
     "schoolId": "SCH-icct-colleges-foundation-inc-sumulong-camp-405319",
     "schoolName": "ICCT Colleges Foundation, Inc.-Sumulong Campus",
-    "normalizedSchoolName": "ICCT COLLEGES FOUNDATION SUMULONG",
+    "normalizedSchoolName": "ICCT FOUNDATION SUMULONG",
     "municipality": "Cainta",
     "province": "Rizal",
     "latitude": 14.610577,
@@ -2198,7 +2198,7 @@
   {
     "schoolId": "SCH-icct-colleges-foundation-inc-taytay-campus-402259",
     "schoolName": "ICCT Colleges Foundation, Inc.-Taytay Campus",
-    "normalizedSchoolName": "ICCT COLLEGES FOUNDATION TAYTAY",
+    "normalizedSchoolName": "ICCT FOUNDATION TAYTAY",
     "municipality": "Taytay",
     "province": "Rizal",
     "latitude": 14.557907,
@@ -2594,7 +2594,7 @@
   {
     "schoolId": "SCH-lemery-colleges-402032",
     "schoolName": "Lemery Colleges",
-    "normalizedSchoolName": "LEMERY COLLEGES",
+    "normalizedSchoolName": "LEMERY",
     "municipality": "Lemery",
     "province": "Batangas",
     "latitude": 13.92,
@@ -2894,7 +2894,7 @@
   {
     "schoolId": "SCH-malayan-colleges-of-laguna-402166",
     "schoolName": "Malayan Colleges of Laguna",
-    "normalizedSchoolName": "MALAYAN COLLEGES LAGUNA",
+    "normalizedSchoolName": "MALAYAN LAGUNA",
     "municipality": "City of Cabuyao",
     "province": "Laguna",
     "latitude": 14.278,
@@ -3698,7 +3698,7 @@
   {
     "schoolId": "SCH-pimsat-colleges-rosario-campus-colegio-de--402080",
     "schoolName": "PIMSAT Colleges-Rosario Campus: Colegio de Salinas",
-    "normalizedSchoolName": "PIMSAT COLLEGES ROSARIO COLEGIO DE SALINAS",
+    "normalizedSchoolName": "PIMSAT ROSARIO COLEGIO DE SALINAS",
     "municipality": "Laguna",
     "province": "Cavite",
     "latitude": 14.416225,
@@ -3722,7 +3722,7 @@
   {
     "schoolId": "SCH-pntc-colleges-402131",
     "schoolName": "PNTC Colleges",
-    "normalizedSchoolName": "PNTC COLLEGES",
+    "normalizedSchoolName": "PNTC",
     "municipality": "City of Dasmariñas",
     "province": "Cavite",
     "latitude": 14.329,
@@ -3938,7 +3938,7 @@
   {
     "schoolId": "SCH-granby-colleges-of-science-and-technology-402360",
     "schoolName": "Granby Colleges of Science & Technology",
-    "normalizedSchoolName": "GRANBY COLLEGES SCIENCE TECHNOLOGY",
+    "normalizedSchoolName": "GRANBY SCIENCE TECHNOLOGY",
     "municipality": "Naic",
     "province": "Cavite",
     "latitude": 14.318,
@@ -5054,7 +5054,7 @@
   {
     "schoolId": "SCH-trimex-colleges-402186",
     "schoolName": "Trimex Colleges",
-    "normalizedSchoolName": "TRIMEX COLLEGES",
+    "normalizedSchoolName": "TRIMEX",
     "municipality": "City of Biñan",
     "province": "Laguna",
     "latitude": 14.342,
@@ -5246,7 +5246,7 @@
   {
     "schoolId": "SCH-world-citi-colleges-407505",
     "schoolName": "World Citi Colleges",
-    "normalizedSchoolName": "WORLD CITI COLLEGES",
+    "normalizedSchoolName": "WORLD CITI",
     "municipality": "Laguna",
     "province": "Quezon",
     "latitude": 14.582784,
@@ -5426,7 +5426,7 @@
   {
     "schoolId": "SCH-golden-gate-colleges-CHED18",
     "schoolName": "Golden Gate Colleges",
-    "normalizedSchoolName": "GOLDEN GATE COLLEGES",
+    "normalizedSchoolName": "GOLDEN GATE",
     "municipality": "Batangas City",
     "province": "Batangas",
     "latitude": 13.756,
@@ -5546,7 +5546,7 @@
   {
     "schoolId": "SCH-philippine-best-training-systems-colleges-CHED33",
     "schoolName": "Philippine Best Training Systems Colleges",
-    "normalizedSchoolName": "PHILIPPINE BEST TRAINING SYSTEMS COLLEGES",
+    "normalizedSchoolName": "PHILIPPINE BEST TRAINING SYSTEMS",
     "municipality": "Binangonan",
     "province": "Rizal",
     "latitude": 14.464,
@@ -5558,7 +5558,7 @@
   {
     "schoolId": "SCH-icct-colleges-binangonan-CHED34",
     "schoolName": "ICCT Colleges-Binangonan",
-    "normalizedSchoolName": "ICCT COLLEGES BINANGONAN",
+    "normalizedSchoolName": "ICCT BINANGONAN",
     "municipality": "Binangonan",
     "province": "Rizal",
     "latitude": 14.464,
@@ -5570,7 +5570,7 @@
   {
     "schoolId": "SCH-icct-colleges-cainta-CHED35",
     "schoolName": "ICCT Colleges-Cainta",
-    "normalizedSchoolName": "ICCT COLLEGES CAINTA",
+    "normalizedSchoolName": "ICCT CAINTA",
     "municipality": "Cainta",
     "province": "Rizal",
     "latitude": 14.578,
@@ -5810,7 +5810,7 @@
   {
     "schoolId": "SCH-unciano-colleges-CHED60",
     "schoolName": "Unciano Colleges",
-    "normalizedSchoolName": "UNCIANO COLLEGES",
+    "normalizedSchoolName": "UNCIANO",
     "municipality": "City of Antipolo",
     "province": "Rizal",
     "latitude": 14.586,
@@ -5822,7 +5822,7 @@
   {
     "schoolId": "SCH-world-citi-colleges-antipolo-city-CHED62",
     "schoolName": "World Citi Colleges-Antipolo City",
-    "normalizedSchoolName": "WORLD CITI COLLEGES ANTIPOLO CITY",
+    "normalizedSchoolName": "WORLD CITI ANTIPOLO CITY",
     "municipality": "City of Antipolo",
     "province": "Rizal",
     "latitude": 14.586,
@@ -5870,7 +5870,7 @@
   {
     "schoolId": "SCH-icct-colleges-antipolo-CHED70",
     "schoolName": "ICCT Colleges-Antipolo",
-    "normalizedSchoolName": "ICCT COLLEGES ANTIPOLO",
+    "normalizedSchoolName": "ICCT ANTIPOLO",
     "municipality": "City of Antipolo",
     "province": "Rizal",
     "latitude": 14.586,
@@ -5966,7 +5966,7 @@
   {
     "schoolId": "SCH-the-bearer-of-light-and-wisdom-colleges-CHED81",
     "schoolName": "The Bearer of Light and Wisdom Colleges",
-    "normalizedSchoolName": "BEARER LIGHT AND WISDOM COLLEGES",
+    "normalizedSchoolName": "BEARER LIGHT AND WISDOM",
     "municipality": "City of Bacoor",
     "province": "Cavite",
     "latitude": 14.459,
@@ -6182,7 +6182,7 @@
   {
     "schoolId": "SCH-st-john-colleges-CHED111",
     "schoolName": "St. John Colleges",
-    "normalizedSchoolName": "ST JOHN COLLEGES",
+    "normalizedSchoolName": "ST JOHN",
     "municipality": "City of Calamba",
     "province": "Laguna",
     "latitude": 14.211,
@@ -6290,7 +6290,7 @@
   {
     "schoolId": "SCH-st-mary-magdalene-colleges-of-laguna-CHED121",
     "schoolName": "St. Mary Magdalene Colleges of Laguna",
-    "normalizedSchoolName": "ST MARY MAGDALENE COLLEGES LAGUNA",
+    "normalizedSchoolName": "ST MARY MAGDALENE LAGUNA",
     "municipality": "City of Calamba",
     "province": "Laguna",
     "latitude": 14.211,
@@ -6410,7 +6410,7 @@
   {
     "schoolId": "SCH-oxfordian-colleges-CHED141",
     "schoolName": "Oxfordian Colleges",
-    "normalizedSchoolName": "OXFORDIAN COLLEGES",
+    "normalizedSchoolName": "OXFORDIAN",
     "municipality": "City of Dasmariñas",
     "province": "Cavite",
     "latitude": 14.329,
@@ -6554,7 +6554,7 @@
   {
     "schoolId": "SCH-unida-christian-colleges-CHED159",
     "schoolName": "Unida Christian Colleges",
-    "normalizedSchoolName": "UNIDA CHRISTIAN COLLEGES",
+    "normalizedSchoolName": "UNIDA CHRISTIAN",
     "municipality": "City of Imus",
     "province": "Cavite",
     "latitude": 14.406,
@@ -6614,7 +6614,7 @@
   {
     "schoolId": "SCH-lipa-city-colleges-CHED165",
     "schoolName": "Lipa City Colleges",
-    "normalizedSchoolName": "LIPA CITY COLLEGES",
+    "normalizedSchoolName": "LIPA CITY",
     "municipality": "City of Lipa",
     "province": "Batangas",
     "latitude": 13.941,
@@ -6914,7 +6914,7 @@
   {
     "schoolId": "SCH-san-pablo-colleges-CHED203",
     "schoolName": "San Pablo Colleges",
-    "normalizedSchoolName": "SAN PABLO COLLEGES",
+    "normalizedSchoolName": "SAN PABLO",
     "municipality": "City of San Pablo",
     "province": "Laguna",
     "latitude": 14.068,
@@ -6962,7 +6962,7 @@
   {
     "schoolId": "SCH-st-louis-anne-colleges-of-san-pedro-CHED209",
     "schoolName": "St. Louis Anne Colleges of San Pedro",
-    "normalizedSchoolName": "ST LOUIS ANNE COLLEGES SAN PEDRO",
+    "normalizedSchoolName": "ST LOUIS ANNE SAN PEDRO",
     "municipality": "City of San Pedro",
     "province": "Laguna",
     "latitude": 14.359,
@@ -7046,7 +7046,7 @@
   {
     "schoolId": "SCH-new-sinai-school-and-colleges-sta-rosa-CHED221",
     "schoolName": "New Sinai School and Colleges-Sta. Rosa",
-    "normalizedSchoolName": "NEW SINAI AND COLLEGES STA ROSA",
+    "normalizedSchoolName": "NEW SINAI AND STA ROSA",
     "municipality": "City of Santa Rosa",
     "province": "Laguna",
     "latitude": 14.312,
@@ -7538,7 +7538,7 @@
   {
     "schoolId": "SCH-kurios-christian-colleges-foundation-CHED276",
     "schoolName": "Kurios Christian Colleges Foundation",
-    "normalizedSchoolName": "KURIOS CHRISTIAN COLLEGES FOUNDATION",
+    "normalizedSchoolName": "KURIOS CHRISTIAN FOUNDATION",
     "municipality": "Magallanes",
     "province": "Cavite",
     "latitude": 14.188,
@@ -7598,7 +7598,7 @@
   {
     "schoolId": "SCH-tomas-claudio-colleges-CHED282",
     "schoolName": "Tomas Claudio Colleges",
-    "normalizedSchoolName": "TOMAS CLAUDIO COLLEGES",
+    "normalizedSchoolName": "TOMAS CLAUDIO",
     "municipality": "Morong",
     "province": "Rizal",
     "latitude": 14.511,
@@ -7646,7 +7646,7 @@
   {
     "schoolId": "SCH-western-colleges-CHED287",
     "schoolName": "Western Colleges",
-    "normalizedSchoolName": "WESTERN COLLEGES",
+    "normalizedSchoolName": "WESTERN",
     "municipality": "Naic",
     "province": "Cavite",
     "latitude": 14.318,
@@ -7670,7 +7670,7 @@
   {
     "schoolId": "SCH-cve-colleges-CHED292",
     "schoolName": "CVE Colleges",
-    "normalizedSchoolName": "CVE COLLEGES",
+    "normalizedSchoolName": "CVE",
     "municipality": "Pagbilao",
     "province": "Quezon",
     "latitude": 13.971,
@@ -7874,7 +7874,7 @@
   {
     "schoolId": "SCH-batangas-eastern-colleges-CHED311",
     "schoolName": "Batangas Eastern Colleges",
-    "normalizedSchoolName": "BATANGAS EASTERN COLLEGES",
+    "normalizedSchoolName": "BATANGAS EASTERN",
     "municipality": "San Juan",
     "province": "Batangas",
     "latitude": 13.826,
@@ -7910,7 +7910,7 @@
   {
     "schoolId": "SCH-icct-colleges-san-mateo-CHED314",
     "schoolName": "ICCT Colleges-San Mateo",
-    "normalizedSchoolName": "ICCT COLLEGES SAN MATEO",
+    "normalizedSchoolName": "ICCT SAN MATEO",
     "municipality": "San Mateo",
     "province": "Rizal",
     "latitude": 14.696,
@@ -7958,7 +7958,7 @@
   {
     "schoolId": "SCH-southbay-montessori-school-and-colleges-CHED324",
     "schoolName": "Southbay Montessori School and Colleges",
-    "normalizedSchoolName": "SOUTHBAY MONTESSORI AND COLLEGES",
+    "normalizedSchoolName": "SOUTHBAY MONTESSORI AND",
     "municipality": "Santa Cruz",
     "province": "Laguna",
     "latitude": 14.281,
@@ -8270,7 +8270,7 @@
   {
     "schoolId": "SCH-icct-colleges-taytay-CHED358",
     "schoolName": "ICCT Colleges-Taytay",
-    "normalizedSchoolName": "ICCT COLLEGES TAYTAY",
+    "normalizedSchoolName": "ICCT TAYTAY",
     "municipality": "Taytay",
     "province": "Rizal",
     "latitude": 14.569,

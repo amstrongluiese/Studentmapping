@@ -141,6 +141,11 @@ export class SchoolMatchingEngine {
         matchedSchools = this.acronymMap.get(fullAcronym) || [];
         usedBranch = false;
       }
+      
+      // If we didn't match the branch but the user provided a long branch name, this is likely a false positive acronym match
+      if (matchedSchools.length > 0 && !usedBranch && potentialBranch && potentialBranch.length > 5 && !validFullAcronym) {
+        matchedSchools = [];
+      }
 
       if (matchedSchools.length > 0) {
         let confidence = usedBranch ? 90 : 85;
@@ -180,11 +185,13 @@ export class SchoolMatchingEngine {
     }
 
     // 9. Fuzzy Match & Database pg_trgm (30%)
-    // First try pg_trgm for similarity
+    // Try both raw name and normalized name for similarity
     const trgmRes = await db.execute(sql`
-      SELECT id, similarity(school_name, ${rawName}) as sim 
+      SELECT id, 
+             GREATEST(similarity(school_name, ${rawName}), similarity(normalized_school_name, ${normalized})) as sim 
       FROM school_registry 
-      WHERE is_active = true AND similarity(school_name, ${rawName}) > 0.4 
+      WHERE is_active = true 
+        AND (similarity(school_name, ${rawName}) > 0.3 OR similarity(normalized_school_name, ${normalized}) > 0.3)
       ORDER BY sim DESC LIMIT 1
     `);
     
@@ -210,18 +217,21 @@ export class SchoolMatchingEngine {
 
     const bestSim = Math.max(dbTopSim, fuseTopSim);
     const bestSchool = (bestSim === dbTopSim && dbTopSchool) ? dbTopSchool : fuseTopSchool;
-
-    if (bestSchool && bestSim >= 0.8) {
+    
+    // We lower the threshold slightly to 0.75 because real-world messy data rarely hits 0.8 perfectly without exact substring match
+    if (bestSchool && bestSim >= 0.75) {
       // Highly confident fuzzy match
       const confidence = Math.round(bestSim * 100);
       return { status: "matched", school: bestSchool, matchType: "fuzzy", confidence };
     }
 
     // Fallback: Geospatial & Metadata matching
-    if (metadata && metadata.municipality) {
+    const addressStr = [metadata?.address, metadata?.municipality].filter(Boolean).join(" ").toLowerCase();
+
+    if (addressStr) {
       // 5. Municipality Match Filter (Boost 20%)
       const muniSchools = this.registry.filter(s => 
-        s.municipality?.toLowerCase() === metadata.municipality?.toLowerCase()
+        s.municipality && addressStr.includes(s.municipality.toLowerCase())
       );
       if (muniSchools.length > 0 && bestSchool && muniSchools.some(s => s.id === bestSchool.id) && bestSim > 0.6) {
          return { status: "matched", school: bestSchool, matchType: "municipality", confidence: Math.round((bestSim + 0.2) * 100) };
@@ -230,7 +240,26 @@ export class SchoolMatchingEngine {
 
     // AI Suggestions (Top 3 fuzzy if below threshold)
     if (fuzzyResults.length > 0) {
-      const suggestions = fuzzyResults.slice(0, 3).map(r => r.item);
+      // Combine suggestions from both pg_trgm and fuse
+      const pgSuggestions = trgmRows.map((r: any) => this.registry.find(s => s.id === r.id)).filter(Boolean) as SchoolRegistry[];
+      const fuseSuggestions = fuzzyResults.slice(0, 3).map(r => r.item);
+      const suggestions = Array.from(new Set([...pgSuggestions, ...fuseSuggestions])).slice(0, 3);
+      
+      // Address Resolution
+      if (addressStr && suggestions.length > 1) {
+        const resolved = suggestions.filter(s => {
+          const muni = s.municipality?.toLowerCase();
+          if (muni && addressStr.includes(muni)) return true;
+          const nameLower = s.schoolName.toLowerCase();
+          if (nameLower.split(/[-,\s]+/).some(word => word.length > 3 && addressStr.includes(word) && !rawName.toLowerCase().includes(word))) return true;
+          return false;
+        });
+
+        if (resolved.length === 1) {
+          return { status: "matched", school: resolved[0], matchType: "address", confidence: 95 };
+        }
+      }
+
       return { status: "suggested", school: null, suggestions, confidence: Math.round(fuseTopSim * 100) };
     }
 

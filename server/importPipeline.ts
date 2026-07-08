@@ -95,6 +95,7 @@ export async function processBatch(records: any[]) {
         matchedSchoolId: matchResult.school?.id || null,
         matchConfidence: matchResult.confidence || 0,
         matchRule: matchResult.matchType || "none",
+        enrollmentStatus: record.enrollmentStatus || "Unknown",
       });
 
       currentProgress.processed++;

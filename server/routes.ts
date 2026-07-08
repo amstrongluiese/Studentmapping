@@ -12,6 +12,8 @@ import {
   studentsRaw,
   studentImports,
   systemSettings,
+  departments,
+  programs,
   schoolMatchHistory,
   schoolRegistry,
   students,
@@ -42,6 +44,31 @@ import {
 import multer from "multer";
 import { syncExcelToJSON } from "./syncMasterDirectory";
 import { startImportSession, getImportProgress, processBatch } from "./importPipeline";
+import { seedPrograms } from "./seed";
+import { setDynamicCatalog } from "@shared/programIntelligence";
+
+async function refreshCatalog() {
+  const db = getDb();
+  const dbPrograms = await db.select().from(programs);
+  const deptRecords = await db.select().from(departments);
+  const deptMap = new Map(deptRecords.map(d => [d.id, d]));
+  
+  const formatted = dbPrograms.map(p => {
+    const dept = deptMap.get(p.departmentId)!;
+    return {
+      code: p.code,
+      college: dept.code,
+      collegeName: dept.name,
+      department: dept.code,
+      departmentName: dept.name,
+      program: p.name,
+      track: p.track || "General",
+      level: p.level,
+      color: p.color
+    };
+  });
+  setDynamicCatalog(formatted as any);
+}
 
 const upload = multer({ dest: "server/uploads/" });
 
@@ -49,6 +76,10 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  // Seed DB with default programs on startup
+  await seedPrograms();
+  await refreshCatalog();
+
   // School routes
   app.get(api.schoolRegistry.list.path, async (req, res) => {
     const schoolsList = await storage.listSchoolRegistry();
@@ -185,12 +216,17 @@ export async function registerRoutes(
         };
 
         return {
-          studentNumber: getVal(["student id", "student no", "student_number", "id"]),
+          enrollmentStatus: getVal(["status"]),
+          studentNumber: getVal(["student id", "student no", "student_number", "id", "student number"]),
           fullName: getVal(["name", "full name", "fullname", "student name", "student_name"]),
           previousSchool: getVal(["school", "previous", "graduated", "feeder"]),
           program: getVal(["program", "course", "strand", "degree"]),
-          scholarship: getVal(["scholarship", "iskolar", "grant"]),
+          scholarship: getVal(["scholarship", "iskolar", "grant", "scholar"]),
           municipality: getVal(["municipality", "city", "town", "address"]),
+          strand: getVal(["strand"]),
+          schedule: getVal(["schedule", "sched"]),
+          contactNumber: getVal(["contact", "contact no", "number", "phone"]),
+          requirements: getVal(["requirements", "req"]),
           importSource: "Google Sheets Auto-Sync",
         };
       });
@@ -267,6 +303,91 @@ export async function registerRoutes(
     res.json({ success: true, message: "Settings saved successfully" });
   });
 
+  // Departments and Programs API
+  app.get("/api/departments", async (req, res) => {
+    const db = getDb();
+    const records = await db.select().from(departments);
+    res.json(records);
+  });
+
+  app.post("/api/departments", async (req, res) => {
+    const { id, code, name, color, targetValue } = req.body;
+    const db = getDb();
+    
+    if (id) {
+      const updated = await db.update(departments)
+        .set({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() })
+        .where(eq(departments.id, id))
+        .returning();
+      res.json(updated[0]);
+    } else {
+      const existing = await db.select().from(departments).where(eq(departments.code, code)).limit(1);
+      if (existing.length > 0) {
+        const updated = await db.update(departments)
+          .set({ name, color, targetValue: targetValue || 0, updatedAt: new Date() })
+          .where(eq(departments.id, existing[0].id))
+          .returning();
+        res.json(updated[0]);
+      } else {
+        const inserted = await db.insert(departments)
+          .values({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() })
+          .returning();
+        res.json(inserted[0]);
+      }
+    }
+  });
+
+  app.delete("/api/departments/:id", async (req, res) => {
+    const db = getDb();
+    // Also delete associated programs
+    await db.delete(programs).where(eq(programs.departmentId, parseInt(req.params.id)));
+    await db.delete(departments).where(eq(departments.id, parseInt(req.params.id)));
+    res.json({ success: true });
+  });
+
+  app.get("/api/programs", async (req, res) => {
+    const db = getDb();
+    const records = await db.select().from(programs);
+    res.json(records);
+  });
+
+  app.post("/api/programs", async (req, res) => {
+    const { id, departmentId, code, name, track, level, color, targetValue } = req.body;
+    const db = getDb();
+    
+    if (id) {
+      const updated = await db.update(programs)
+        .set({ departmentId, code, name, track, level, color, targetValue: targetValue || 0, updatedAt: new Date() })
+        .where(eq(programs.id, id))
+        .returning();
+      await refreshCatalog();
+      res.json(updated[0]);
+    } else {
+      const existing = await db.select().from(programs).where(eq(programs.code, code)).limit(1);
+      if (existing.length > 0) {
+        const updated = await db.update(programs)
+          .set({ departmentId, name, track, level, color, targetValue: targetValue || 0, updatedAt: new Date() })
+          .where(eq(programs.id, existing[0].id))
+          .returning();
+        await refreshCatalog();
+        res.json(updated[0]);
+      } else {
+        const inserted = await db.insert(programs)
+          .values({ departmentId, code, name, track, level: level || "Bachelor", color, targetValue: targetValue || 0, updatedAt: new Date() })
+          .returning();
+        await refreshCatalog();
+        res.json(inserted[0]);
+      }
+    }
+  });
+
+  app.delete("/api/programs/:id", async (req, res) => {
+    const db = getDb();
+    await db.delete(programs).where(eq(programs.id, parseInt(req.params.id)));
+    await refreshCatalog();
+    res.json({ success: true });
+  });
+
   app.post("/api/imports/match-resolution", async (req, res) => {
     const db = getDb();
 
@@ -331,7 +452,9 @@ export async function registerRoutes(
         schoolRegistryId: record.matchedSchoolId,
         municipality: record.municipality || "Laguna",
         province: "Laguna",
-        enrollmentStatus: "Active",
+        enrollmentStatus: record.enrollmentStatus === "OE" ? "Officially Enrolled" : 
+                          record.enrollmentStatus === "NOE" ? "Not Officially Enrolled" : 
+                          (record.enrollmentStatus || "For Verification"),
         importedSource: record.importSource,
         mappingStatus: "verified",
       });

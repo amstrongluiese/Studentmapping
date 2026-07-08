@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Activity,
   AlertCircle,
@@ -24,10 +25,11 @@ import {
   Users,
   ChevronLeft,
   ChevronRight,
+  Target, Building2,
 } from "lucide-react";
 import type { Import, SchoolRegistry as School, StudentProcessed } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
-import { ALL_PROGRAM_FILTER, PROGRAM_CATALOG, normalizeStudentProgramValue, recognizeProgram } from "@shared/programIntelligence";
+import { ALL_PROGRAM_FILTER, getFullCatalog, setDynamicCatalog, normalizeStudentProgramValue, recognizeProgram } from "@shared/programIntelligence";
 import { formatAdmissionLabel, parseStudentNumberTag } from "@/lib/adminPortalUtils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -66,8 +68,9 @@ import { TableToolbar } from "@/components/ui/table-toolbar";
 import { cn } from "@/lib/utils";
 import { AdminSchoolDirectory } from "./AdminSchoolDirectory";
 import { SchoolMatchingQueue } from "./SchoolMatchingQueue";
+import { DepartmentManagementWorkspace } from "./DepartmentManagementWorkspace";
 
-export type AdminPortalSection = "overview" | "students" | "feed" | "queue" | "registry" | "directory" | "import-logs" | "settings";
+export type AdminPortalSection = "overview" | "students" | "feed" | "queue" | "registry" | "directory" | "import-logs" | "targets" | "settings";
 
 export interface AdminPortalWorkspaceProps {
   section: AdminPortalSection;
@@ -119,6 +122,7 @@ function sectionTabs(queueCount: number): { value: AdminPortalSection; label: st
     { value: "registry", label: "School Registry", short: "Registry", icon: <Database className="h-4 w-4" /> },
     { value: "directory", label: "Master Directory", short: "Directory", icon: <Database className="h-4 w-4" /> },
     { value: "import-logs", label: "Import Logs", short: "Logs", icon: <ClipboardList className="h-4 w-4" /> },
+    { value: "targets", label: "Dept Management", short: "Depts", icon: <Building2 className="h-4 w-4" /> },
     { value: "settings", label: "Settings", short: "Settings", icon: <Settings2 className="h-4 w-4" /> },
   ];
 }
@@ -283,6 +287,13 @@ export function AdminPortalWorkspace({
     }
   };
 
+  const { data: dynamicProgs } = useQuery({ queryKey: ["/api/programs"] });
+  if (dynamicProgs) {
+    setDynamicCatalog(dynamicProgs as any);
+  }
+
+  const { data: studentsRaw } = useQuery<StudentProcessed[]>({ queryKey: ["/api/students"] });
+
   const startEditStudent = (student: StudentProcessed) => {
     setEditingStudent(student);
     setStudentEditDraft({
@@ -372,9 +383,9 @@ export function AdminPortalWorkspace({
 
   const studentRows = useMemo(() => processedStudents.map((student) => enrichStudentRow(student, schools)), [processedStudents, schools]);
   const studentOptions = useMemo(() => ({
-    colleges: uniqueSorted([...PROGRAM_CATALOG.map((program) => program.college), ...studentRows.map((row) => row.college)].filter(Boolean)),
-    programs: uniqueSorted([...PROGRAM_CATALOG.map((program) => program.program), ...studentRows.map((row) => row.program)].filter(Boolean)),
-    tracks: uniqueSorted([...PROGRAM_CATALOG.map((program) => program.track || "General"), ...studentRows.map((row) => row.track || "General")]),
+    colleges: uniqueSorted([...getFullCatalog().map((program) => program.college), ...studentRows.map((row) => row.college)].filter(Boolean)),
+    programs: uniqueSorted([...getFullCatalog().map((program) => program.program), ...studentRows.map((row) => row.program)].filter(Boolean)),
+    tracks: uniqueSorted([...getFullCatalog().map((program) => program.track || "General"), ...studentRows.map((row) => row.track || "General")]),
     years: uniqueSorted(studentRows.map((row) => row.yearLevel || "Unspecified")),
     municipalities: uniqueSorted(studentRows.map((row) => row.municipality || "Laguna")),
     statuses: STUDENT_STATUSES,
@@ -940,6 +951,10 @@ export function AdminPortalWorkspace({
                 </Card>
               </div>
             </ScrollArea>
+          </TabsContent>
+
+          <TabsContent value="targets" className="m-0 mt-0 min-h-0 flex-1 flex-col overflow-y-auto data-[state=inactive]:hidden bg-slate-50/50">
+            <DepartmentManagementWorkspace />
           </TabsContent>
 
           <TabsContent value="settings" className="m-0 mt-0 min-h-0 flex-1 flex-col data-[state=inactive]:hidden">

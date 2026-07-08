@@ -53,6 +53,11 @@ const LAGUNA_BOUNDS: L.LatLngBoundsExpression = [
   [14.58, 121.72],
 ];
 
+const PHILIPPINES_BOUNDS: L.LatLngBoundsExpression = [
+  [4.5, 116.9], // Southwest (near Palawan/Sulu)
+  [21.5, 126.6] // Northeast (near Batanes/Philippine Sea)
+];
+
 const TILE_URL = "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png";
 const MINIMAL_TILE_URL = "https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png";
 const DARK_TILE_URL = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
@@ -263,7 +268,7 @@ function escapeHtml(value?: string | null) {
 
 function mappedSchools(schools: ProgramSchool[] = []): MappedSchool[] {
   return schools
-    .filter((school) => hasCoordinates(school) && ((school as any).filteredStudentCount ?? (school as any).studentCount ?? 0) > 0)
+    .filter((school) => hasCoordinates(school) && school.schoolName !== "Unspecified" && ((school as any).filteredStudentCount ?? (school as any).studentCount ?? 0) > 0)
     .map((school) => ({
       ...school,
       lat: school.latitude,
@@ -810,9 +815,8 @@ export default function MapWrapper({
       <MapContainer
         center={LAGUNA_CENTER}
         zoom={11}
-        minZoom={9}
+        minZoom={4}
         maxZoom={18}
-        maxBounds={LAGUNA_BOUNDS}
         maxBoundsViscosity={0.75}
         zoomControl={false}
         className="relative z-0 h-full w-full"

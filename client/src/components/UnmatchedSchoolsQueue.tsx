@@ -96,17 +96,22 @@ export function UnmatchedSchoolsQueue({
         </Button>
       </CardHeader>
       <CardContent className="p-0 flex-1 flex flex-col min-h-0">
-        <ScrollArea className="flex-1 min-h-0">
-          <div className="divide-y divide-amber-100">
-            {currentItems.map((name) => (
-              <UnmatchedSchoolRow
-                key={name}
-                name={name}
-                currentMatch={manualMatches[name]}
-                existingSchools={existingSchools}
-                onResolveMatch={onResolveMatch}
-              />
-            ))}
+        <ScrollArea className="flex-1 min-h-[250px]">
+          <div className="divide-y divide-amber-100 pb-[240px]">
+            {currentItems.map((name) => {
+              const schoolData = unmatchedSchoolsData?.find(d => d.name === name);
+              const address = schoolData?.municipality;
+              return (
+                <UnmatchedSchoolRow
+                  key={name}
+                  name={name}
+                  address={address}
+                  currentMatch={manualMatches[name]}
+                  existingSchools={existingSchools}
+                  onResolveMatch={onResolveMatch}
+                />
+              );
+            })}
           </div>
         </ScrollArea>
         {totalPages > 1 && (
@@ -143,11 +148,13 @@ export function UnmatchedSchoolsQueue({
 
 function UnmatchedSchoolRow({
   name,
+  address,
   currentMatch,
   existingSchools,
   onResolveMatch,
 }: {
   name: string;
+  address?: string;
   currentMatch?: School;
   existingSchools: School[];
   onResolveMatch: (schoolName: string, selectedSchool: School | null) => void;
@@ -158,7 +165,16 @@ function UnmatchedSchoolRow({
     <div className="flex items-center justify-between p-4 hover:bg-amber-100/20 transition-colors">
       <div className="flex-1 min-w-0 pr-6">
         <p className="text-sm font-medium text-amber-950 truncate" title={name}>{name}</p>
-        <p className="text-[11px] text-amber-700 mt-1">Unrecognized imported name</p>
+        <div className="flex items-center gap-2 mt-1">
+          <Badge variant="outline" className="text-[10px] bg-amber-50 text-amber-700 border-amber-200">
+            Unrecognized name
+          </Badge>
+          {address && (
+            <Badge variant="outline" className="text-[10px] bg-emerald-50 text-emerald-700 border-emerald-200">
+              Student Address: {address}
+            </Badge>
+          )}
+        </div>
       </div>
       <div className="w-[300px] flex-shrink-0">
         <SchoolNameAutocomplete

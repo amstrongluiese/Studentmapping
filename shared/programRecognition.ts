@@ -85,7 +85,19 @@ export const PROGRAM_MAP: Record<string, ProgramInfo> = {
 
 export const PROGRAM_CATALOG = Object.values(PROGRAM_MAP);
 
-const PROGRAM_LOOKUP = new Map(PROGRAM_CATALOG.map((record) => [record.code, record]));
+let dynamicCatalog: ProgramInfo[] = [];
+
+export function setDynamicCatalog(programs: ProgramInfo[]) {
+  dynamicCatalog = programs;
+}
+
+export function getFullCatalog(): ProgramInfo[] {
+  return [...PROGRAM_CATALOG, ...dynamicCatalog];
+}
+
+export function getProgramLookup(): Map<string, ProgramInfo> {
+  return new Map(getFullCatalog().map((record) => [record.code, record]));
+}
 
 const PROGRAM_ALIASES: Record<string, string> = {
   "AB PSY": "ABPSY",
@@ -164,31 +176,40 @@ export function normalizeStudentProgramValue(value: string | null | undefined) {
 }
 
 export function getProgramInfo(value: string | null | undefined): ProgramInfo | undefined {
-  const normalized = normalizeProgramCode(value);
-  if (!normalized) return undefined;
+  if (!value) return undefined;
+  const trimmed = value.trim().toUpperCase();
+  const catalog = getFullCatalog();
+  const lookup = getProgramLookup();
+  if (lookup.has(trimmed)) return lookup.get(trimmed);
+  
+  if (PROGRAM_ALIASES[trimmed]) {
+    return lookup.get(PROGRAM_ALIASES[trimmed]);
+  }
 
-  const exact = PROGRAM_LOOKUP.get(normalized);
+  const normalized = normalizeProgramCode(trimmed);
+  const exact = lookup.get(normalized);
   if (exact) return exact;
 
   const compact = normalized.replace(/\s+/g, "");
-  const compactMatch = PROGRAM_CATALOG.find((record) => record.code.replace(/\s+/g, "") === compact);
+  const compactMatch = catalog.find((record) => record.code.replace(/\s+/g, "") === compact);
   if (compactMatch) return compactMatch;
 
-  const tokens = new Set(normalized.split(" "));
-  const tokenMatch = PROGRAM_CATALOG.find((record) => {
+  // 4. Token-based fallback matching
+  const tokens = new Set(trimmed.split(/[\s-]+/));
+  const tokenMatch = catalog.find((record) => {
     const parts = record.code.split(" ");
     return parts.every((part) => tokens.has(part));
   });
   if (tokenMatch) return tokenMatch;
 
-  if (tokens.has("INFORMATION") && tokens.has("TECHNOLOGY")) return PROGRAM_MAP["BSIT MWD"];
-  if (tokens.has("COMPUTER") && tokens.has("ENGINEERING")) return PROGRAM_MAP.BSCPE;
-  if (tokens.has("COMPUTER") && tokens.has("SCIENCE") && tokens.has("DATA")) return PROGRAM_MAP["BSCS DS"];
-  if (tokens.has("COMPUTER") && tokens.has("SCIENCE")) return PROGRAM_MAP["BSCS CS"];
-  if (tokens.has("ACCOUNTANCY")) return PROGRAM_MAP.BSA;
-  if (tokens.has("CRIMINOLOGY")) return PROGRAM_MAP["BS CRIM"];
-  if (tokens.has("TOURISM")) return PROGRAM_MAP.BSTM;
-  if (tokens.has("NURSING") && (tokens.has("AID") || tokens.has("AIDE"))) return PROGRAM_MAP.NA;
+  if (tokens.has("INFORMATION") && tokens.has("TECHNOLOGY")) return lookup.get("BSIT MWD");
+  if (tokens.has("COMPUTER") && tokens.has("ENGINEERING")) return lookup.get("BSCPE");
+  if (tokens.has("COMPUTER") && tokens.has("SCIENCE") && tokens.has("DATA")) return lookup.get("BSCS DS");
+  if (tokens.has("COMPUTER") && tokens.has("SCIENCE")) return lookup.get("BSCS CS");
+  if (tokens.has("ACCOUNTANCY")) return lookup.get("BSA");
+  if (tokens.has("CRIMINOLOGY")) return lookup.get("BS CRIM");
+  if (tokens.has("TOURISM")) return lookup.get("BSTM");
+  if (tokens.has("NURSING") && (tokens.has("AID") || tokens.has("AIDE"))) return lookup.get("NA");
 
   return undefined;
 }
@@ -262,11 +283,20 @@ export function getDominantDepartment(entries: ProgramDistributionEntry[]) {
   const totals = new Map<string, { department: string; departmentName: string; color: string; count: number }>();
 
   for (const entry of entries) {
-    const department = entry.department || entry.college || "Unknown";
+    let department = entry.department || entry.college || "Unknown";
+    let departmentName = entry.departmentName || entry.collegeName || department;
+    let color = getDepartmentColor(department);
+
+    if (department.toUpperCase() === "STANDALONE" || department.toUpperCase() === "STANDALONE PROGRAMS") {
+      department = entry.program || entry.code || department;
+      departmentName = entry.program || entry.code || departmentName;
+      color = entry.color || color;
+    }
+
     const current = totals.get(department) || {
       department,
-      departmentName: entry.departmentName || entry.collegeName || department,
-      color: getDepartmentColor(department),
+      departmentName,
+      color,
       count: 0,
     };
     totals.set(department, { ...current, count: current.count + entry.count });
