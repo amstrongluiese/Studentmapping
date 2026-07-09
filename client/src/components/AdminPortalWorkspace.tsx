@@ -112,13 +112,10 @@ type StudentEditDraft = {
 };
 
 function sectionTabs(queueCount: number): { value: AdminPortalSection; label: string; short: string; icon: ReactNode }[] {
-  const queueLabel = queueCount > 0 ? `Mapping Queue (${queueCount})` : "Mapping Queue";
-  const queueShort = queueCount > 0 ? `Queue (${queueCount})` : "Queue";
   return [
     { value: "overview", label: "Overview", short: "Overview", icon: <LayoutDashboard className="h-4 w-4" /> },
     { value: "students", label: "Students", short: "Students", icon: <Users className="h-4 w-4" /> },
     { value: "feed", label: "Live Student Feed", short: "Feed", icon: <Activity className="h-4 w-4" /> },
-    { value: "queue", label: queueLabel, short: queueShort, icon: <ListChecks className="h-4 w-4" /> },
     { value: "registry", label: "School Registry", short: "Registry", icon: <Database className="h-4 w-4" /> },
     { value: "directory", label: "Master Directory", short: "Directory", icon: <Database className="h-4 w-4" /> },
     { value: "import-logs", label: "Import Logs", short: "Logs", icon: <ClipboardList className="h-4 w-4" /> },
@@ -840,20 +837,6 @@ export function AdminPortalWorkspace({
             </div>
           </TabsContent>
 
-          <TabsContent value="queue" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-            <SchoolMatchingQueue
-              duplicateIds={duplicateIds}
-              onAddSchool={onAddSchool}
-              onEditSchool={onEditSchool}
-              onGeolocateSchool={onGeolocateSchool}
-              onRemoveDuplicate={onRemoveDuplicate}
-              queueSearch={queueSearch}
-              queueSelected={queueSelected}
-              queueSchools={queueSchools}
-              setQueueSearch={setQueueSearch}
-              setQueueSelected={setQueueSelected}
-            />
-          </TabsContent>
 
           <TabsContent value="registry" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
             <ScrollArea className="h-full">

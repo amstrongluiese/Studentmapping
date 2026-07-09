@@ -11,6 +11,7 @@ export const schoolRegistry = pgTable("school_registry", {
   sector: text("sector"),
   municipality: text("municipality").notNull().default("Laguna"),
   province: text("province").notNull().default("Laguna"),
+  barangay: text("barangay"),
   address: text("address"),
   latitude: doublePrecision("latitude"),
   longitude: doublePrecision("longitude"),

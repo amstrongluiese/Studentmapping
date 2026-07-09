@@ -491,11 +491,8 @@ export async function registerRoutes(
   });
 
   app.get("/api/imports/logs", async (req, res) => {
-    // Currently returns recent batches from studentImports grouped by importSource
-    const db = getDb();
-
-    const recentImports = await db.select().from(studentImports).orderBy(desc(studentImports.importedAt)).limit(100);
-    res.json(recentImports);
+    const logs = await getImportLogs(100);
+    res.json(logs);
   });
 
   app.post(api.integrations.preview.path, async (req, res) => {

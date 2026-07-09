@@ -1,7 +1,7 @@
 import * as dotenv from "dotenv";
 dotenv.config();
 import { getDb, getPool } from "./server/db";
-import { schoolRegistry, schoolAliases } from "./shared/schema";
+import { schoolRegistry, schoolAliases, studentImports } from "./shared/schema";
 import { normalizeSchoolName } from "./shared/schoolRegistry";
 import { eq, inArray } from "drizzle-orm";
 
@@ -53,6 +53,10 @@ async function run() {
         await db.update(schoolAliases)
           .set({ schoolRegistryId: primary.id })
           .where(eq(schoolAliases.schoolRegistryId, otherId));
+          
+        await db.update(studentImports)
+          .set({ matchedSchoolId: primary.id })
+          .where(eq(studentImports.matchedSchoolId, otherId));
       }
 
       // Delete the duplicate schools

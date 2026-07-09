@@ -175,6 +175,10 @@ export function ApiSettingsCenter() {
     refetchInterval: (query) => query.state.data?.isProcessing ? 1000 : 3000,
   });
 
+  const { data: importLogs = [], isLoading: isLoadingLogs } = useQuery<any[]>({
+    queryKey: ["/api/imports/logs"],
+  });
+
   const { data: stagingRecords = [] } = useQuery<any[]>({
     queryKey: ["/api/imports/staging"],
     refetchInterval: (query) => importProgress?.isProcessing ? 2000 : false,
@@ -310,14 +314,7 @@ export function ApiSettingsCenter() {
             <TabsTrigger value="manual" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Manual Upload</TabsTrigger>
             <TabsTrigger value="alignment" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Column Alignment</TabsTrigger>
             <TabsTrigger value="imported" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Imported Table</TabsTrigger>
-            <TabsTrigger value="unmatched" className="flex-none text-xs rounded-lg relative data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">
-              Unmatched 
-              {unmatchedNames.length > 0 && (
-                <span className="ml-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
-                  {unmatchedNames.length}
-                </span>
-              )}
-            </TabsTrigger>
+
             <TabsTrigger value="alias" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Alias Manager</TabsTrigger>
             <TabsTrigger value="logs" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Import Logs</TabsTrigger>
             <TabsTrigger value="diagnostics" className="flex-none text-xs rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm data-[state=active]:text-indigo-700">Diagnostics</TabsTrigger>
@@ -491,19 +488,7 @@ export function ApiSettingsCenter() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="unmatched" className="m-0 flex-1 min-h-0 flex flex-col pb-4 mt-0">
-            <UnmatchedSchoolsQueue 
-              unmatchedSchoolNames={unmatchedNames}
-              unmatchedSchoolsData={unmatchedSchoolsData}
-              manualMatches={manualMatches}
-              existingSchools={schools}
-              onResolveMatch={(importedName, school) => {
-                if (school) {
-                  resolveMatchMutation.mutate({ importedName, officialSchoolId: school.id, createAlias: true });
-                }
-              }}
-            />
-          </TabsContent>
+
 
           <TabsContent value="alias" className="m-0 h-full overflow-auto pb-4">
             <Card>
@@ -524,7 +509,42 @@ export function ApiSettingsCenter() {
                 <CardDescription>History of all import runs.</CardDescription>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-slate-500">Import logs from the /api/imports/logs endpoint will appear here.</p>
+                {isLoadingLogs ? (
+                  <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin text-indigo-500" /></div>
+                ) : importLogs.length === 0 ? (
+                  <div className="p-8 text-center text-slate-500 border-2 border-dashed rounded-md">
+                    No import logs found.
+                  </div>
+                ) : (
+                  <div className="rounded-md border">
+                    <Table>
+                      <TableHeader className="bg-slate-50">
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Source</TableHead>
+                          <TableHead>Records</TableHead>
+                          <TableHead>Processed</TableHead>
+                          <TableHead>Status</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {importLogs.map((log: any) => (
+                          <TableRow key={log.id}>
+                            <TableCell className="whitespace-nowrap">{new Date(log.startedAt).toLocaleString()}</TableCell>
+                            <TableCell>{log.source}</TableCell>
+                            <TableCell>{log.importedCount}</TableCell>
+                            <TableCell>{log.failedCount}</TableCell>
+                            <TableCell>
+                              <Badge variant={log.status === "completed" ? "default" : log.status === "failed" ? "destructive" : "secondary"} className="text-[10px]">
+                                {log.status}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

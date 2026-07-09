@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Edit, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useState, useMemo } from "react";
+import { Edit, Plus, RefreshCw, Trash2, MapPin } from "lucide-react";
 import type { SchoolRegistry as School } from "@shared/schema";
 import { api } from "@shared/routes";
 import { getSchoolStatus, hasCoordinates } from "@shared/schoolRegistry";
@@ -10,7 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TableToolbar } from "@/components/ui/table-toolbar";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { UnmatchedSchoolsQueue } from "./UnmatchedSchoolsQueue";
 import {
   Table,
   TableBody,
@@ -74,9 +77,82 @@ export function AdminSchoolRegistry({
     }
   };
 
+  const { data: importProgress } = useQuery<any>({
+    queryKey: ["/api/imports/progress"],
+    refetchInterval: (query) => query.state.data?.isProcessing ? 1000 : 3000,
+  });
+
+  const { data: stagingRecords = [] } = useQuery<any[]>({
+    queryKey: ["/api/imports/staging"],
+    refetchInterval: (query) => importProgress?.isProcessing ? 2000 : false,
+  });
+
+  const unmatchedNames = Array.from(new Set(
+    stagingRecords
+      .filter((r: any) => r.importStatus === "Unmatched")
+      .map((r: any) => r.previousSchool)
+      .filter(Boolean)
+  )) as string[];
+
+  const unmatchedSchoolsData = useMemo(() => {
+    const map = new Map<string, string>();
+    stagingRecords
+      .filter((r: any) => r.importStatus === "Unmatched" && r.previousSchool)
+      .forEach((r: any) => {
+        if (!map.has(r.previousSchool)) {
+          map.set(r.previousSchool, r.municipality || "Laguna");
+        }
+      });
+    return Array.from(map.entries()).map(([name, municipality]) => ({ name, municipality }));
+  }, [stagingRecords]);
+
+  const resolveMatchMutation = useMutation({
+    mutationFn: async (payload: { importedName: string; officialSchoolId: number; createAlias: boolean }) => {
+      const res = await fetch("/api/imports/match-resolution", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) throw new Error("Failed to resolve match");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/imports/staging"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/diagnostics"] });
+    },
+  });
+
   return (
     <div className={cn("mx-auto space-y-3", compact ? "max-w-full" : "max-w-7xl space-y-4")}>
-      <TableToolbar
+      <Tabs defaultValue="masterlist" className="w-full">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+          <div>
+            <h3 className={cn("font-semibold text-slate-900", compact ? "text-sm" : "text-xl font-black")}>School registry</h3>
+            <p className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-sm")}>
+              Manage official schools and process pending imports.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <TabsList className="bg-slate-100/80">
+              <TabsTrigger value="masterlist" className="text-xs">Official Masterlist</TabsTrigger>
+              <TabsTrigger value="pending" className="text-xs relative">
+                Pending Imports
+                {unmatchedNames.length > 0 && (
+                  <span className="ml-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
+                    {unmatchedNames.length}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+            <Button className={cn("gap-2", compact ? "h-9 px-3 text-xs" : "h-10")} onClick={onAdd}>
+              <Plus className="h-3.5 w-3.5" />
+              Add school
+            </Button>
+          </div>
+        </div>
+
+        <TabsContent value="masterlist" className="m-0 space-y-3">
+          <TableToolbar
         searchQuery={registrySearch}
         onSearchChange={onSearchChange}
         searchPlaceholder="Search schools, municipalities, type, or status..."
@@ -233,6 +309,22 @@ export function AdminSchoolRegistry({
           </Table>
         </div>
       </Card>
+      </TabsContent>
+
+      <TabsContent value="pending" className="m-0">
+        <UnmatchedSchoolsQueue 
+          unmatchedSchoolNames={unmatchedNames}
+          unmatchedSchoolsData={unmatchedSchoolsData}
+          manualMatches={{}} // handled internally if needed, or we can just pass {}
+          existingSchools={filteredSchools}
+          onResolveMatch={(importedName, school) => {
+            if (school) {
+              resolveMatchMutation.mutate({ importedName, officialSchoolId: school.id, createAlias: true });
+            }
+          }}
+        />
+      </TabsContent>
+      </Tabs>
     </div>
   );
 }
