@@ -1,5 +1,5 @@
 import { getDb } from "./db";
-import { studentImports, schoolAliases } from "@shared/schema";
+import { studentsProcessed, schoolAliases } from "@shared/schema";
 import { SchoolMatchingEngine } from "./schoolMatcher";
 import { storage } from "./storage";
 
@@ -81,21 +81,20 @@ export async function processBatch(records: any[]) {
       const status = matchResult.status === "matched" ? "Matched" : 
                     matchResult.status === "suggested" ? "Unmatched" : "Unmatched";
 
-      await db.insert(studentImports).values({
+      await db.insert(studentsProcessed).values({
         studentNumber: record.studentNumber || "N/A",
         fullName: record.fullName || "Unknown",
+        lastSchoolName: record.previousSchool || "Unknown",
         previousSchool: record.previousSchool || null,
         strand: record.strand || null,
         admissionType: record.admissionType,
-        program: record.program || null,
-        scholarship: record.scholarship || null,
+        course: record.program || null,
+        iskolarNiKap: record.scholarship || null,
         municipality: record.municipality || "Laguna",
-        importSource: record.importSource || "API Batch",
-        importStatus: status,
-        matchedSchoolId: matchResult.school?.id || null,
-        matchConfidence: matchResult.confidence || 0,
-        matchRule: matchResult.matchType || "none",
-        enrollmentStatus: record.enrollmentStatus || "Unknown",
+        importedSource: record.importSource || "Google Sheets Auto-Sync",
+        mappingStatus: status === "Matched" ? "mapped" : "needs_review",
+        schoolRegistryId: matchResult.school?.id || null,
+        enrollmentStatus: record.enrollmentStatus || "Active",
       });
 
       currentProgress.processed++;

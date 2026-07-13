@@ -705,6 +705,26 @@ export async function registerRoutes(
   });
 
   // Student routes
+  app.post("/api/students/processed/archive-all", async (req, res) => {
+    try {
+      const db = getDb();
+      // Update all students that are not currently archived
+      await db.update(studentsProcessed)
+        .set({
+          enrollmentStatus: "Archived",
+          archivedAt: new Date()
+        })
+        .where(
+          inArray(studentsProcessed.enrollmentStatus, ["Active", "Enrolled", "Pending", "Unknown"])
+        );
+
+      res.json({ success: true, message: "Successfully archived all current student records." });
+    } catch (err) {
+      console.error("Archive error:", err);
+      res.status(500).json({ success: false, message: "Failed to archive student data." });
+    }
+  });
+
   app.get("/api/students", async (req, res) => {
     const studentsList = await storage.getStudents();
     res.json(studentsList);

@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid, Legend } from 'recharts';
 import {
   Activity,
   AlertCircle,
@@ -25,7 +26,7 @@ import {
   Users,
   ChevronLeft,
   ChevronRight,
-  Target, Building2,
+  Target, Building2, Folder, RotateCcw,
 } from "lucide-react";
 import type { Import, SchoolRegistry as School, StudentProcessed } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
@@ -66,11 +67,10 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { TableToolbar } from "@/components/ui/table-toolbar";
 import { cn } from "@/lib/utils";
-import { AdminSchoolDirectory } from "./AdminSchoolDirectory";
 import { SchoolMatchingQueue } from "./SchoolMatchingQueue";
 import { DepartmentManagementWorkspace } from "./DepartmentManagementWorkspace";
 
-export type AdminPortalSection = "overview" | "students" | "feed" | "queue" | "registry" | "directory" | "import-logs" | "targets" | "settings";
+export type AdminPortalSection = "overview" | "students" | "feed" | "queue" | "registry" | "import-logs" | "targets" | "settings" | "archives";
 
 export interface AdminPortalWorkspaceProps {
   section: AdminPortalSection;
@@ -117,9 +117,9 @@ function sectionTabs(queueCount: number): { value: AdminPortalSection; label: st
     { value: "students", label: "Students", short: "Students", icon: <Users className="h-4 w-4" /> },
     { value: "feed", label: "Live Student Feed", short: "Feed", icon: <Activity className="h-4 w-4" /> },
     { value: "registry", label: "School Registry", short: "Registry", icon: <Database className="h-4 w-4" /> },
-    { value: "directory", label: "Master Directory", short: "Directory", icon: <Database className="h-4 w-4" /> },
     { value: "import-logs", label: "Import Logs", short: "Logs", icon: <ClipboardList className="h-4 w-4" /> },
     { value: "targets", label: "Dept Management", short: "Depts", icon: <Building2 className="h-4 w-4" /> },
+    { value: "archives", label: "Archives", short: "Archives", icon: <Archive className="h-4 w-4" /> },
     { value: "settings", label: "Settings", short: "Settings", icon: <Settings2 className="h-4 w-4" /> },
   ];
 }
@@ -177,6 +177,8 @@ export function AdminPortalWorkspace({
   const [logsSearch, setLogsSearch] = useState("");
   const [logsSelected, setLogsSelected] = useState<Set<number>>(new Set());
   const [isDeletingLogs, setIsDeletingLogs] = useState(false);
+
+  const [selectedArchiveFolder, setSelectedArchiveFolder] = useState<string | null>(null);
 
   const deleteFeed = async () => {
     try {
@@ -361,6 +363,23 @@ export function AdminPortalWorkspace({
     }
   };
 
+  const archiveAllData = async () => {
+    if (!confirm("Are you sure you want to archive all current student data? This will reset the active dashboard.")) return;
+    try {
+      const res = await apiRequest("POST", "/api/students/processed/archive-all");
+      const data = await res.json();
+      if (data.success) {
+        toast({ title: "Data Archived", description: data.message });
+        void queryClient.invalidateQueries({ queryKey: ["/api/students/processed"] });
+        void queryClient.invalidateQueries({ queryKey: ["/api/gis/overview"] });
+      } else {
+        toast({ title: "Archive Failed", description: data.message, variant: "destructive" });
+      }
+    } catch (e) {
+      toast({ title: "Archive Failed", description: String(e), variant: "destructive" });
+    }
+  };
+
   const overview = useMemo(() => {
     const verifiedSchools = gisOverview?.verifiedSchools ?? schools.filter((s) => s.isActive && hasCoordinates(s)).length;
     const unmappedSchools = gisOverview?.unmappedSchools ?? schools.filter((s) => !hasCoordinates(s)).length;
@@ -401,6 +420,83 @@ export function AdminPortalWorkspace({
       newStudents: studentRows.filter((row) => new Date(row.syncedAt).getTime() >= weekAgo).length,
       archived,
     };
+  }, [studentRows]);
+
+  const chartData = useMemo(() => {
+    // 1. Admission Demographics (Pie Chart)
+    const admissionMap = new Map<string, number>();
+    studentRows.forEach(s => {
+      if (s.enrollmentStatus === "Archived") return;
+      const type = s.admissionType || "Unknown";
+      admissionMap.set(type, (admissionMap.get(type) || 0) + 1);
+    });
+    const admissionDemographics = Array.from(admissionMap.entries()).map(([name, value]) => ({ name, value }));
+    const COLORS = ['#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#64748b'];
+
+    // 2. Top Programs (Bar Chart)
+    const programMap = new Map<string, number>();
+    studentRows.forEach(s => {
+      if (s.enrollmentStatus === "Archived") return;
+      if (s.program) {
+        programMap.set(s.program, (programMap.get(s.program) || 0) + 1);
+      }
+    });
+    const topPrograms = Array.from(programMap.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Top 5
+
+    // 3. Geographic Distribution (Bar Chart)
+    const geoMap = new Map<string, number>();
+    studentRows.forEach(s => {
+      if (s.enrollmentStatus === "Archived") return;
+      const mun = s.municipality || "Laguna";
+      geoMap.set(mun, (geoMap.get(mun) || 0) + 1);
+    });
+    const geoDistribution = Array.from(geoMap.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Top 5
+
+    // 4. Enrollment Trends (Area Chart - mock grouping by last 7 days)
+    const trendMap = new Map<string, number>();
+    const now = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      trendMap.set(d.toISOString().slice(0, 10), 0);
+    }
+    studentRows.forEach(s => {
+      if (s.enrollmentStatus === "Archived") return;
+      const dStr = new Date(s.syncedAt).toISOString().slice(0, 10);
+      if (trendMap.has(dStr)) {
+        trendMap.set(dStr, trendMap.get(dStr)! + 1);
+      }
+    });
+    const enrollmentTrends = Array.from(trendMap.entries()).map(([date, count]) => ({ date, count }));
+
+    // 5. School Mapping Progress
+    const mapped = schools.filter(s => hasCoordinates(s)).length;
+    const unmapped = schools.filter(s => !hasCoordinates(s)).length;
+    const mappingProgress = [
+      { name: 'Mapped', value: mapped, fill: '#10b981' },
+      { name: 'Unmapped', value: unmapped, fill: '#f43f5e' }
+    ];
+
+    return { admissionDemographics, COLORS, topPrograms, geoDistribution, enrollmentTrends, mappingProgress };
+  }, [studentRows, schools]);
+
+  const archiveFolders = useMemo(() => {
+    const folders = new Map<string, number>();
+    studentRows.forEach(s => {
+      if (s.enrollmentStatus === "Archived") {
+        const dateStr = s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt));
+        folders.set(dateStr, (folders.get(dateStr) || 0) + 1);
+      }
+    });
+    return Array.from(folders.entries())
+      .map(([date, count]) => ({ date, count, label: `Enrollment Data - ${date}` }))
+      .sort((a, b) => b.date.localeCompare(a.date));
   }, [studentRows]);
 
   const studentsManaged = useMemo(() => {
@@ -496,8 +592,8 @@ export function AdminPortalWorkspace({
         onValueChange={(v) => onSectionChange(v as AdminPortalSection)}
         className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:gap-4 md:p-4"
       >
-        <aside className={cn("shrink-0 h-fit self-start overflow-hidden rounded-2xl border border-white/20 bg-transparent p-1.5 shadow-lg backdrop-blur-xl md:p-2 transition-all duration-300 ease-in-out relative", isSidebarCollapsed ? "md:w-16" : "md:w-60")}>
-          <div className={cn("hidden md:flex w-full pt-1 pb-2", isSidebarCollapsed ? "justify-center" : "justify-end px-2")}>
+        <aside className={cn("shrink-0 h-full self-start overflow-hidden rounded-2xl border border-white/20 bg-transparent p-1.5 shadow-lg backdrop-blur-xl md:p-2 transition-all duration-300 ease-in-out relative flex flex-col", isSidebarCollapsed ? "md:w-16" : "md:w-60")}>
+          <div className={cn("hidden md:flex w-full pt-1 pb-2 shrink-0", isSidebarCollapsed ? "justify-center" : "justify-end px-2")}>
             <Button
               variant="ghost"
               size="icon"
@@ -510,7 +606,7 @@ export function AdminPortalWorkspace({
           <TabsList
             aria-label="Admin sections"
             className={cn(
-              "flex h-auto w-full justify-start gap-1 overflow-x-auto p-1 text-muted-foreground",
+              "flex flex-1 h-full w-full justify-start gap-1 overflow-x-auto p-1 text-muted-foreground",
               "md:flex-col md:overflow-visible md:!bg-transparent md:p-0 md:shadow-none md:border-none",
               isSidebarCollapsed && "md:items-center"
             )}
@@ -519,12 +615,14 @@ export function AdminPortalWorkspace({
               <TabsTrigger
                 key={value}
                 value={value}
+                data-tab-id={value}
                 title={isSidebarCollapsed ? label : undefined}
                 className={cn(
                   "group relative w-full flex items-center shrink-0 justify-start rounded-xl border border-transparent text-xs font-semibold text-muted-foreground shadow-none transition-all duration-300 ease-in-out",
                   "hover:bg-surface hover:text-foreground",
                   "data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_14px_34px_-24px_rgba(123,17,19,0.9)]",
-                  isSidebarCollapsed ? "md:px-2 md:py-2.5 gap-0" : "md:px-3.5 md:py-2.5 gap-2"
+                  isSidebarCollapsed ? "md:px-2 md:py-2.5 gap-0" : "md:px-3.5 md:py-2.5 gap-2",
+                  value === "settings" && "md:mt-auto"
                 )}
               >
                 <span className={cn("grid h-7 shrink-0 place-items-center rounded-lg bg-transparent text-muted-foreground transition-all duration-300 group-data-[state=active]:text-white", isSidebarCollapsed ? "w-full" : "w-7")}>
@@ -546,32 +644,132 @@ export function AdminPortalWorkspace({
 
           <TabsContent value="overview" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
             <ScrollArea className="h-full">
-              <div className="mx-auto max-w-5xl space-y-4 p-3 sm:p-4">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <StatMini
-                    title="Total students synced"
-                    value={overview.totalStudentsSynced.toLocaleString()}
-                    icon={<GraduationCap className="h-3.5 w-3.5" />}
-                  />
-                  <StatMini title="Freshmen" value={overview.freshmenCount} sub="SHS → Frosh when API connected" icon={<UserCircle2 className="h-3.5 w-3.5" />} />
-                  <StatMini title="Transferees" value={overview.transfereeCount} sub="College → xfer when API connected" icon={<ArrowRightLeft className="h-3.5 w-3.5" />} />
-                  <StatMini title="Verified schools" value={String(overview.verifiedSchools)} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-                  <StatMini title="Unmapped schools" value={String(overview.unmappedSchools)} warn={overview.unmappedSchools > 0} icon={<MapPinned className="h-3.5 w-3.5" />} />
-                  <StatMini title="API sync status" value={overview.apiSyncStatus} icon={<CloudOff className="h-3.5 w-3.5" />} />
-                  <StatMini title="Last sync" value={formatSyncTime(schoolsUpdatedAt)} sub="Registry data refresh" icon={<Clock3 className="h-3.5 w-3.5" />} />
+              <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
+                
+                {/* Header Section */}
+                <div className="flex flex-col gap-4 rounded-xl border border-white/60 bg-white/40 p-5 shadow-sm backdrop-blur-md sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h1 className="text-2xl font-bold tracking-tight text-slate-900">System Overview</h1>
+                    <p className="text-sm text-slate-500">Real-time statistics and enrollment analytics.</p>
+                  </div>
+                  <Button variant="destructive" onClick={archiveAllData} className="gap-2 shadow-sm transition-transform active:scale-95">
+                    <Archive className="h-4 w-4" />
+                    Reset / Archive Data
+                  </Button>
                 </div>
-                <Card className="border-white/70 bg-white/70 shadow-[0_18px_50px_-36px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-                  <CardHeader className="space-y-1 pb-2 pt-4">
-                    <CardTitle className="flex items-center gap-2 text-sm font-semibold">
-                      <GitBranch className="h-4 w-4 text-slate-600" />
-                      School matching pipeline
-                    </CardTitle>
-                    <CardDescription className="text-xs leading-relaxed">
-                      API / Excel / Sheets → students_raw → students_processed → school_aliases → schools registry → GIS
-                      aggregation → map. Names normalize; aliases dedupe; verified coordinates reuse.
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
+
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                  <StatMini title="Total students synced" value={overview.totalStudentsSynced.toLocaleString()} icon={<GraduationCap className="h-4 w-4 text-emerald-500" />} />
+                  <StatMini title="Freshmen" value={String(overview.freshmenCount)} sub="SHS → Frosh" icon={<UserCircle2 className="h-4 w-4 text-blue-500" />} />
+                  <StatMini title="Transferees" value={String(overview.transfereeCount)} sub="College → Xfer" icon={<ArrowRightLeft className="h-4 w-4 text-purple-500" />} />
+                  <StatMini title="Verified schools" value={String(overview.verifiedSchools)} icon={<ShieldCheck className="h-4 w-4 text-emerald-500" />} />
+                  <StatMini title="Unmapped schools" value={String(overview.unmappedSchools)} warn={overview.unmappedSchools > 0} icon={<MapPinned className="h-4 w-4 text-rose-500" />} />
+                  <StatMini title="API sync status" value={overview.apiSyncStatus} icon={<CloudOff className="h-4 w-4 text-slate-400" />} />
+                  <StatMini title="Last sync" value={formatSyncTime(schoolsUpdatedAt)} sub="Registry data" icon={<Clock3 className="h-4 w-4 text-amber-500" />} />
+                </div>
+
+                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                  {/* Admission Demographics */}
+                  <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
+                    <CardHeader className="pb-2 pt-5 px-6">
+                      <CardTitle className="text-sm font-semibold text-slate-800">Admission Demographics</CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-72 px-2 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={chartData.admissionDemographics} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={65} outerRadius={90} label={{ fontSize: 11, fill: '#64748b' }} stroke="none">
+                            {chartData.admissionDemographics.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={chartData.COLORS[index % chartData.COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                          <Legend wrapperStyle={{ fontSize: 12, paddingTop: '10px' }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Top Programs */}
+                  <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
+                    <CardHeader className="pb-2 pt-5 px-6">
+                      <CardTitle className="text-sm font-semibold text-slate-800">Top Programs</CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-72 px-4 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData.topPrograms} layout="vertical" margin={{ left: 50, right: 20 }}>
+                          <defs>
+                            <linearGradient id="programGradient" x1="0" y1="0" x2="1" y2="0">
+                              <stop offset="0%" stopColor="#8b5cf6" />
+                              <stop offset="100%" stopColor="#a855f7" />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
+                          <XAxis type="number" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                          <YAxis dataKey="name" type="category" width={90} tick={{ fontSize: 11, fill: '#475569', fontWeight: 500 }} axisLine={false} tickLine={false} />
+                          <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                          <Bar dataKey="count" fill="url(#programGradient)" radius={[0, 6, 6, 0]} barSize={24} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Geographic Distribution */}
+                  <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
+                    <CardHeader className="pb-2 pt-5 px-6">
+                      <CardTitle className="text-sm font-semibold text-slate-800">Top Municipalities</CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-72 px-4 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData.geoDistribution} margin={{ top: 10, bottom: 20 }}>
+                          <defs>
+                            <linearGradient id="geoGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#38bdf8" />
+                              <stop offset="100%" stopColor="#0284c7" />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                          <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} angle={-25} textAnchor="end" height={40} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                          <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                          <Bar dataKey="count" fill="url(#geoGradient)" radius={[6, 6, 0, 0]} barSize={32} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Enrollment Trends */}
+                  <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
+                    <CardHeader className="pb-2 pt-5 px-6">
+                      <CardTitle className="text-sm font-semibold text-slate-800">Sync Trends (Last 7 Days)</CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-72 px-4 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={chartData.enrollmentTrends} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
+                              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                          <XAxis 
+                            dataKey="date" 
+                            tick={{ fontSize: 11, fill: '#64748b' }} 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tickFormatter={(val) => {
+                              const d = new Date(val);
+                              return `${d.toLocaleString('en-US', { month: 'short' })} ${d.getDate()}`;
+                            }} 
+                          />
+                          <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                          <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                          <Area type="monotone" dataKey="count" stroke="#10b981" strokeWidth={3} fillOpacity={1} fill="url(#trendGradient)" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+                </div>
               </div>
             </ScrollArea>
           </TabsContent>
@@ -844,10 +1042,6 @@ export function AdminPortalWorkspace({
             </ScrollArea>
           </TabsContent>
 
-          <TabsContent value="directory" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
-            <AdminSchoolDirectory />
-          </TabsContent>
-
           <TabsContent value="import-logs" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
             <ScrollArea className="h-full">
               <div className="mx-auto max-w-4xl p-3 sm:p-4 space-y-4">
@@ -1031,6 +1225,139 @@ export function AdminPortalWorkspace({
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          <TabsContent value="archives" className="m-0 mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
+            <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-900">Archived Students</h2>
+                  <p className="text-sm text-slate-500">Historical records of previously enrolled students.</p>
+                </div>
+              </div>
+
+              {!selectedArchiveFolder ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                  {archiveFolders.map(folder => (
+                    <Card key={folder.date} className="relative cursor-pointer transition-colors hover:bg-slate-50" onClick={() => setSelectedArchiveFolder(folder.date)}>
+                      <div className="absolute top-2 right-2 flex gap-1 z-10">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-emerald-600 hover:bg-emerald-100"
+                          title="Restore Folder"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!confirm(`Restore all students from ${folder.label}?`)) return;
+                            const folderStudents = studentRows.filter(s => s.enrollmentStatus === "Archived" && (s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt))) === folder.date);
+                            updateStudentStatusByIds(folderStudents.map(s => s.id), "Active");
+                          }}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-rose-600 hover:bg-rose-100"
+                          title="Delete Folder"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!confirm(`Permanently delete all students from ${folder.label}? This cannot be undone.`)) return;
+                            const folderStudents = studentRows.filter(s => s.enrollmentStatus === "Archived" && (s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt))) === folder.date);
+                            deleteStudentsByIds(folderStudents.map(s => s.id));
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                      <CardContent className="flex flex-col items-center justify-center space-y-2 p-6 text-center">
+                        <Folder className="h-10 w-10 text-slate-400" />
+                        <h3 className="text-sm font-semibold text-slate-800">{folder.label}</h3>
+                        <p className="text-xs text-slate-500">{folder.count} students</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                  {archiveFolders.length === 0 && (
+                    <div className="col-span-full flex h-32 items-center justify-center text-slate-500">
+                      No archived folders found.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex min-h-0 flex-1 flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <Button variant="outline" className="w-fit gap-2" onClick={() => setSelectedArchiveFolder(null)}>
+                      <ChevronLeft className="h-4 w-4" /> Back to Folders
+                    </Button>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" className="gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => {
+                        if (!confirm(`Restore all students from ${selectedArchiveFolder}?`)) return;
+                        const folderStudents = studentRows.filter(s => s.enrollmentStatus === "Archived" && (s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt))) === selectedArchiveFolder);
+                        updateStudentStatusByIds(folderStudents.map(s => s.id), "Active");
+                        setSelectedArchiveFolder(null);
+                      }}>
+                        <RotateCcw className="h-4 w-4" /> Restore Folder
+                      </Button>
+                      <Button variant="outline" className="gap-2 border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => {
+                        if (!confirm(`Permanently delete all students from ${selectedArchiveFolder}? This cannot be undone.`)) return;
+                        const folderStudents = studentRows.filter(s => s.enrollmentStatus === "Archived" && (s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt))) === selectedArchiveFolder);
+                        deleteStudentsByIds(folderStudents.map(s => s.id));
+                        setSelectedArchiveFolder(null);
+                      }}>
+                        <Trash2 className="h-4 w-4" /> Delete Folder
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                    <ScrollArea className="flex-1">
+                      <Table>
+                        <TableHeader className="sticky top-0 z-10 bg-slate-50/90 backdrop-blur">
+                          <TableRow>
+                            <TableHead className="w-[120px]">Student #</TableHead>
+                            <TableHead>Full Name</TableHead>
+                            <TableHead>Program</TableHead>
+                            <TableHead>Archived Date</TableHead>
+                            <TableHead className="w-[120px] text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {studentRows
+                            .filter(s => s.enrollmentStatus === "Archived" && (s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt))) === selectedArchiveFolder)
+                            .map((student) => (
+                            <TableRow key={student.id}>
+                              <TableCell className="font-medium text-slate-900">{student.studentNumber}</TableCell>
+                              <TableCell>{student.fullName}</TableCell>
+                              <TableCell>
+                                <div className="flex flex-col">
+                                  <span className="truncate">{student.program}</span>
+                                  {student.collegeName !== "Unknown" && <span className="text-[10px] text-slate-500">{student.collegeName}</span>}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-slate-500">
+                                {toInputDate(student.archivedAt || student.processedAt || student.syncedAt)}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end items-center gap-1">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-emerald-600" onClick={() => updateStudentStatusByIds([student.id], "Active")} title="Restore to Active">
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600" onClick={() => startEditStudent(student)} title="Edit student details">
+                                    <Edit className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-700" onClick={() => deleteStudentsByIds([student.id])} title="Permanently Delete">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </ScrollArea>
+                  </div>
+                </div>
+              )}
+            </div>
+          </TabsContent>
+
         </main>
       </Tabs>
     </div>

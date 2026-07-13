@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Edit, Plus, RefreshCw, Trash2, MapPin } from "lucide-react";
+import { Edit, Plus, RefreshCw, Trash2, MapPin, Upload, Download } from "lucide-react";
 import type { SchoolRegistry as School } from "@shared/schema";
 import { api } from "@shared/routes";
 import { getSchoolStatus, hasCoordinates } from "@shared/schoolRegistry";
@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -52,7 +53,50 @@ export function AdminSchoolRegistry({
 }: AdminSchoolRegistryProps) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const { toast } = useToast();
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const res = await fetch("/api/admin/directory/import", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      
+      if (data.success) {
+        toast({ title: "Import Successful", description: data.message });
+        void queryClient.invalidateQueries({ queryKey: [api.schoolRegistry.list.path] });
+      } else {
+        toast({ title: "Import Failed", description: data.message, variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Upload Error", description: "An error occurred while uploading.", variant: "destructive" });
+    } finally {
+      setIsUploading(false);
+      event.target.value = "";
+    }
+  };
+
+  const handleExportJson = () => {
+    const jsonString = JSON.stringify(filteredSchools, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "schools_directory.json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   const handleBulkDelete = async () => {
     try {
@@ -170,10 +214,26 @@ export function AdminSchoolRegistry({
             One GIS entity per school - coordinates, municipality, verification.
           </p>
         </div>
-        <Button className={cn("gap-2", compact ? "h-8 px-3 text-xs" : "h-10")} onClick={onAdd}>
-          <Plus className="h-3.5 w-3.5" />
-          Add school
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={handleExportJson} className="gap-2 shadow-sm h-9">
+            <Download className="w-4 h-4" />
+            Export JSON
+          </Button>
+          
+          <div className="relative">
+            <Input 
+              type="file" 
+              accept=".xlsx,.xls" 
+              onChange={handleFileUpload} 
+              disabled={isUploading}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+            />
+            <Button size="sm" className="gap-2 shadow-sm h-9" disabled={isUploading}>
+              <Upload className="w-4 h-4" />
+              {isUploading ? "Importing..." : "Import Updated Excel"}
+            </Button>
+          </div>
+        </div>
       </div>
 
       <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
