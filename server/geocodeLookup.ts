@@ -104,5 +104,24 @@ export async function geocodeSchoolPreview(
 
 
   // No match found in the master directory or local DB
+  // As a read-only preview we can still check the in-memory master directory for a likely match
+  try {
+    const all = await storage.listSchoolRegistry();
+    const matcher = new SchoolMatchingEngine(all, []);
+    const matchResult = matcher.match(trimmed);
+    if (matchResult.status === "matched" && matchResult.school && hasCoordinates(matchResult.school)) {
+      return {
+        latitude: matchResult.school.latitude!,
+        longitude: matchResult.school.longitude!,
+        displayName: matchResult.school.schoolName,
+        source: "master-directory",
+        schoolId: matchResult.school.id,
+        reused: true,
+      };
+    }
+  } catch {
+    // on error, just continue to return null
+  }
+
   return null;
 }

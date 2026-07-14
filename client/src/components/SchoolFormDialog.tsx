@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { api } from "@shared/routes";
-import { requestGeocodeSchoolOrThrow } from "@/lib/geocodeSchoolApi";
 import { type SchoolRegistry as SchoolRecord } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
 import {
@@ -15,7 +14,6 @@ import {
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -28,9 +26,14 @@ import {
   SchoolNameAutocomplete,
   type SchoolSearchSelection,
 } from "@/components/SchoolNameAutocomplete";
-import { Building2, Loader2, MapPin, School as SchoolIcon, Sparkles, Users } from "lucide-react";
+import { Loader2, MapPin, School as SchoolIcon, Sparkles, Navigation } from "lucide-react";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
+import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
+
+const libraries: "places"[] = ["places"];
+
+const LAGUNA_CENTER = { lat: 14.1667, lng: 121.25 };
 
 interface SchoolFormDialogProps {
   open: boolean;
@@ -51,10 +54,17 @@ export function SchoolFormDialog({
   const updateMutation = useUpdateSchool();
   const { toast } = useToast();
   const [isGeocoding, setIsGeocoding] = useState(false);
-  const [isResolvingPlace, setIsResolvingPlace] = useState(false);
   const [geocodePreview, setGeocodePreview] = useState<string | null>(null);
   const [selectedSavedSchoolId, setSelectedSavedSchoolId] = useState<number | null>(null);
   const selectionConfirmedRef = useRef(false);
+  const [mapCenter, setMapCenter] = useState(LAGUNA_CENTER);
+  const [markerPos, setMarkerPos] = useState<{ lat: number; lng: number } | null>(null);
+
+  const { isLoaded } = useJsApiLoader({
+    id: "google-map-script",
+    googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
+    libraries,
+  });
 
   const formSchema = api.schoolRegistry.create.input.extend({
     municipality: z.string().trim().min(1, "Municipality is required"),
@@ -69,42 +79,58 @@ export function SchoolFormDialog({
     resolver: zodResolver(formSchema),
     defaultValues: {
       schoolName: "",
-      municipality: "Laguna",
+      municipality: "",
       province: "Laguna",
       institutionType: "Feeder Institution",
-      latitude: defaultCoordinates?.latitude ?? 14.1667,
-      longitude: defaultCoordinates?.longitude ?? 121.2500,
+      latitude: defaultCoordinates?.latitude ?? LAGUNA_CENTER.lat,
+      longitude: defaultCoordinates?.longitude ?? LAGUNA_CENTER.lng,
       altitude: null,
       studentCount: 0,
       isActive: true,
-      
       source: "Manual Entry",
     },
   });
+
+  const latVal = form.watch("latitude");
+  const lngVal = form.watch("longitude");
+
+  // Sync marker when lat/lng fields change
+  useEffect(() => {
+    if (latVal && lngVal && !isNaN(Number(latVal)) && !isNaN(Number(lngVal))) {
+      const pos = { lat: Number(latVal), lng: Number(lngVal) };
+      setMarkerPos(pos);
+    }
+  }, [latVal, lngVal]);
 
   useEffect(() => {
     if (open) {
       selectionConfirmedRef.current = Boolean(initialData);
       setSelectedSavedSchoolId(initialData?.id ?? null);
       setGeocodePreview(null);
+      
+      const lat = initialData?.latitude ?? defaultCoordinates?.latitude ?? LAGUNA_CENTER.lat;
+      const lng = initialData?.longitude ?? defaultCoordinates?.longitude ?? LAGUNA_CENTER.lng;
+      
+      setMapCenter({ lat, lng });
+      setMarkerPos({ lat, lng });
+
       if (initialData) {
         form.reset({
           schoolName: initialData.schoolName,
           municipality: initialData.municipality || "Laguna",
           province: initialData.province || "Laguna",
           institutionType: initialData.schoolType || "Feeder Institution",
-          latitude: initialData.latitude ?? 14.1667,
-          longitude: initialData.longitude ?? 121.2500,
-          altitude: initialData.id ?? null,
-          studentCount: initialData.id /* no student count */,
+          latitude: lat,
+          longitude: lng,
+          altitude: null,
+          studentCount: 0,
           isActive: initialData.isActive ?? true,
-          
           source: initialData.source || "Manual Entry",
         });
       } else if (defaultCoordinates) {
         form.reset({
           schoolName: "",
-          municipality: "Laguna",
+          municipality: "",
           province: "Laguna",
           institutionType: "Feeder Institution",
           latitude: defaultCoordinates.latitude,
@@ -112,21 +138,19 @@ export function SchoolFormDialog({
           altitude: null,
           studentCount: 0,
           isActive: true,
-          
           source: "Manual Entry",
         });
       } else {
         form.reset({
           schoolName: "",
-          municipality: "Laguna",
+          municipality: "",
           province: "Laguna",
           institutionType: "Feeder Institution",
-          latitude: 14.1667,
-          longitude: 121.2500,
+          latitude: LAGUNA_CENTER.lat,
+          longitude: LAGUNA_CENTER.lng,
           altitude: null,
           studentCount: 0,
           isActive: true,
-          
           source: "Manual Entry",
         });
       }
@@ -146,13 +170,27 @@ export function SchoolFormDialog({
       if (hasCoordinates(school)) {
         form.setValue("latitude", school.latitude!, { shouldDirty: true, shouldValidate: true });
         form.setValue("longitude", school.longitude!, { shouldDirty: true, shouldValidate: true });
-        form.setValue("isActive", school.isActive ? true : true, { shouldDirty: true });
+        form.setValue("isActive", true, { shouldDirty: true });
+        const pos = { lat: school.latitude!, lng: school.longitude! };
+        setMarkerPos(pos);
+        setMapCenter(pos);
         setGeocodePreview(school.schoolName);
       } else {
-        setGeocodePreview(`${school.schoolName} — select Locate to fetch coordinates`);
+        setGeocodePreview(`${school.schoolName} — click Locate to fetch coordinates`);
       }
     }
   };
+
+  // When user clicks on the map, move the pin and update form fields
+  const onMapClick = useCallback((e: google.maps.MapMouseEvent) => {
+    if (!e.latLng) return;
+    const lat = e.latLng.lat();
+    const lng = e.latLng.lng();
+    setMarkerPos({ lat, lng });
+    form.setValue("latitude", lat, { shouldDirty: true, shouldValidate: true });
+    form.setValue("longitude", lng, { shouldDirty: true, shouldValidate: true });
+    setGeocodePreview(`Manual pin: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+  }, [form]);
 
   const geolocateCurrentSchool = async () => {
     const name = form.getValues("schoolName")?.trim();
@@ -167,14 +205,56 @@ export function SchoolFormDialog({
       return;
     }
 
+    if (!window.google || !window.google.maps) {
+      toast({ title: "Maps not ready", description: "Google Maps not loaded yet.", variant: "destructive" });
+      return;
+    }
+
     setIsGeocoding(true);
     try {
-      const result = await requestGeocodeSchoolOrThrow({ schoolName: name, municipality });
-      form.setValue("latitude", result.latitude, { shouldDirty: true, shouldValidate: true });
-      form.setValue("longitude", result.longitude, { shouldDirty: true, shouldValidate: true });
+      const geocoder = new window.google.maps.Geocoder();
+      const currentMunicipality = form.getValues("municipality")?.trim();
+      const searchQuery = currentMunicipality
+        ? `${name}, ${currentMunicipality}, Philippines`
+        : `${name}, Philippines`;
+
+      const response = await geocoder.geocode({ address: searchQuery, region: "ph" });
+      if (!response.results || response.results.length === 0) throw new Error("No results found on Google Maps.");
+
+      const res = response.results[0];
+      const lat = res.geometry.location.lat();
+      const lng = res.geometry.location.lng();
+      
+      // Extract municipality and province from address components
+      let detectedMunicipality = "";
+      let detectedProvince = "";
+      for (const comp of res.address_components) {
+        if (comp.types.includes("locality")) {
+          detectedMunicipality = comp.long_name;
+        }
+        if (comp.types.includes("administrative_area_level_2")) {
+          detectedProvince = comp.long_name;
+        }
+        if (!detectedProvince && comp.types.includes("administrative_area_level_1")) {
+          detectedProvince = comp.long_name;
+        }
+      }
+
+      form.setValue("latitude", lat, { shouldDirty: true, shouldValidate: true });
+      form.setValue("longitude", lng, { shouldDirty: true, shouldValidate: true });
       form.setValue("isActive", true, { shouldDirty: true });
-      form.setValue("source", result.source === "Google Maps" ? "Google Geocoding Manual Assist" : "Geocoding Manual Assist", { shouldDirty: true });
-      setGeocodePreview(result.displayName);
+      form.setValue("source", "Google Geocoding Manual Assist", { shouldDirty: true });
+      if (detectedMunicipality) {
+        form.setValue("municipality", detectedMunicipality, { shouldDirty: true });
+      }
+      if (detectedProvince) {
+        form.setValue("province", detectedProvince, { shouldDirty: true });
+      }
+
+      const pos = { lat, lng };
+      setMarkerPos(pos);
+      setMapCenter(pos);
+      setGeocodePreview(res.formatted_address);
       selectionConfirmedRef.current = true;
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to geolocate school.";
@@ -219,7 +299,7 @@ export function SchoolFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto overflow-x-visible p-0 border-0 shadow-2xl glass-panel">
+      <DialogContent className="sm:max-w-[680px] max-h-[90vh] overflow-y-auto overflow-x-visible p-0 border-0 shadow-2xl glass-panel">
         <div className="p-6 bg-gradient-to-br from-card/90 to-muted/80">
           <DialogHeader>
             <DialogTitle className="text-2xl font-bold flex items-center gap-2">
@@ -227,7 +307,7 @@ export function SchoolFormDialog({
               {initialData ? "Edit Origin School" : "Map New Origin School"}
             </DialogTitle>
             <DialogDescription>
-              Search the local master directory first. Schools are not created while you type.
+              Search the local master directory first. Click on the map to place the pin manually, or use Locate.
             </DialogDescription>
           </DialogHeader>
 
@@ -250,122 +330,34 @@ export function SchoolFormDialog({
                       }}
                       onSelect={applySchoolSelection}
                       existingSchools={existingSchools}
-                      placeholder="E.g. STI Calamba or Laguna Science High School"
-                      inputClassName="h-10"
                     />
-                    <FormDescription className="text-xs">
-                      Use arrow keys, touch, or Enter to select.
-                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
 
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control as any}
                   name="municipality"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Municipality</FormLabel>
-                      <div className="relative">
-                        <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                        <FormControl>
-                          <Input placeholder="Optional — E.g. Calamba" className="pl-9" {...field} />
-                        </FormControl>
-                      </div>
+                      <FormControl>
+                        <Input placeholder="e.g. Biñan" {...field} />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-
                 <FormField
                   control={form.control as any}
                   name="province"
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Province</FormLabel>
-                      <div className="relative">
-                        <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                        <FormControl>
-                          <Input placeholder="Laguna" className="pl-9" {...field} />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control as any}
-                  name="institutionType"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Institution Type</FormLabel>
-                      <div className="relative">
-                        <Building2 className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                        <FormControl>
-                          <Input placeholder="Public High School" className="pl-9" {...field} />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <FormField
-                  control={form.control as any}
-                  name="latitude"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Latitude</FormLabel>
-                      <div className="relative">
-                        <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                        <FormControl>
-                          <Input type="number" step="any" className="pl-9" {...field} />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control as any}
-                  name="longitude"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Longitude</FormLabel>
-                      <div className="relative">
-                        <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                        <FormControl>
-                          <Input type="number" step="any" className="pl-9" {...field} />
-                        </FormControl>
-                      </div>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control as any}
-                  name="altitude"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Altitude</FormLabel>
                       <FormControl>
-                        <Input
-                          type="number"
-                          step="any"
-                          placeholder="Optional"
-                          {...field}
-                          value={field.value ?? ""}
-                          onChange={(event) =>
-                            field.onChange(event.target.value === "" ? null : event.target.value)
-                          }
-                        />
+                        <Input placeholder="e.g. Laguna" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -373,25 +365,111 @@ export function SchoolFormDialog({
                 />
               </div>
 
+              {/* Mini Map */}
+              <div className="rounded-xl overflow-hidden border border-slate-200 shadow-sm">
+                <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <p className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
+                    <MapPin className="h-3.5 w-3.5 text-indigo-500" />
+                    Location Pin — click map to adjust
+                  </p>
+                  {markerPos && (
+                    <span className="font-mono text-[10px] text-slate-500">
+                      {markerPos.lat.toFixed(5)}, {markerPos.lng.toFixed(5)}
+                    </span>
+                  )}
+                </div>
+                <div className="h-[220px] w-full bg-slate-100">
+                  {isLoaded ? (
+                    <GoogleMap
+                      mapContainerStyle={{ width: "100%", height: "100%" }}
+                      center={mapCenter}
+                      zoom={markerPos ? 14 : 11}
+                      onClick={onMapClick}
+                      options={{
+                        disableDefaultUI: true,
+                        zoomControl: true,
+                        mapTypeControl: false,
+                        streetViewControl: false,
+                        styles: [{ featureType: "poi", elementType: "labels", stylers: [{ visibility: "off" }] }],
+                      }}
+                    >
+                      {markerPos && (
+                        <Marker
+                          position={markerPos}
+                          draggable
+                          onDragEnd={(e) => {
+                            if (!e.latLng) return;
+                            const lat = e.latLng.lat();
+                            const lng = e.latLng.lng();
+                            setMarkerPos({ lat, lng });
+                            form.setValue("latitude", lat, { shouldDirty: true, shouldValidate: true });
+                            form.setValue("longitude", lng, { shouldDirty: true, shouldValidate: true });
+                            setGeocodePreview(`Manual pin: ${lat.toFixed(5)}, ${lng.toFixed(5)}`);
+                          }}
+                        />
+                      )}
+                    </GoogleMap>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-sm text-slate-400">
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading map…
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Coordinates read-only display */}
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control as any}
+                  name="latitude"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Latitude</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="any" placeholder="14.xxxx" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value === "" ? null : Number(e.target.value))} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="longitude"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Longitude</FormLabel>
+                      <FormControl>
+                        <Input type="number" step="any" placeholder="121.xxxx" {...field} value={field.value ?? ""} onChange={e => field.onChange(e.target.value === "" ? null : Number(e.target.value))} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              {/* Geocode action */}
               <div className="rounded-lg border border-primary/15 bg-primary/5 p-3">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="flex items-center gap-2 text-sm font-semibold text-primary">
                       <Sparkles className="h-4 w-4" />
-                      Geolocation (on demand)
+                      Auto-Locate via Google Maps
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Locate previews coordinates until you save.
+                      Or click directly on the map / drag the pin to set manually.
                     </p>
-                    {geocodePreview ? (
-                      <p className="mt-2 text-xs font-medium text-slate-700">Match: {geocodePreview}</p>
-                    ) : null}
+                    {geocodePreview && (
+                      <p className="mt-2 text-xs font-medium text-slate-700">
+                        <Navigation className="h-3 w-3 inline mr-1 text-indigo-500" />
+                        {geocodePreview}
+                      </p>
+                    )}
                   </div>
                   <Button
                     type="button"
                     variant="outline"
                     className="shrink-0 gap-2 bg-white"
-                    disabled={isGeocoding || isResolvingPlace}
+                    disabled={isGeocoding}
                     onClick={() => void geolocateCurrentSchool()}
                   >
                     {isGeocoding ? <Loader2 className="h-4 w-4 animate-spin" /> : <MapPin className="h-4 w-4" />}
@@ -400,12 +478,41 @@ export function SchoolFormDialog({
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control as any}
+                  name="institutionType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Institution Type</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Feeder Institution" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control as any}
+                  name="source"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Source</FormLabel>
+                      <FormControl>
+                        <Input placeholder="e.g. Manual Entry" {...field} value={field.value ?? ""} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
               <div className="pt-4 flex justify-end gap-3">
                 <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" disabled={isPending || isResolvingPlace} className="font-semibold shadow-lg shadow-primary/20">
-                  {isPending || isResolvingPlace ? "Saving..." : initialData ? "Update School" : selectedSavedSchoolId ? "Update Verified School" : "Save School"}
+                <Button type="submit" disabled={isPending} className="font-semibold shadow-lg shadow-primary/20">
+                  {isPending ? "Saving..." : initialData ? "Update School" : selectedSavedSchoolId ? "Update Verified School" : "Save School"}
                 </Button>
               </div>
             </form>

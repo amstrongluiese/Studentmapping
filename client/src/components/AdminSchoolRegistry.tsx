@@ -61,7 +61,9 @@ export function AdminSchoolRegistry({
   const [schoolsToReview, setSchoolsToReview] = useState<School[]>([]);
   
   const [registryPage, setRegistryPage] = useState(1);
-  const [registryStatusFilter, setRegistryStatusFilter] = useState("All Statuses");
+  const [registryStatusFilter, setRegistryStatusFilter] = useState("All");
+  const [registryMunicipalityFilter, setRegistryMunicipalityFilter] = useState("All");
+  const [registryTypeFilter, setRegistryTypeFilter] = useState("All");
   const [registrySort, setRegistrySort] = useState("Newest");
 
   const { toast } = useToast();
@@ -138,13 +140,34 @@ export function AdminSchoolRegistry({
     setIsReviewModalOpen(true);
   };
 
+  const municipalityOptions = useMemo(() => {
+    const set = new Set(filteredSchools.map(s => s.municipality?.trim()).filter(Boolean) as string[]);
+    return Array.from(set).sort();
+  }, [filteredSchools]);
+
+  const typeOptions = useMemo(() => {
+    const set = new Set(filteredSchools.map(s => s.schoolType?.trim()).filter(Boolean) as string[]);
+    return Array.from(set).sort();
+  }, [filteredSchools]);
+
   const processedSchools = useMemo(() => {
     return filteredSchools
       .filter((school) => {
-        if (registryStatusFilter === "All Statuses") return true;
-        const status = duplicateIds.has(school.id) ? "Duplicate Entry" : getSchoolStatus(school);
-        if (registryStatusFilter === "Verified") return school.isActive && hasCoordinates(school);
-        return status === registryStatusFilter;
+        // Status filter
+        if (registryStatusFilter !== "All") {
+          const status = duplicateIds.has(school.id) ? "Duplicate Entry" : getSchoolStatus(school);
+          if (registryStatusFilter === "Verified" && !(school.isActive && hasCoordinates(school))) return false;
+          if (registryStatusFilter !== "Verified" && status !== registryStatusFilter) return false;
+        }
+        // Municipality filter
+        if (registryMunicipalityFilter !== "All") {
+          if ((school.municipality?.trim() || "") !== registryMunicipalityFilter) return false;
+        }
+        // School type filter
+        if (registryTypeFilter !== "All") {
+          if ((school.schoolType?.trim() || "") !== registryTypeFilter) return false;
+        }
+        return true;
       })
       .sort((a, b) => {
         if (registrySort === "School Name (A-Z)") return a.schoolName.localeCompare(b.schoolName);
@@ -155,9 +178,9 @@ export function AdminSchoolRegistry({
           if (aMiss && !bMiss) return -1;
           if (!aMiss && bMiss) return 1;
         }
-        return b.id - a.id; // Newest default
+        return b.id - a.id;
       });
-  }, [filteredSchools, duplicateIds, registryStatusFilter, registrySort]);
+  }, [filteredSchools, duplicateIds, registryStatusFilter, registryMunicipalityFilter, registryTypeFilter, registrySort]);
 
   const pageSize = 25;
   const totalPages = Math.max(1, Math.ceil(processedSchools.length / pageSize));
@@ -279,23 +302,52 @@ export function AdminSchoolRegistry({
         </div>
       </div>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-lg bg-slate-50/80 p-2">
+      <div className="flex flex-col gap-2 rounded-lg bg-slate-50/80 p-2">
         <div className="flex flex-wrap items-center gap-2">
+          {/* Status */}
           <Select value={registryStatusFilter} onValueChange={(v) => { setRegistryStatusFilter(v); setRegistryPage(1); }}>
-            <SelectTrigger className="h-8 w-[160px] text-xs">
-              <SelectValue placeholder="Filter by status" />
+            <SelectTrigger className="h-8 w-[175px] text-xs">
+              <SelectValue placeholder="All Statuses" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="All Statuses">All Statuses</SelectItem>
-              <SelectItem value="Verified">Verified</SelectItem>
-              <SelectItem value="Missing Coordinates">Missing Coordinates</SelectItem>
-              <SelectItem value="Auto-Located">Auto-Located</SelectItem>
-              <SelectItem value="Needs Review">Needs Review</SelectItem>
-              <SelectItem value="Duplicate Entry">Duplicate Entry</SelectItem>
+              <SelectItem value="All">All Statuses</SelectItem>
+              <SelectItem value="Verified">✅ Verified</SelectItem>
+              <SelectItem value="Missing Coordinates">⚠️ Missing Coordinates</SelectItem>
+              <SelectItem value="Auto-Located">🔍 Auto-Located</SelectItem>
+              <SelectItem value="Needs Review">🔄 Needs Review</SelectItem>
+              <SelectItem value="Duplicate Entry">🗂 Duplicate Entry</SelectItem>
             </SelectContent>
           </Select>
+
+          {/* Municipality */}
+          <Select value={registryMunicipalityFilter} onValueChange={(v) => { setRegistryMunicipalityFilter(v); setRegistryPage(1); }}>
+            <SelectTrigger className="h-8 w-[175px] text-xs">
+              <SelectValue placeholder="All Municipalities" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All">All Municipalities</SelectItem>
+              {municipalityOptions.map(m => (
+                <SelectItem key={m} value={m}>{m}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* School Type */}
+          <Select value={registryTypeFilter} onValueChange={(v) => { setRegistryTypeFilter(v); setRegistryPage(1); }}>
+            <SelectTrigger className="h-8 w-[175px] text-xs">
+              <SelectValue placeholder="All Types" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All">All Types</SelectItem>
+              {typeOptions.map(t => (
+                <SelectItem key={t} value={t}>{t}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Sort */}
           <Select value={registrySort} onValueChange={(v) => { setRegistrySort(v); setRegistryPage(1); }}>
-            <SelectTrigger className="h-8 w-[160px] text-xs">
+            <SelectTrigger className="h-8 w-[185px] text-xs">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
@@ -305,12 +357,30 @@ export function AdminSchoolRegistry({
               <SelectItem value="Missing Coordinates First">Missing Coordinates First</SelectItem>
             </SelectContent>
           </Select>
+
+          {/* Reset filters */}
+          {(registryStatusFilter !== "All" || registryMunicipalityFilter !== "All" || registryTypeFilter !== "All") && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1.5 text-xs text-slate-500 hover:text-slate-900"
+              onClick={() => {
+                setRegistryStatusFilter("All");
+                setRegistryMunicipalityFilter("All");
+                setRegistryTypeFilter("All");
+                setRegistryPage(1);
+              }}
+            >
+              ✕ Clear Filters
+            </Button>
+          )}
         </div>
+
         {selectedIds.size > 0 && (
-          <Button 
-            size="sm" 
-            variant="outline" 
-            className="h-8 gap-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800" 
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 gap-2 self-end border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
             onClick={handleBulkGeolocate}
           >
             <MapPin className="h-3.5 w-3.5" />

@@ -346,18 +346,46 @@ export default function Dashboard() {
 
   const geolocateSchool = async (school: SchoolRegistry) => {
     try {
-      const { requestGeocodeSchoolOrThrow } = await import("@/lib/geocodeSchoolApi");
-      const municipality = school.municipality?.trim() || undefined;
-      const result = await requestGeocodeSchoolOrThrow({
-        schoolName: school.schoolName,
-        municipality,
-      });
+      if (!window.google || !window.google.maps || !window.google.maps.places) {
+        throw new Error("Google Maps API is not loaded yet.");
+      }
+      
+      const geocoder = new window.google.maps.Geocoder();
+      const searchLocation = school.municipality
+        ? `${school.schoolName}, ${school.municipality}, Philippines`
+        : `${school.schoolName}, Philippines`;
+      
+      const response = await geocoder.geocode({ address: searchLocation, region: "ph" });
+      if (!response.results || response.results.length === 0) {
+        throw new Error("No results found on Google Maps.");
+      }
+      
+      const res = response.results[0];
+      const lat = res.geometry.location.lat();
+      const lng = res.geometry.location.lng();
+
+      // Extract municipality and province from address components
+      let detectedMunicipality = "";
+      let detectedProvince = "";
+      for (const comp of res.address_components) {
+        if (comp.types.includes("locality")) detectedMunicipality = comp.long_name;
+        if (comp.types.includes("administrative_area_level_2")) detectedProvince = comp.long_name;
+        if (!detectedProvince && comp.types.includes("administrative_area_level_1")) detectedProvince = comp.long_name;
+      }
+
       await updateSchool.mutateAsync({
         id: school.id,
-        latitude: result.latitude,
-        longitude: result.longitude,
+        latitude: lat,
+        longitude: lng,
         isActive: true,
-        source: result.source === "Google Maps" ? "Google Geocoding Manual Assist" : "Geocoding Manual Assist",
+        source: "Google Geocoding Manual Assist",
+        ...(detectedMunicipality ? { municipality: detectedMunicipality } : {}),
+        ...(detectedProvince ? { province: detectedProvince } : {}),
+      });
+      
+      toast({
+        title: "Geolocation Successful",
+        description: `${school.schoolName} → ${detectedMunicipality || "?"}, ${detectedProvince || "?"} (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to geolocate school.";
@@ -794,7 +822,7 @@ function SelectedClusterPanel({
                 <p className="truncate text-sm font-bold text-slate-900">{school.schoolName}</p>
                 <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-600">
                   <MapIcon className="mt-[2px] h-3 w-3 shrink-0" />
-                  <span className="leading-snug">{school.municipality || "Laguna"}</span>
+                  <span className="leading-snug">{school.municipality || school.province || "—"}</span>
                 </p>
                 <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-600">
                   <Layers className="mt-[2px] h-3 w-3 shrink-0" />
@@ -1202,7 +1230,7 @@ function ProgramSchoolList({ schools }: { schools: any[] }) {
               />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs font-bold text-slate-900">{school.schoolName}</p>
-                <p className="truncate text-[10px] text-slate-500">{school.municipality || "Laguna"} · {school.dominantProgram?.code || "Unknown"}</p>
+                <p className="truncate text-[10px] text-slate-500">{school.municipality || school.province || "—"} · {school.dominantProgram?.code || "Unknown"}</p>
               </div>
               <div className="shrink-0 text-right">
                 <p className="text-xs font-black text-slate-900">{school.filteredStudentCount.toLocaleString()}</p>

@@ -14,14 +14,14 @@ function readErrorMessage(payload: unknown, fallback: string): string {
 }
 
 /** Build a clean JSON body — omits empty municipality so the API can do name-only lookup. */
-export function buildGeocodeRequestBody(input: GeocodeSchoolRequest): { schoolName: string; municipality?: string } {
-  const schoolName = input.schoolName?.trim() ?? "";
-  if (schoolName.length < 2) {
+export function buildGeocodeRequestBody(input: GeocodeSchoolRequest): { name: string; municipality?: string } {
+  const name = input.schoolName?.trim() ?? "";
+  if (name.length < 2) {
     throw new Error("School name is required");
   }
 
   const municipality = input.municipality?.trim();
-  const body: { schoolName: string; municipality?: string } = { schoolName };
+  const body: { name: string; municipality?: string } = { name };
   if (municipality) body.municipality = municipality;
   return body;
 }

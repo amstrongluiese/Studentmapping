@@ -518,18 +518,68 @@ export async function searchSchools(query: string, limit = 25) {
   const q = query.trim();
   if (!q) return storage.listSchoolRegistry();
 
+  // Try normalized exact/contains first to prefer strong matches
+  const normalized = normalizeSchoolName(q);
+
+  // Build patterns for ILIKE search
   const pattern = `%${q}%`;
-  return getDb()
+  const normPattern = `%${normalized}%`;
+
+  // Query DB for a broad set of candidate matches (name, normalized, municipality, province, address)
+  const rows = await getDb()
     .select()
     .from(schoolRegistry)
     .where(
       or(
         ilike(schoolRegistry.schoolName, pattern),
-        ilike(schoolRegistry.normalizedSchoolName, pattern),
+        ilike(schoolRegistry.normalizedSchoolName, normPattern),
         ilike(schoolRegistry.municipality, pattern),
+        ilike(schoolRegistry.province, pattern),
+        ilike(schoolRegistry.address, pattern),
       ),
     )
-    .limit(limit);
+    .limit(Math.max(limit, 50));
+
+  // In-memory fuzzy ranking using SchoolMatchingEngine to promote better suggestions
+  try {
+    const all = await storage.listSchoolRegistry();
+    const engine = new SchoolMatchingEngine(all, []);
+    const matchRes = engine.match(q);
+
+    const results: typeof rows = [];
+
+    // If engine found a high-confidence match, prefer it first
+    if (matchRes.status === "matched" && matchRes.school) {
+      results.push(matchRes.school);
+    }
+
+    // Merge DB rows preserving uniqueness and keep order
+    const seen = new Set<number>(results.map(r => r.id));
+    for (const r of rows) {
+      if (!seen.has(r.id)) {
+        results.push(r);
+        seen.add(r.id);
+      }
+      if (results.length >= limit) break;
+    }
+
+    // If still short, add fuzzy suggestions from fuse (via engine suggestions)
+    if (results.length < limit) {
+      const fuzzy = engine.suggestions(q, limit * 2);
+      for (const f of fuzzy) {
+        if (!seen.has(f.id)) {
+          results.push(f);
+          seen.add(f.id);
+        }
+        if (results.length >= limit) break;
+      }
+    }
+
+    return results.slice(0, limit);
+  } catch (err) {
+    // On any error, fall back to DB-only result limited
+    return rows.slice(0, limit);
+  }
 }
 
 export async function verifySchoolMapping(input: VerifyMappingInput) {

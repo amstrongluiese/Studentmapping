@@ -64,6 +64,16 @@ export class SchoolMatchingEngine {
     });
   }
 
+  /**
+   * Return fuzzy suggestions from the internal Fuse index.
+   * This keeps the Fuse usage encapsulated and avoids touching private fields from outside.
+   */
+  public suggestions(query: string, limit = 5): SchoolRegistry[] {
+    if (!query) return [];
+    const results = this.fuse.search(query, { limit });
+    return results.map(r => r.item);
+  }
+
   private getAcronyms(name: string, municipality?: string | null): string[] {
     const cleanName = name.replace(/\([^)]*\)/g, '').trim();
     const words = cleanName.split(/[\s-]+/);
