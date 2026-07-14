@@ -34,6 +34,8 @@ import {
   buildProgramSchools,
   getProgramOptions,
   programFilterIsActive,
+  getProgramInfo,
+  isStudentActiveForProgramGis,
   type ProgramAnalytics,
   type ProgramFilters,
 } from "@shared/programIntelligence";
@@ -250,9 +252,45 @@ export default function Dashboard() {
     () => buildProgramSchools(schools, processedStudents, programFilters),
     [processedStudents, programFilters, schools],
   );
-  const programAnalytics = useMemo(() => buildProgramAnalytics(programSchools, programFilters), [programFilters, programSchools]);
+  const totalStudents = useMemo(() => {
+    return processedStudents.filter((student) => {
+      // 1. Check if student is active
+      if (!isStudentActiveForProgramGis(student)) return false;
+
+      // 2. Check if matches programFilters
+      const info = getProgramInfo(student.course);
+      if (!info) return !programFilterIsActive(programFilters);
+
+      if (programFilters.college !== ALL_PROGRAM_FILTER && info.department !== programFilters.college) return false;
+      if (programFilters.program !== ALL_PROGRAM_FILTER && info.program !== programFilters.program) return false;
+      if (programFilters.track !== ALL_PROGRAM_FILTER && (info.track || "General") !== programFilters.track) return false;
+      
+      return true;
+    }).length;
+  }, [processedStudents, programFilters]);
+
+  const programAnalytics = useMemo(() => {
+    const analytics = buildProgramAnalytics(programSchools, programFilters);
+    return {
+      ...analytics,
+      totalStudents,
+    };
+  }, [programFilters, programSchools, totalStudents]);
+
   const mappedSchools = useMemo(() => programSchools.filter(hasCoordinates), [programSchools]);
-  const totalStudents = programAnalytics.totalStudents;
+
+  const mappedStudentsCount = useMemo(() => {
+    return programSchools
+      .filter((school) => {
+        if (!hasCoordinates(school)) return false;
+        if (school.schoolName === "Unspecified") return false;
+        const lat = school.latitude;
+        const lng = school.longitude;
+        // Coordinates must lie strictly inside Laguna's bounding box
+        return lat >= 13.78 && lat <= 14.58 && lng >= 120.88 && lng <= 121.72;
+      })
+      .reduce((sum, school) => sum + school.filteredStudentCount, 0);
+  }, [programSchools]);
   
   const grandTotalStudents = useMemo(() => {
     // Determine which target to show based on filters
@@ -467,8 +505,6 @@ export default function Dashboard() {
                       onEditSchool={openEditSchool}
                     />
                   )}
-                  <Metric label="Total Schools Registered" value={schools.length} />
-                  <Metric label="Mapped Schools" value={mappedSchools.length} />
                   <Metric label={programFilterIsActive(programFilters) ? "Filtered Enrollees (GIS)" : "Mapped Enrollees (GIS)"} value={totalStudents} />
                   <Metric label={programFilterIsActive(programFilters) ? "Filtered Target" : "Overall Target"} value={grandTotalStudents} />
                   <Metric label="Municipalities" value={municipalityCount} />
@@ -518,9 +554,9 @@ export default function Dashboard() {
                     onEditSchool={openEditSchool}
                   />
                 )}
-                <Metric label="Total Schools Registered" value={schools.length} />
-                <Metric label="Mapped Schools" value={mappedSchools.length} />
-                <Metric label={programFilterIsActive(programFilters) ? "Filtered Enrollees (GIS)" : "Mapped Enrollees (GIS)"} value={totalStudents} />
+                <Metric label="Total Enrollees" value={totalStudents} />
+                <Metric label="Mapped Enrollees (GIS)" value={mappedStudentsCount} />
+                <Metric label="Unmapped / Distant" value={totalStudents - mappedStudentsCount} />
                 <Metric label={programFilterIsActive(programFilters) ? "Filtered Target" : "Overall Target"} value={grandTotalStudents} />
                 <Metric label="Municipalities" value={municipalityCount} />
                 <AnalyticsInsightPanel analytics={programAnalytics} />

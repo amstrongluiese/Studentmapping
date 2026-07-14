@@ -11,10 +11,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TableToolbar } from "@/components/ui/table-toolbar";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { UnmatchedSchoolsQueue } from "./UnmatchedSchoolsQueue";
+import { RegistryGeocodeReviewModal } from "./RegistryGeocodeReviewModal";
 import {
   Table,
   TableBody,
@@ -54,6 +56,14 @@ export function AdminSchoolRegistry({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  
+  const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
+  const [schoolsToReview, setSchoolsToReview] = useState<School[]>([]);
+  
+  const [registryPage, setRegistryPage] = useState(1);
+  const [registryStatusFilter, setRegistryStatusFilter] = useState("All Statuses");
+  const [registrySort, setRegistrySort] = useState("Newest");
+
   const { toast } = useToast();
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -120,6 +130,39 @@ export function AdminSchoolRegistry({
       setIsDeleting(false);
     }
   };
+
+  const handleBulkGeolocate = () => {
+    if (selectedIds.size === 0) return;
+    const selected = filteredSchools.filter(s => selectedIds.has(s.id));
+    setSchoolsToReview(selected);
+    setIsReviewModalOpen(true);
+  };
+
+  const processedSchools = useMemo(() => {
+    return filteredSchools
+      .filter((school) => {
+        if (registryStatusFilter === "All Statuses") return true;
+        const status = duplicateIds.has(school.id) ? "Duplicate Entry" : getSchoolStatus(school);
+        if (registryStatusFilter === "Verified") return school.isActive && hasCoordinates(school);
+        return status === registryStatusFilter;
+      })
+      .sort((a, b) => {
+        if (registrySort === "School Name (A-Z)") return a.schoolName.localeCompare(b.schoolName);
+        if (registrySort === "School Name (Z-A)") return b.schoolName.localeCompare(a.schoolName);
+        if (registrySort === "Missing Coordinates First") {
+          const aMiss = !hasCoordinates(a);
+          const bMiss = !hasCoordinates(b);
+          if (aMiss && !bMiss) return -1;
+          if (!aMiss && bMiss) return 1;
+        }
+        return b.id - a.id; // Newest default
+      });
+  }, [filteredSchools, duplicateIds, registryStatusFilter, registrySort]);
+
+  const pageSize = 25;
+  const totalPages = Math.max(1, Math.ceil(processedSchools.length / pageSize));
+  const currentPage = Math.min(registryPage, totalPages);
+  const pageRows = processedSchools.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const { data: importProgress } = useQuery<any>({
     queryKey: ["/api/imports/progress"],
@@ -236,6 +279,46 @@ export function AdminSchoolRegistry({
         </div>
       </div>
 
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between rounded-lg bg-slate-50/80 p-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={registryStatusFilter} onValueChange={(v) => { setRegistryStatusFilter(v); setRegistryPage(1); }}>
+            <SelectTrigger className="h-8 w-[160px] text-xs">
+              <SelectValue placeholder="Filter by status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All Statuses">All Statuses</SelectItem>
+              <SelectItem value="Verified">Verified</SelectItem>
+              <SelectItem value="Missing Coordinates">Missing Coordinates</SelectItem>
+              <SelectItem value="Auto-Located">Auto-Located</SelectItem>
+              <SelectItem value="Needs Review">Needs Review</SelectItem>
+              <SelectItem value="Duplicate Entry">Duplicate Entry</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={registrySort} onValueChange={(v) => { setRegistrySort(v); setRegistryPage(1); }}>
+            <SelectTrigger className="h-8 w-[160px] text-xs">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Newest">Newest First</SelectItem>
+              <SelectItem value="School Name (A-Z)">School Name (A-Z)</SelectItem>
+              <SelectItem value="School Name (Z-A)">School Name (Z-A)</SelectItem>
+              <SelectItem value="Missing Coordinates First">Missing Coordinates First</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {selectedIds.size > 0 && (
+          <Button 
+            size="sm" 
+            variant="outline" 
+            className="h-8 gap-2 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800" 
+            onClick={handleBulkGeolocate}
+          >
+            <MapPin className="h-3.5 w-3.5" />
+            Geocode Selected ({selectedIds.size})
+          </Button>
+        )}
+      </div>
+
       <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
         <div className="overflow-x-auto">
           <Table className={cn(compact ? "min-w-[960px] text-xs" : "min-w-[800px]")}>
@@ -243,9 +326,17 @@ export function AdminSchoolRegistry({
               <TableRow className={cn(compact && "hover:bg-transparent")}>
                 <TableHead className="w-10 px-4">
                   <Checkbox
-                    checked={filteredSchools.length > 0 && selectedIds.size === filteredSchools.length}
-                    onCheckedChange={(checked) => setSelectedIds(checked ? new Set(filteredSchools.map((s) => s.id)) : new Set())}
-                    aria-label="Select all schools"
+                    checked={pageRows.length > 0 && pageRows.every((s) => selectedIds.has(s.id))}
+                    onCheckedChange={(checked) => {
+                      const next = new Set(selectedIds);
+                      if (checked) {
+                        pageRows.forEach(s => next.add(s.id));
+                      } else {
+                        pageRows.forEach(s => next.delete(s.id));
+                      }
+                      setSelectedIds(next);
+                    }}
+                    aria-label="Select all schools on page"
                   />
                 </TableHead>
                 {compact ? (
@@ -275,9 +366,9 @@ export function AdminSchoolRegistry({
             <TableBody>
               {isLoading ? (
                 <TableRow><TableCell colSpan={compact ? 10 : 7} className="h-24 text-center text-muted-foreground">Loading registry...</TableCell></TableRow>
-              ) : filteredSchools.length === 0 ? (
+              ) : pageRows.length === 0 ? (
                 <TableRow><TableCell colSpan={compact ? 10 : 7} className="h-24 text-center text-muted-foreground">No schools found.</TableCell></TableRow>
-              ) : filteredSchools.map((school) => {
+              ) : pageRows.map((school) => {
                 const registryStatus = duplicateIds.has(school.id) ? "Duplicate Entry" : getSchoolStatus(school);
                 const actionBtn = compact ? "h-7 w-7" : "h-8 w-8";
                 const actionIcon = compact ? "h-3.5 w-3.5" : "h-4 w-4";
@@ -368,6 +459,14 @@ export function AdminSchoolRegistry({
             </TableBody>
           </Table>
         </div>
+        <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 px-3 py-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <span>{processedSchools.length.toLocaleString()} schools · {selectedIds.size.toLocaleString()} selected</span>
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="outline" size="sm" className="h-8 text-xs" disabled={currentPage <= 1} onClick={() => setRegistryPage((page) => Math.max(1, page - 1))}>Previous</Button>
+            <span className="min-w-[92px] text-center">Page {currentPage} of {totalPages}</span>
+            <Button variant="outline" size="sm" className="h-8 text-xs" disabled={currentPage >= totalPages} onClick={() => setRegistryPage((page) => Math.min(totalPages, page + 1))}>Next</Button>
+          </div>
+        </div>
       </Card>
       </TabsContent>
 
@@ -385,6 +484,13 @@ export function AdminSchoolRegistry({
         />
       </TabsContent>
       </Tabs>
+      
+      <RegistryGeocodeReviewModal
+        open={isReviewModalOpen}
+        onOpenChange={setIsReviewModalOpen}
+        schoolsToProcess={schoolsToReview}
+        onComplete={() => setSelectedIds(new Set())}
+      />
     </div>
   );
 }

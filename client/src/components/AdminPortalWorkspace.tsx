@@ -115,7 +115,6 @@ function sectionTabs(queueCount: number): { value: AdminPortalSection; label: st
   return [
     { value: "overview", label: "Overview", short: "Overview", icon: <LayoutDashboard className="h-4 w-4" /> },
     { value: "students", label: "Students", short: "Students", icon: <Users className="h-4 w-4" /> },
-    { value: "feed", label: "Live Student Feed", short: "Feed", icon: <Activity className="h-4 w-4" /> },
     { value: "registry", label: "School Registry", short: "Registry", icon: <Database className="h-4 w-4" /> },
     { value: "import-logs", label: "Import Logs", short: "Logs", icon: <ClipboardList className="h-4 w-4" /> },
     { value: "targets", label: "Dept Management", short: "Depts", icon: <Building2 className="h-4 w-4" /> },
@@ -150,6 +149,7 @@ export function AdminPortalWorkspace({
 }: AdminPortalWorkspaceProps) {
   const [settingsPanel, setSettingsPanel] = useState<"integrations" | "map">("integrations");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [studentsTab, setStudentsTab] = useState<"directory" | "feed">("directory");
   const { toast } = useToast();
 
   const [feedSearch, setFeedSearch] = useState("");
@@ -164,6 +164,7 @@ export function AdminPortalWorkspace({
   const [studentYearFilter, setStudentYearFilter] = useState(ALL_PROGRAM_FILTER);
   const [studentMunicipalityFilter, setStudentMunicipalityFilter] = useState(ALL_PROGRAM_FILTER);
   const [studentStatusFilter, setStudentStatusFilter] = useState(ALL_PROGRAM_FILTER);
+  const [studentMappingFilter, setStudentMappingFilter] = useState(ALL_PROGRAM_FILTER);
   const [studentSort, setStudentSort] = useState("Newest");
   const [studentPage, setStudentPage] = useState(1);
   const [isStudentBulkAction, setIsStudentBulkAction] = useState(false);
@@ -405,6 +406,7 @@ export function AdminPortalWorkspace({
     years: uniqueSorted(studentRows.map((row) => row.yearLevel || "Unspecified")),
     municipalities: uniqueSorted(studentRows.map((row) => row.municipality || "Laguna")),
     statuses: STUDENT_STATUSES,
+    mappingStatuses: ["Mapped", "Unmapped & Distant"],
   }), [studentRows]);
 
   const studentStats = useMemo(() => {
@@ -475,15 +477,48 @@ export function AdminPortalWorkspace({
     });
     const enrollmentTrends = Array.from(trendMap.entries()).map(([date, count]) => ({ date, count }));
 
-    // 5. School Mapping Progress
+    // 5. Top Feeder Schools (Bar Chart)
+    const feederMap = new Map<string, number>();
+    studentRows.forEach(s => {
+      if (s.enrollmentStatus === "Archived") return;
+      const matchedSchool = s.schoolRegistryId ? schools.find(sch => sch.id === s.schoolRegistryId) : null;
+      let schoolName = matchedSchool ? matchedSchool.schoolName : (s.lastSchoolName || "Unspecified");
+      if (schoolName !== "Unspecified") {
+        schoolName = schoolName.replace(/National High School/i, 'NHS')
+                               .replace(/Integrated National High School/i, 'INHS')
+                               .replace(/Senior High School/i, 'SHS');
+        feederMap.set(schoolName, (feederMap.get(schoolName) || 0) + 1);
+      }
+    });
+    const topFeederSchools = Array.from(feederMap.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Top 5
+
+    // 6. Year Level Distribution (Donut Chart)
+    const yearMap = new Map<string, number>();
+    studentRows.forEach(s => {
+      if (s.enrollmentStatus === "Archived") return;
+      let yr = s.yearLevel || "Unspecified";
+      if (yr.includes("1") || yr.toLowerCase().includes("first")) yr = "1st Year";
+      else if (yr.includes("2") || yr.toLowerCase().includes("second")) yr = "2nd Year";
+      else if (yr.includes("3") || yr.toLowerCase().includes("third")) yr = "3rd Year";
+      else if (yr.includes("4") || yr.toLowerCase().includes("fourth")) yr = "4th Year";
+      yearMap.set(yr, (yearMap.get(yr) || 0) + 1);
+    });
+    const yearLevelDistribution = Array.from(yearMap.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    // 7. Geographic Information System (GIS) Mapping Success
     const mapped = schools.filter(s => hasCoordinates(s)).length;
     const unmapped = schools.filter(s => !hasCoordinates(s)).length;
     const mappingProgress = [
-      { name: 'Mapped', value: mapped, fill: '#10b981' },
-      { name: 'Unmapped', value: unmapped, fill: '#f43f5e' }
+      { name: 'Mapped (With Coordinates)', value: mapped, fill: '#10b981' },
+      { name: 'Unmapped / Missing', value: unmapped, fill: '#f43f5e' }
     ];
 
-    return { admissionDemographics, COLORS, topPrograms, geoDistribution, enrollmentTrends, mappingProgress };
+    return { admissionDemographics, COLORS, topPrograms, geoDistribution, enrollmentTrends, topFeederSchools, yearLevelDistribution, mappingProgress };
   }, [studentRows, schools]);
 
   const archiveFolders = useMemo(() => {
@@ -516,6 +551,16 @@ export function AdminPortalWorkspace({
       .filter((row) => studentYearFilter === ALL_PROGRAM_FILTER || (row.yearLevel || "Unspecified") === studentYearFilter)
       .filter((row) => studentMunicipalityFilter === ALL_PROGRAM_FILTER || (row.municipality || "Laguna") === studentMunicipalityFilter)
       .filter((row) => studentStatusFilter === ALL_PROGRAM_FILTER || row.enrollmentStatus === studentStatusFilter)
+      .filter((row) => {
+        if (studentMappingFilter === ALL_PROGRAM_FILTER) return true;
+        const matchedSchool = row.schoolRegistryId ? schools.find(s => s.id === row.schoolRegistryId) : null;
+        const isMapped = matchedSchool && hasCoordinates(matchedSchool) && 
+                         matchedSchool.latitude >= 13.78 && matchedSchool.latitude <= 14.58 && 
+                         matchedSchool.longitude >= 120.88 && matchedSchool.longitude <= 121.72;
+        if (studentMappingFilter === "Mapped") return isMapped;
+        if (studentMappingFilter === "Unmapped & Distant") return !isMapped;
+        return true;
+      })
       .sort((a, b) => sortStudents(a, b, studentSort));
   }, [
     studentRows,
@@ -526,7 +571,9 @@ export function AdminPortalWorkspace({
     studentYearFilter,
     studentMunicipalityFilter,
     studentStatusFilter,
+    studentMappingFilter,
     studentSort,
+    schools,
   ]);
 
   const studentPageSize = 25;
@@ -592,12 +639,12 @@ export function AdminPortalWorkspace({
         onValueChange={(v) => onSectionChange(v as AdminPortalSection)}
         className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:flex-row md:gap-4 md:p-4"
       >
-        <aside className={cn("shrink-0 h-full self-start overflow-hidden rounded-2xl border border-white/20 bg-transparent p-1.5 shadow-lg backdrop-blur-xl md:p-2 transition-all duration-300 ease-in-out relative flex flex-col", isSidebarCollapsed ? "md:w-16" : "md:w-60")}>
+        <aside className={cn("shrink-0 h-full overflow-hidden rounded-2xl border border-white/20 bg-white/40 p-1.5 shadow-lg backdrop-blur-xl md:p-2 transition-all duration-300 ease-in-out relative flex flex-col", isSidebarCollapsed ? "md:w-16" : "md:w-60")}>
           <div className={cn("hidden md:flex w-full pt-1 pb-2 shrink-0", isSidebarCollapsed ? "justify-center" : "justify-end px-2")}>
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 rounded-lg hover:bg-white/20 text-slate-500 transition-colors border-0 outline-none focus-visible:ring-0 focus:outline-none"
+              className="h-8 w-8 rounded-lg hover:bg-white/50 text-slate-500 transition-colors border-0 outline-none focus-visible:ring-0 focus:outline-none"
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             >
               {isSidebarCollapsed ? <ChevronRight className="h-4 w-4" strokeWidth={3} /> : <ChevronLeft className="h-4 w-4" strokeWidth={3} />}
@@ -606,8 +653,9 @@ export function AdminPortalWorkspace({
           <TabsList
             aria-label="Admin sections"
             className={cn(
-              "flex flex-1 h-full w-full justify-start gap-1 overflow-x-auto p-1 text-muted-foreground",
-              "md:flex-col md:overflow-visible md:!bg-transparent md:p-0 md:shadow-none md:border-none",
+              "flex w-full gap-1 p-1 text-muted-foreground",
+              "flex-row overflow-x-auto overflow-y-hidden",
+              "md:flex-col md:flex-1 md:h-full md:overflow-hidden md:!bg-transparent md:p-0 md:shadow-none md:border-none",
               isSidebarCollapsed && "md:items-center"
             )}
           >
@@ -618,10 +666,11 @@ export function AdminPortalWorkspace({
                 data-tab-id={value}
                 title={isSidebarCollapsed ? label : undefined}
                 className={cn(
-                  "group relative w-full flex items-center shrink-0 justify-start rounded-xl border border-transparent text-xs font-semibold text-muted-foreground shadow-none transition-all duration-300 ease-in-out",
-                  "hover:bg-surface hover:text-foreground",
+                  "group relative flex items-center shrink-0 rounded-xl border border-transparent text-xs font-semibold text-muted-foreground shadow-none transition-all duration-300 ease-in-out",
+                  "hover:bg-slate-200/50 hover:text-slate-900",
                   "data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_14px_34px_-24px_rgba(123,17,19,0.9)]",
-                  isSidebarCollapsed ? "md:px-2 md:py-2.5 gap-0" : "md:px-3.5 md:py-2.5 gap-2",
+                  "px-3 py-2",
+                  isSidebarCollapsed ? "md:w-10 md:h-10 md:px-0 md:py-0 md:justify-center" : "md:w-full md:h-10 md:justify-start md:px-3 md:py-2 gap-2",
                   value === "settings" && "md:mt-auto"
                 )}
               >
@@ -630,10 +679,10 @@ export function AdminPortalWorkspace({
                 </span>
                 <div className={cn(
                   "flex items-center whitespace-nowrap overflow-hidden transition-all duration-300 ease-in-out",
-                  isSidebarCollapsed ? "max-w-0 opacity-0" : "max-w-[150px] opacity-100"
+                  isSidebarCollapsed ? "max-w-0 opacity-0 hidden md:block" : "max-w-[150px] opacity-100"
                 )}>
-                  <span className="sm:hidden">{short}</span>
-                  <span className="hidden sm:inline">{label}</span>
+                  <span className="md:hidden">{short}</span>
+                  <span className="hidden md:inline">{label}</span>
                 </div>
               </TabsTrigger>
             ))}
@@ -664,7 +713,7 @@ export function AdminPortalWorkspace({
                   <StatMini title="Transferees" value={String(overview.transfereeCount)} sub="College → Xfer" icon={<ArrowRightLeft className="h-4 w-4 text-purple-500" />} />
                   <StatMini title="Verified schools" value={String(overview.verifiedSchools)} icon={<ShieldCheck className="h-4 w-4 text-emerald-500" />} />
                   <StatMini title="Unmapped schools" value={String(overview.unmappedSchools)} warn={overview.unmappedSchools > 0} icon={<MapPinned className="h-4 w-4 text-rose-500" />} />
-                  <StatMini title="API sync status" value={overview.apiSyncStatus} icon={<CloudOff className="h-4 w-4 text-slate-400" />} />
+                  <StatMini title="API sync status" value={overview.apiSyncStatus.replace('GIS', 'Geographic Information System (GIS)')} icon={<CloudOff className="h-4 w-4 text-slate-400" />} />
                   <StatMini title="Last sync" value={formatSyncTime(schoolsUpdatedAt)} sub="Registry data" icon={<Clock3 className="h-4 w-4 text-amber-500" />} />
                 </div>
 
@@ -679,6 +728,26 @@ export function AdminPortalWorkspace({
                         <PieChart>
                           <Pie data={chartData.admissionDemographics} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={65} outerRadius={90} label={{ fontSize: 11, fill: '#64748b' }} stroke="none">
                             {chartData.admissionDemographics.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={chartData.COLORS[index % chartData.COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                          <Legend wrapperStyle={{ fontSize: 12, paddingTop: '10px' }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Year Level Distribution */}
+                  <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
+                    <CardHeader className="pb-2 pt-5 px-6">
+                      <CardTitle className="text-sm font-semibold text-slate-800">Year Level Distribution</CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-72 px-2 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={chartData.yearLevelDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={65} outerRadius={90} label={{ fontSize: 11, fill: '#64748b' }} stroke="none">
+                            {chartData.yearLevelDistribution.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={chartData.COLORS[index % chartData.COLORS.length]} />
                             ))}
                           </Pie>
@@ -713,6 +782,30 @@ export function AdminPortalWorkspace({
                     </CardContent>
                   </Card>
 
+                  {/* Top Feeder Schools */}
+                  <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
+                    <CardHeader className="pb-2 pt-5 px-6">
+                      <CardTitle className="text-sm font-semibold text-slate-800">Top Feeder Schools</CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-72 px-4 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData.topFeederSchools} layout="vertical" margin={{ left: 100, right: 20 }}>
+                          <defs>
+                            <linearGradient id="feederGradient" x1="0" y1="0" x2="1" y2="0">
+                              <stop offset="0%" stopColor="#f59e0b" />
+                              <stop offset="100%" stopColor="#fbbf24" />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
+                          <XAxis type="number" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                          <YAxis dataKey="name" type="category" width={140} tick={{ fontSize: 11, fill: '#475569', fontWeight: 500 }} axisLine={false} tickLine={false} />
+                          <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                          <Bar dataKey="count" fill="url(#feederGradient)" radius={[0, 6, 6, 0]} barSize={24} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
                   {/* Geographic Distribution */}
                   <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
                     <CardHeader className="pb-2 pt-5 px-6">
@@ -737,8 +830,28 @@ export function AdminPortalWorkspace({
                     </CardContent>
                   </Card>
 
-                  {/* Enrollment Trends */}
+                  {/* GIS Mapping Success */}
                   <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
+                    <CardHeader className="pb-2 pt-5 px-6">
+                      <CardTitle className="text-sm font-semibold text-slate-800">Geographic Information System (GIS) Mapping Success</CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-72 px-2 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie data={chartData.mappingProgress} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={65} outerRadius={90} label={{ fontSize: 11, fill: '#64748b' }} stroke="none">
+                            {chartData.mappingProgress.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.fill} />
+                            ))}
+                          </Pie>
+                          <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                          <Legend wrapperStyle={{ fontSize: 12, paddingTop: '10px' }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Enrollment Trends */}
+                  <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl lg:col-span-2">
                     <CardHeader className="pb-2 pt-5 px-6">
                       <CardTitle className="text-sm font-semibold text-slate-800">Sync Trends (Last 7 Days)</CardTitle>
                     </CardHeader>
@@ -785,256 +898,286 @@ export function AdminPortalWorkspace({
                 <StudentStat title="Archived Students" value={studentStats.archived} tone="slate" />
               </div>
 
-              <div className="flex flex-col gap-2 rounded-xl border border-white/50 bg-white/50 p-3 shadow-sm backdrop-blur-md">
-                <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-                  <div className="relative min-w-0 flex-1">
-                    <Input
-                      className="h-9 bg-slate-50 text-sm"
-                      placeholder="Search student number, name, program, school..."
-                      value={studentSearch}
-                      onChange={(event) => {
-                        setStudentSearch(event.target.value);
-                        setStudentPage(1);
-                      }}
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      className="h-9 gap-2 text-xs"
-                      disabled={selectedManagedRows.length === 0}
-                      onClick={() => exportStudents(selectedManagedRows.length ? selectedManagedRows : studentsManaged)}
-                    >
-                      <Download className="h-3.5 w-3.5" />
-                      Export Selected
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="h-9 gap-2 text-xs"
-                      disabled={studentSelected.size === 0 || isStudentBulkAction}
-                      onClick={() => updateSelectedStudentStatus("Archived")}
-                    >
-                      <Archive className="h-3.5 w-3.5" />
-                      Archive Selected
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="h-9 gap-2 text-xs text-rose-700"
-                      disabled={studentSelected.size === 0 || isStudentBulkAction}
-                      onClick={deleteSelectedStudents}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete Selected
-                    </Button>
-                  </div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
-                  <StudentFilterSelect label="College" value={studentCollegeFilter} values={studentOptions.colleges} allLabel="All Colleges" onChange={(value) => { setStudentCollegeFilter(value); setStudentPage(1); }} />
-                  <StudentFilterSelect label="Program" value={studentProgramFilter} values={studentOptions.programs} allLabel="All Programs" onChange={(value) => { setStudentProgramFilter(value); setStudentPage(1); }} />
-                  <StudentFilterSelect label="Track" value={studentTrackFilter} values={studentOptions.tracks} allLabel="All Tracks" onChange={(value) => { setStudentTrackFilter(value); setStudentPage(1); }} />
-                  <StudentFilterSelect label="Year" value={studentYearFilter} values={studentOptions.years} allLabel="All Years" onChange={(value) => { setStudentYearFilter(value); setStudentPage(1); }} />
-                  <StudentFilterSelect label="Municipality" value={studentMunicipalityFilter} values={studentOptions.municipalities} allLabel="All Municipalities" onChange={(value) => { setStudentMunicipalityFilter(value); setStudentPage(1); }} />
-                  <StudentFilterSelect label="Status" value={studentStatusFilter} values={studentOptions.statuses} allLabel="All Statuses" onChange={(value) => { setStudentStatusFilter(value); setStudentPage(1); }} />
-                  <StudentFilterSelect label="Sort" value={studentSort} values={STUDENT_SORTS} onChange={(value) => { setStudentSort(value); setStudentPage(1); }} />
-                </div>
+              {/* Sub-tabs Switcher */}
+              <div className="flex border-b border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setStudentsTab("directory")}
+                  className={cn(
+                    "px-4 py-2 text-xs font-semibold border-b-2 transition-colors focus:outline-none",
+                    studentsTab === "directory"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-slate-500 hover:text-slate-900"
+                  )}
+                >
+                  Student Directory
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStudentsTab("feed")}
+                  className={cn(
+                    "px-4 py-2 text-xs font-semibold border-b-2 transition-colors focus:outline-none",
+                    studentsTab === "feed"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-slate-500 hover:text-slate-900"
+                  )}
+                >
+                  Live Sync Feed
+                </button>
               </div>
 
-              <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border-slate-200 shadow-sm">
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <Table className="min-w-[1320px] text-xs">
-                    <TableHeader className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(226_232_240)]">
-                      <TableRow>
-                        <TableHead className="w-10 px-4">
-                          <Checkbox
-                            checked={studentPageRows.length > 0 && studentPageRows.every((row) => studentSelected.has(row.id))}
-                            onCheckedChange={(checked) => {
-                              const next = new Set(studentSelected);
-                              studentPageRows.forEach((row) => checked ? next.add(row.id) : next.delete(row.id));
-                              setStudentSelected(next);
-                            }}
-                            aria-label="Select page students"
-                          />
-                        </TableHead>
-                        <TableHead>Student Number</TableHead>
-                        <TableHead>Full Name</TableHead>
-                        <TableHead>College / Department</TableHead>
-                        <TableHead>Program</TableHead>
-                        <TableHead>Track</TableHead>
-                        <TableHead>Year Level</TableHead>
-                        <TableHead>Last School Attended</TableHead>
-                        <TableHead>Municipality</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Enrollment Date</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {studentPageRows.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={12} className="h-32 text-center text-slate-500">No students match the current filters.</TableCell>
-                        </TableRow>
-                      ) : studentPageRows.map((student) => (
-                        <TableRow key={student.id} data-state={studentSelected.has(student.id) ? "selected" : undefined}>
-                          <TableCell className="px-4">
-                            <Checkbox
-                              checked={studentSelected.has(student.id)}
-                              onCheckedChange={(checked) => {
-                                const next = new Set(studentSelected);
-                                if (checked) next.add(student.id);
-                                else next.delete(student.id);
-                                setStudentSelected(next);
-                              }}
-                              aria-label={`Select student ${student.studentNumber}`}
-                            />
-                          </TableCell>
-                          <TableCell className="font-mono text-[11px]">{student.studentNumber}</TableCell>
-                          <TableCell className="font-semibold text-slate-900">{student.fullName}</TableCell>
-                          <TableCell>{student.collegeName}</TableCell>
-                          <TableCell>{student.program}</TableCell>
-                          <TableCell>{student.track || "General"}</TableCell>
-                          <TableCell>{student.yearLevel || "Unspecified"}</TableCell>
-                          <TableCell className="max-w-[210px] truncate" title={student.lastSchoolName}>{student.lastSchoolName}</TableCell>
-                          <TableCell>{student.municipality || "Laguna"}</TableCell>
-                          <TableCell><StudentStatusBadge status={student.enrollmentStatus} /></TableCell>
-                          <TableCell>{formatSyncTime(new Date(student.enrollmentDate || student.syncedAt).getTime())}</TableCell>
-                          <TableCell>
-                            <div className="flex justify-end gap-0.5">
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewingStudent(student)} title="View student">
-                                <Eye className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => startEditStudent(student)} title="Edit student">
-                                <Edit className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-700" onClick={() => updateStudentStatusByIds([student.id], "Archived")} title="Archive student">
-                                <Archive className="h-3.5 w-3.5" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-700" onClick={() => deleteStudentsByIds([student.id])} title="Delete student">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 px-3 py-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-                  <span>{studentsManaged.length.toLocaleString()} students · {studentSelected.size.toLocaleString()} selected</span>
-                  <div className="flex items-center justify-end gap-2">
-                    <Button variant="outline" size="sm" className="h-8 text-xs" disabled={studentCurrentPage <= 1} onClick={() => setStudentPage((page) => Math.max(1, page - 1))}>Previous</Button>
-                    <span className="min-w-[92px] text-center">Page {studentCurrentPage} of {studentTotalPages}</span>
-                    <Button variant="outline" size="sm" className="h-8 text-xs" disabled={studentCurrentPage >= studentTotalPages} onClick={() => setStudentPage((page) => Math.min(studentTotalPages, page + 1))}>Next</Button>
+              {studentsTab === "directory" ? (
+                <>
+                  <div className="flex flex-col gap-2 rounded-xl border border-white/50 bg-white/50 p-3 shadow-sm backdrop-blur-md">
+                    <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+                      <div className="relative min-w-0 flex-1">
+                        <Input
+                          className="h-9 bg-slate-50 text-sm"
+                          placeholder="Search student number, name, program, school..."
+                          value={studentSearch}
+                          onChange={(event) => {
+                            setStudentSearch(event.target.value);
+                            setStudentPage(1);
+                          }}
+                        />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          className="h-9 gap-2 text-xs"
+                          disabled={selectedManagedRows.length === 0}
+                          onClick={() => exportStudents(selectedManagedRows.length ? selectedManagedRows : studentsManaged)}
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          Export Selected
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="h-9 gap-2 text-xs"
+                          disabled={studentSelected.size === 0 || isStudentBulkAction}
+                          onClick={() => updateSelectedStudentStatus("Archived")}
+                        >
+                          <Archive className="h-3.5 w-3.5" />
+                          Archive Selected
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="h-9 gap-2 text-xs text-rose-700"
+                          disabled={studentSelected.size === 0 || isStudentBulkAction}
+                          onClick={deleteSelectedStudents}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete Selected
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+                      <StudentFilterSelect label="College" value={studentCollegeFilter} values={studentOptions.colleges} allLabel="All Colleges" onChange={(value) => { setStudentCollegeFilter(value); setStudentPage(1); }} />
+                      <StudentFilterSelect label="Program" value={studentProgramFilter} values={studentOptions.programs} allLabel="All Programs" onChange={(value) => { setStudentProgramFilter(value); setStudentPage(1); }} />
+                      <StudentFilterSelect label="Track" value={studentTrackFilter} values={studentOptions.tracks} allLabel="All Tracks" onChange={(value) => { setStudentTrackFilter(value); setStudentPage(1); }} />
+                      <StudentFilterSelect label="Year" value={studentYearFilter} values={studentOptions.years} allLabel="All Years" onChange={(value) => { setStudentYearFilter(value); setStudentPage(1); }} />
+                      <StudentFilterSelect label="Municipality" value={studentMunicipalityFilter} values={studentOptions.municipalities} allLabel="All Municipalities" onChange={(value) => { setStudentMunicipalityFilter(value); setStudentPage(1); }} />
+                      <StudentFilterSelect label="Status" value={studentStatusFilter} values={studentOptions.statuses} allLabel="All Statuses" onChange={(value) => { setStudentStatusFilter(value); setStudentPage(1); }} />
+                      <StudentFilterSelect label="Mapping" value={studentMappingFilter} values={studentOptions.mappingStatuses} allLabel="All Mapping" onChange={(value) => { setStudentMappingFilter(value); setStudentPage(1); }} />
+                      <StudentFilterSelect label="Sort" value={studentSort} values={STUDENT_SORTS} onChange={(value) => { setStudentSort(value); setStudentPage(1); }} />
+                    </div>
                   </div>
-                </div>
-              </Card>
-            </div>
-          </TabsContent>
 
-          <TabsContent value="feed" className="m-0 mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
-            <div className="flex min-h-0 flex-1 flex-col px-3 py-3 sm:px-4">
-              <TableToolbar
-                searchQuery={feedSearch}
-                onSearchChange={setFeedSearch}
-                searchPlaceholder="Search student number, name, course..."
-                selectedCount={feedSelected.size}
-                onClearSelection={() => setFeedSelected(new Set())}
-                onDelete={deleteFeed}
-                isDeleting={isDeletingFeed}
-                deleteItemName="students"
-              />
-              <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border-white/70 bg-white/70 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.5)] backdrop-blur-xl">
-                <CardHeader className="shrink-0 border-b border-slate-100 py-3">
-                  <CardTitle className="text-sm font-semibold">Live student feed</CardTitle>
-                </CardHeader>
-                <div className="min-h-0 flex-1 overflow-auto">
-                  <Table className="min-w-[800px]">
-                    <TableHeader className="sticky top-0 z-10 bg-white/90 shadow-[0_1px_0_0_rgb(241_245_249)] backdrop-blur-xl">
-                      <TableRow>
-                        <TableHead className="w-10 px-4">
-                          <Checkbox
-                            checked={studentsFiltered.length > 0 && feedSelected.size === studentsFiltered.length}
-                            onCheckedChange={(checked) => {
-                              if (checked) {
-                                setFeedSelected(new Set(studentsFiltered.map(s => s.id)));
-                              } else {
-                                setFeedSelected(new Set());
-                              }
-                            }}
-                            aria-label="Select all students"
-                          />
-                        </TableHead>
-                        <TableHead className="text-[10px] font-semibold uppercase">Student</TableHead>
-                        <TableHead className="hidden text-[10px] font-semibold uppercase sm:table-cell">Course</TableHead>
-                        <TableHead className="hidden text-[10px] font-semibold uppercase md:table-cell">Raw School</TableHead>
-                        <TableHead className="text-[10px] font-semibold uppercase">Matched To</TableHead>
-                        <TableHead className="hidden text-[10px] font-semibold uppercase lg:table-cell">Type</TableHead>
-                        <TableHead className="hidden text-[10px] font-semibold uppercase lg:table-cell">Status</TableHead>
-                        <TableHead className="hidden text-[10px] font-semibold uppercase lg:table-cell">Synced</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {studentsFiltered.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={8} className="h-32 text-center">
-                            <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-slate-300" />
-                            <p className="text-sm font-medium text-slate-900">No students found</p>
-                            <p className="text-xs text-slate-500">Wait for next API sync or import from CSV.</p>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        studentsFiltered.map((st) => {
-                          const matchedSchool = st.schoolRegistryId ? schools.find(s => s.id === st.schoolRegistryId) : null;
-                          const matchedSchoolName = matchedSchool?.schoolName || null;
-
-                          return (
-                            <TableRow key={st.id} className="text-xs hover:bg-slate-50/50" data-state={feedSelected.has(st.id) ? "selected" : undefined}>
+                  <Card className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border-slate-200 shadow-sm">
+                    <div className="min-h-0 flex-1 overflow-auto">
+                      <Table className="min-w-[1320px] text-xs">
+                        <TableHeader className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(226_232_240)]">
+                          <TableRow>
+                            <TableHead className="w-10 px-4">
+                              <Checkbox
+                                checked={studentPageRows.length > 0 && studentPageRows.every((row) => studentSelected.has(row.id))}
+                                onCheckedChange={(checked) => {
+                                  const next = new Set(studentSelected);
+                                  studentPageRows.forEach((row) => checked ? next.add(row.id) : next.delete(row.id));
+                                  setStudentSelected(next);
+                                }}
+                                aria-label="Select page students"
+                              />
+                            </TableHead>
+                            <TableHead>Student Number</TableHead>
+                            <TableHead>Full Name</TableHead>
+                            <TableHead>College / Department</TableHead>
+                            <TableHead>Program</TableHead>
+                            <TableHead>Track</TableHead>
+                            <TableHead>Year Level</TableHead>
+                            <TableHead>Last School Attended</TableHead>
+                            <TableHead>Municipality</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Enrollment Date</TableHead>
+                            <TableHead className="text-right">Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {studentPageRows.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={12} className="h-32 text-center text-slate-500">No students match the current filters.</TableCell>
+                            </TableRow>
+                          ) : studentPageRows.map((student) => (
+                            <TableRow key={student.id} data-state={studentSelected.has(student.id) ? "selected" : undefined}>
                               <TableCell className="px-4">
                                 <Checkbox
-                                  checked={feedSelected.has(st.id)}
+                                  checked={studentSelected.has(student.id)}
                                   onCheckedChange={(checked) => {
-                                    const next = new Set(feedSelected);
-                                    if (checked) next.add(st.id);
-                                    else next.delete(st.id);
-                                    setFeedSelected(next);
+                                    const next = new Set(studentSelected);
+                                    if (checked) next.add(student.id);
+                                    else next.delete(student.id);
+                                    setStudentSelected(next);
                                   }}
-                                  aria-label={`Select student ${st.studentNumber}`}
+                                  aria-label={`Select student ${student.studentNumber}`}
                                 />
                               </TableCell>
+                              <TableCell className="font-mono text-[11px]">{student.studentNumber}</TableCell>
+                              <TableCell className="font-semibold text-slate-900">{student.fullName}</TableCell>
+                              <TableCell>{student.collegeName}</TableCell>
+                              <TableCell>{student.program}</TableCell>
+                              <TableCell>{student.track || "General"}</TableCell>
+                              <TableCell>{student.yearLevel || "Unspecified"}</TableCell>
+                              <TableCell className="max-w-[210px] truncate" title={student.lastSchoolName}>{student.lastSchoolName}</TableCell>
+                              <TableCell>{student.municipality || "Laguna"}</TableCell>
+                              <TableCell><StudentStatusBadge status={student.enrollmentStatus} /></TableCell>
+                              <TableCell>{formatSyncTime(new Date(student.enrollmentDate || student.syncedAt).getTime())}</TableCell>
                               <TableCell>
-                                <div className="font-medium text-slate-900">{st.studentNumber}</div>
-                                <div className="text-[10px] text-slate-500">{st.fullName || "—"}</div>
-                              </TableCell>
-                              <TableCell className="hidden text-slate-600 sm:table-cell">{st.course || "—"}</TableCell>
-                              <TableCell className="hidden max-w-[150px] truncate md:table-cell" title={st.lastSchoolName || undefined}>
-                                {st.lastSchoolName || "—"}
-                              </TableCell>
-                              <TableCell className="max-w-[150px] truncate" title={matchedSchoolName || undefined}>
-                                {matchedSchoolName ? (
-                                  <span className="font-medium text-slate-900">{matchedSchoolName}</span>
-                                ) : (
-                                  <span className="text-slate-400">Unmapped</span>
-                                )}
-                              </TableCell>
-                              <TableCell className="hidden align-top lg:table-cell">{st.lastSchoolType || "—"}</TableCell>
-                              <TableCell className="hidden align-top lg:table-cell">
-                                <Badge variant="outline" className="text-[10px] font-normal">
-                                  {mappingStatusLabel(st.mappingStatus)}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="hidden whitespace-nowrap align-top text-slate-500 lg:table-cell">
-                                {formatSyncTime(new Date(st.syncedAt).getTime())}
+                                <div className="flex justify-end gap-0.5">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewingStudent(student)} title="View student">
+                                    <Eye className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => startEditStudent(student)} title="Edit student">
+                                    <Edit className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-amber-700" onClick={() => updateStudentStatusByIds([student.id], "Archived")} title="Archive student">
+                                    <Archive className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-rose-700" onClick={() => deleteStudentsByIds([student.id])} title="Delete student">
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
                               </TableCell>
                             </TableRow>
-                          );
-                        })
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </Card>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                    <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 px-3 py-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                      <span>{studentsManaged.length.toLocaleString()} students · {studentSelected.size.toLocaleString()} selected</span>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button variant="outline" size="sm" className="h-8 text-xs" disabled={studentCurrentPage <= 1} onClick={() => setStudentPage((page) => Math.max(1, page - 1))}>Previous</Button>
+                        <span className="min-w-[92px] text-center">Page {studentCurrentPage} of {studentTotalPages}</span>
+                        <Button variant="outline" size="sm" className="h-8 text-xs" disabled={studentCurrentPage >= studentTotalPages} onClick={() => setStudentPage((page) => Math.min(studentTotalPages, page + 1))}>Next</Button>
+                      </div>
+                    </div>
+                  </Card>
+                </>
+              ) : (
+                <>
+                  <TableToolbar
+                    searchQuery={feedSearch}
+                    onSearchChange={setFeedSearch}
+                    searchPlaceholder="Search student number, name, course..."
+                    selectedCount={feedSelected.size}
+                    onClearSelection={() => setFeedSelected(new Set())}
+                    onDelete={deleteFeed}
+                    isDeleting={isDeletingFeed}
+                    deleteItemName="students"
+                  />
+                  <Card className="flex min-h-0 flex-1 flex-col overflow-hidden border-slate-200 shadow-sm">
+                    <CardHeader className="shrink-0 border-b border-slate-100 py-3">
+                      <CardTitle className="text-sm font-semibold">Live student feed</CardTitle>
+                    </CardHeader>
+                    <div className="min-h-0 flex-1 overflow-auto">
+                      <Table className="min-w-[800px] text-xs">
+                        <TableHeader className="sticky top-0 z-10 bg-white shadow-[0_1px_0_0_rgb(241_245_249)]">
+                          <TableRow>
+                            <TableHead className="w-10 px-4">
+                              <Checkbox
+                                checked={studentsFiltered.length > 0 && feedSelected.size === studentsFiltered.length}
+                                onCheckedChange={(checked) => {
+                                  if (checked) {
+                                    setFeedSelected(new Set(studentsFiltered.map(s => s.id)));
+                                  } else {
+                                    setFeedSelected(new Set());
+                                  }
+                                }}
+                                aria-label="Select all students"
+                              />
+                            </TableHead>
+                            <TableHead className="font-semibold uppercase text-[10px]">Student</TableHead>
+                            <TableHead className="hidden font-semibold uppercase text-[10px] sm:table-cell">Course</TableHead>
+                            <TableHead className="hidden font-semibold uppercase text-[10px] md:table-cell">Raw School</TableHead>
+                            <TableHead className="font-semibold uppercase text-[10px]">Matched To</TableHead>
+                            <TableHead className="hidden font-semibold uppercase text-[10px] lg:table-cell">Type</TableHead>
+                            <TableHead className="hidden font-semibold uppercase text-[10px] lg:table-cell">Status</TableHead>
+                            <TableHead className="hidden font-semibold uppercase text-[10px] lg:table-cell">Synced</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {studentsFiltered.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={8} className="h-32 text-center">
+                                <CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+                                <p className="text-sm font-medium text-slate-900">No students found</p>
+                                <p className="text-xs text-slate-500">Wait for next API sync or import from CSV.</p>
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            studentsFiltered.map((st) => {
+                              const matchedSchool = st.schoolRegistryId ? schools.find(s => s.id === st.schoolRegistryId) : null;
+                              const matchedSchoolName = matchedSchool?.schoolName || null;
+
+                              return (
+                                <TableRow key={st.id} className="hover:bg-slate-50/50" data-state={feedSelected.has(st.id) ? "selected" : undefined}>
+                                  <TableCell className="px-4">
+                                    <Checkbox
+                                      checked={feedSelected.has(st.id)}
+                                      onCheckedChange={(checked) => {
+                                        const next = new Set(feedSelected);
+                                        if (checked) next.add(st.id);
+                                        else next.delete(st.id);
+                                        setFeedSelected(next);
+                                      }}
+                                      aria-label={`Select student ${st.studentNumber}`}
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <div className="font-medium text-slate-900">{st.studentNumber}</div>
+                                    <div className="text-[10px] text-slate-500">{st.fullName || "—"}</div>
+                                  </TableCell>
+                                  <TableCell className="hidden text-slate-600 sm:table-cell">{st.course || "—"}</TableCell>
+                                  <TableCell className="hidden max-w-[150px] truncate md:table-cell" title={st.lastSchoolName || undefined}>
+                                    {st.lastSchoolName || "—"}
+                                  </TableCell>
+                                  <TableCell className="max-w-[150px] truncate" title={matchedSchoolName || undefined}>
+                                    {matchedSchoolName ? (
+                                      <span className="font-medium text-slate-900">{matchedSchoolName}</span>
+                                    ) : (
+                                      <span className="text-slate-400">Unmapped</span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="hidden align-top lg:table-cell">{st.lastSchoolType || "—"}</TableCell>
+                                  <TableCell className="hidden align-top lg:table-cell">
+                                    <Badge variant="outline" className="text-[10px] font-normal">
+                                      {mappingStatusLabel(st.mappingStatus)}
+                                    </Badge>
+                                  </TableCell>
+                                  <TableCell className="hidden whitespace-nowrap align-top text-slate-500 lg:table-cell">
+                                    {formatSyncTime(new Date(st.syncedAt).getTime())}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </Card>
+                </>
+              )}
             </div>
           </TabsContent>
-
 
           <TabsContent value="registry" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
             <ScrollArea className="h-full">
@@ -1364,7 +1507,7 @@ export function AdminPortalWorkspace({
   );
 }
 
-const STUDENT_STATUSES = ["Active", "Enrolled", "Pending", "Dropped", "Transferred", "Graduated", "Archived"];
+const STUDENT_STATUSES = ["Active", "Enrolled", "Officially Enrolled", "OE", "NOE", "Pending", "Dropped", "Transferred", "Graduated", "Archived"];
 const STUDENT_SORTS = [
   "Newest",
   "Student Number",
@@ -1382,13 +1525,34 @@ type ManagedStudent = StudentProcessed & {
   track: string;
 };
 
+function cleanMunicipality(raw: string | null | undefined): string {
+  if (!raw) return "Laguna";
+  const lower = raw.toLowerCase();
+  if (lower.includes("biñan") || lower.includes("binan")) return "Biñan";
+  if (lower.includes("santa rosa") || lower.includes("sta. rosa") || lower.includes("sta rosa")) return "Santa Rosa";
+  if (lower.includes("san pedro")) return "San Pedro";
+  if (lower.includes("calamba")) return "Calamba";
+  if (lower.includes("cabuyao")) return "Cabuyao";
+  if (lower.includes("carmona")) return "Carmona";
+  if (lower.includes("dasma") || lower.includes("dasmarinas")) return "Dasmariñas";
+  if (lower.includes("silang")) return "Silang";
+  if (lower.includes("muntinlupa")) return "Muntinlupa";
+  if (lower.includes("manila")) return "Metro Manila";
+  if (lower.includes("laguna")) return "Laguna";
+  return raw.replace(/,\s*(Laguna|Philippines)$/i, '').trim() || "Laguna";
+}
+
 function enrichStudentRow(student: StudentProcessed, schools: School[]): ManagedStudent {
   const program = recognizeProgram(student.course);
   const matchedSchool = student.schoolRegistryId ? schools.find((school) => school.id === student.schoolRegistryId) : undefined;
+  
+  // Prioritize clean registry municipality, fallback to cleaned raw student municipality
+  const finalMunicipality = matchedSchool?.municipality || cleanMunicipality(student.municipality);
+  
   return {
     ...student,
-    municipality: student.municipality || matchedSchool?.municipality || "Laguna",
-    province: student.province || matchedSchool?.province || "Laguna",
+    municipality: finalMunicipality,
+    province: matchedSchool?.province || student.province || "Laguna",
     enrollmentStatus: student.enrollmentStatus || "Active",
     importedSource: student.importedSource || "API",
     college: program?.college || "Unknown",

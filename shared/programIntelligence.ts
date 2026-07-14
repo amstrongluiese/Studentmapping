@@ -37,7 +37,7 @@ export {
   type ProgramInfo,
 } from "./programRecognition";
 
-export const ACTIVE_GIS_STUDENT_STATUSES = new Set(["Active", "Enrolled", "Officially Enrolled", "OE"]);
+export const ACTIVE_GIS_STUDENT_STATUSES = new Set(["Active", "Enrolled", "Officially Enrolled", "OE", "NOE"]);
 
 export type ProgramRecord = ProgramInfo;
 

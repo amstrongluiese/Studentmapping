@@ -210,9 +210,17 @@ function getClusterProgramColors(cluster: SchoolCluster, filters: ProgramFilters
   };
 }
 
+function getStableIndex(id: string) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash << 5) - hash + id.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) % 20;
+}
+
 function createSchoolIcon(
   cluster: SchoolCluster,
-  index: number,
   options: { showLabel: boolean; showNameLabel: boolean; zoom: number; isPresenting: boolean; programFilters: ProgramFilters },
 ) {
   const { showLabel, showNameLabel, zoom, isPresenting, programFilters } = options;
@@ -231,9 +239,11 @@ function createSchoolIcon(
     ? "Cluster"
     : cluster.schools[0].dominantProgram?.code || cluster.schools[0].institutionType || "Feeder Institution";
 
+  const stableIndex = getStableIndex(cluster.id);
+
   return L.divIcon({
     html: `
-      <div class="gis-marker ${isCluster ? "gis-marker-cluster" : ""} ${showLabel ? "gis-marker-show-label" : ""}" style="--marker-color:${color}; --marker-secondary-color:${secondaryColor}; animation-delay:${Math.min(index * 35, 420)}ms">
+      <div class="gis-marker ${isCluster ? "gis-marker-cluster" : ""} ${showLabel ? "gis-marker-show-label" : ""}" style="--marker-color:${color}; --marker-secondary-color:${secondaryColor}; animation-delay:${Math.min(stableIndex * 35, 420)}ms">
         <div class="gis-marker-core">
           <span class="gis-marker-pin" aria-hidden="true">
             <span class="gis-marker-stem"></span>
@@ -268,7 +278,15 @@ function escapeHtml(value?: string | null) {
 
 function mappedSchools(schools: ProgramSchool[] = []): MappedSchool[] {
   return schools
-    .filter((school) => hasCoordinates(school) && school.schoolName !== "Unspecified" && ((school as any).filteredStudentCount ?? (school as any).studentCount ?? 0) > 0)
+    .filter((school) => {
+      if (school.schoolName === "Unspecified") return false;
+      if (!hasCoordinates(school)) return false;
+      if (((school as any).filteredStudentCount ?? (school as any).studentCount ?? 0) <= 0) return false;
+      const lat = school.latitude;
+      const lng = school.longitude;
+      // Coordinates must lie strictly inside Laguna's bounding box
+      return lat >= 13.78 && lat <= 14.58 && lng >= 120.88 && lng <= 121.72;
+    })
     .map((school) => ({
       ...school,
       lat: school.latitude,
@@ -389,6 +407,28 @@ function MapSizeController({
   return null;
 }
 
+function ViewportWatcher({ onBoundsChange }: { onBoundsChange: (bounds: L.LatLngBounds) => void }) {
+  const debouncedBoundsChange = useMemo(
+    () => debounce((bounds: L.LatLngBounds) => onBoundsChange(bounds), 50),
+    [onBoundsChange]
+  );
+
+  const map = useMapEvents({
+    moveend() {
+      debouncedBoundsChange(map.getBounds());
+    },
+    zoomend() {
+      debouncedBoundsChange(map.getBounds());
+    },
+  });
+
+  useEffect(() => {
+    debouncedBoundsChange(map.getBounds());
+  }, [map, debouncedBoundsChange]);
+
+  return null;
+}
+
 function ZoomWatcher({ onZoomChange }: { onZoomChange: (zoom: number) => void }) {
   const map = useMapEvents({
     zoomend() {
@@ -464,7 +504,6 @@ function MapGestureGuard({ active }: { active: boolean }) {
 
 const SchoolMarker = memo(function SchoolMarker({
   cluster,
-  index,
   onEditSchool,
   onMarkerClick,
   isPresenting,
@@ -474,7 +513,6 @@ const SchoolMarker = memo(function SchoolMarker({
   programFilters,
 }: {
   cluster: SchoolCluster;
-  index: number;
   onEditSchool: (school: School) => void;
   onMarkerClick?: (cluster: SchoolCluster) => void;
   isPresenting: boolean;
@@ -484,8 +522,8 @@ const SchoolMarker = memo(function SchoolMarker({
   programFilters: ProgramFilters;
 }) {
   const icon = useMemo(
-    () => createSchoolIcon(cluster, index, { showLabel, showNameLabel, zoom, isPresenting, programFilters }),
-    [cluster, index, isPresenting, programFilters, showLabel, showNameLabel, zoom],
+    () => createSchoolIcon(cluster, { showLabel, showNameLabel, zoom, isPresenting, programFilters }),
+    [cluster, isPresenting, programFilters, showLabel, showNameLabel, zoom],
   );
 
   return (
@@ -685,6 +723,7 @@ export default function MapWrapper({
   const schools = providedSchools || coerceProgramSchools(schoolsQuery.data || []);
   const [mounted, setMounted] = useState(false);
   const [zoom, setZoom] = useState(11);
+  const [currentBounds, setCurrentBounds] = useState<L.LatLngBounds | null>(null);
   const [isDrawingEnabled, setIsDrawingEnabled] = usePersistentState("trimex-gis-map:draw-toolbar-open-v2", false);
   const drawButtonRef = useRef<HTMLButtonElement | null>(null);
   const drawing = useDrawing();
@@ -699,6 +738,14 @@ export default function MapWrapper({
 
   const plottedSchools = useMemo(() => mappedSchools(schools || []), [schools]);
   const clusters = useMemo(() => clusterSchools(plottedSchools, zoom, uiMapSettings.clusters), [plottedSchools, zoom, uiMapSettings.clusters]);
+  
+  // Performance optimization: only render clusters/markers visible in the current viewport bounds
+  const visibleClusters = useMemo(() => {
+    if (!currentBounds) return clusters;
+    const paddedBounds = currentBounds.pad(0.15); // pad by 15% so pins don't pop out abruptly at screen edges
+    return clusters.filter((cluster) => paddedBounds.contains([cluster.lat, cluster.lng]));
+  }, [clusters, currentBounds]);
+
   const showMunicipalityLayer = uiMapSettings.overlays && (uiMapSettings.barangayLabels || uiMapSettings.cityLabels);
 
   const annotationLayerActive = Boolean(leafletMap) && drawSettings.showDrawings;
@@ -827,6 +874,7 @@ export default function MapWrapper({
         <MapInstanceBridge onReady={handleMapReady} />
         <MapSizeController schools={plottedSchools} />
         <ZoomWatcher onZoomChange={handleZoomChange} />
+        <ViewportWatcher onBoundsChange={setCurrentBounds} />
         <TourHandler isTouring={isTouring} schools={plottedSchools} />
         <MapGestureGuard active={drawInteractionActive && isActiveCanvasStroke} />
         <MapAnnotationClickBridge
@@ -841,11 +889,10 @@ export default function MapWrapper({
         />
         {showMunicipalityLayer && <MunicipalityLabels schools={plottedSchools} />}
 
-        {clusters.map((cluster, index) => (
+        {visibleClusters.map((cluster) => (
           <SchoolMarker
             key={cluster.id}
             cluster={cluster}
-            index={index}
             onEditSchool={onEditSchool}
             onMarkerClick={onMarkerClick}
             isPresenting={isPresenting}
