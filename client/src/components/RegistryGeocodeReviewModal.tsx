@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,31 @@ interface GeocodeResult {
   isDiscarded?: boolean;
   isEditingQuery?: boolean;
   editQueryDraft?: string;
+  duplicateOf?: string;
+}
+
+function inferSchoolType(name: string): string | undefined {
+  const lower = name.toLowerCase();
+  if (lower.includes("university") || lower.includes("univ")) return "University";
+  if (lower.includes("college") || lower.includes("coll")) return "College";
+  if (lower.includes("senior high") || lower.includes("shs")) return "Senior High School";
+  if (lower.includes("high school") || lower.includes("nhs") || lower.includes("jhs") || lower.includes("academy") || lower.includes("institute")) return "High School";
+  if (lower.includes("elementary") || lower.includes("es") || lower.includes("school")) return "Elementary";
+  return undefined;
+}
+
+function findDuplicate(lat: number, lng: number, currentId: number, allSchools: School[]): string | undefined {
+  for (const s of allSchools) {
+    if (s.id !== currentId && s.latitude && s.longitude) {
+      const dLat = s.latitude - lat;
+      const dLng = s.longitude - lng;
+      const dist = Math.sqrt(dLat * dLat + dLng * dLng);
+      if (dist < 0.0005) { // Roughly 50 meters
+        return s.schoolName;
+      }
+    }
+  }
+  return undefined;
 }
 
 async function geocodeSingle(
@@ -66,6 +92,8 @@ export function RegistryGeocodeReviewModal({
   const [results, setResults] = useState<GeocodeResult[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  const { data: allSchools = [] } = useQuery<School[]>({ queryKey: ["/api/schoolRegistry"] });
 
   const { isLoaded } = useJsApiLoader({
     id: "google-map-script",
@@ -117,9 +145,10 @@ export function RegistryGeocodeReviewModal({
       });
       try {
         const geo = await geocodeSingle(geocoder, initial[i].searchQuery);
+        const dupName = findDuplicate(geo.lat, geo.lng, initial[i].schoolId, allSchools);
         setResults((cur) => {
           const next = [...cur];
-          next[i] = { ...next[i], status: "success", ...geo };
+          next[i] = { ...next[i], status: "success", ...geo, duplicateOf: dupName };
           return next;
         });
       } catch (err: any) {
@@ -146,9 +175,10 @@ export function RegistryGeocodeReviewModal({
     try {
       const query = results[index].searchQuery;
       const geo = await geocodeSingle(geocoder, query);
+      const dupName = findDuplicate(geo.lat, geo.lng, results[index].schoolId, allSchools);
       setResults((cur) => {
         const next = [...cur];
-        next[index] = { ...next[index], status: "success", ...geo };
+        next[index] = { ...next[index], status: "success", ...geo, duplicateOf: dupName };
         return next;
       });
     } catch (err: any) {
@@ -206,16 +236,23 @@ export function RegistryGeocodeReviewModal({
     setIsSaving(true);
     try {
       await Promise.all(
-        toSave.map((r) =>
-          apiRequest("PATCH", `/api/schoolRegistry/${r.schoolId}`, {
+        toSave.map((r) => {
+          const original = schoolsToProcess.find((s) => s.id === r.schoolId);
+          let schoolType = original?.schoolType;
+          if (!schoolType || schoolType === "Unknown") {
+            schoolType = inferSchoolType(r.name) || "Unknown";
+          }
+
+          return apiRequest("PUT", `/api/schoolRegistry/${r.schoolId}`, {
             latitude: r.lat,
             longitude: r.lng,
             isActive: true,
             source: "Bulk Geocoding Manual Assist",
+            schoolType: schoolType !== "Unknown" ? schoolType : undefined,
             ...(r.municipality ? { municipality: r.municipality } : {}),
             ...(r.province ? { province: r.province } : {}),
-          })
-        )
+          });
+        })
       );
       toast({ title: "Updates Saved", description: `Successfully updated ${toSave.length} schools.` });
       queryClient.invalidateQueries({ queryKey: ["/api/schoolRegistry"] });
@@ -267,17 +304,16 @@ export function RegistryGeocodeReviewModal({
               {results.map((result, index) => (
                 <div
                   key={index}
-                  className={`grid grid-cols-12 gap-3 px-4 py-3 text-sm transition-colors ${
-                    result.isDiscarded ? "bg-slate-50/50 opacity-50" : "hover:bg-slate-50/80"
-                  }`}
+                  className={`grid grid-cols-12 gap-3 px-4 py-3 text-sm transition-colors ${result.isDiscarded ? "bg-slate-50/50 opacity-50" : "hover:bg-slate-50/80"
+                    }`}
                 >
                   {/* School name + status */}
                   <div className="col-span-3 flex items-start gap-2 min-w-0">
                     <div className="mt-0.5 shrink-0">
-                      {result.status === "pending"    && <div className="h-4 w-4 rounded-full border-2 border-slate-200" />}
+                      {result.status === "pending" && <div className="h-4 w-4 rounded-full border-2 border-slate-200" />}
                       {result.status === "processing" && <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />}
-                      {result.status === "success"    && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-                      {result.status === "failed"     && <XCircle className="h-4 w-4 text-rose-500" />}
+                      {result.status === "success" && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+                      {result.status === "failed" && <XCircle className="h-4 w-4 text-rose-500" />}
                     </div>
                     <div className="min-w-0">
                       <p className={`text-xs font-semibold truncate ${result.isDiscarded ? "line-through text-slate-400" : "text-slate-900"}`}>
@@ -358,6 +394,11 @@ export function RegistryGeocodeReviewModal({
                         <p className="font-mono text-[9px] text-slate-400 mt-0.5">
                           {result.lat?.toFixed(5)}, {result.lng?.toFixed(5)}
                         </p>
+                        {result.duplicateOf && (
+                          <Badge variant="outline" className="mt-1 max-w-fit border-amber-200 bg-amber-50 text-[9px] text-amber-700">
+                            Possible duplicate of: {result.duplicateOf}
+                          </Badge>
+                        )}
                       </>
                     ) : (
                       <span className="text-slate-400 text-xs">-</span>

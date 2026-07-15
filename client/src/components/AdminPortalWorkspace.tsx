@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid, Legend } from 'recharts';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area, CartesianGrid, Legend, Label as RechartsLabel } from 'recharts';
 import {
   Activity,
   AlertCircle,
@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import type { Import, SchoolRegistry as School, StudentProcessed } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
-import { ALL_PROGRAM_FILTER, getFullCatalog, setDynamicCatalog, normalizeStudentProgramValue, recognizeProgram } from "@shared/programIntelligence";
+import { ALL_PROGRAM_FILTER, getFullCatalog, setDynamicCatalog, normalizeStudentProgramValue, recognizeProgram, getDepartmentColor, getPinColorByProgram } from "@shared/programIntelligence";
 import { formatAdmissionLabel, parseStudentNumberTag } from "@/lib/adminPortalUtils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -437,16 +437,39 @@ export function AdminPortalWorkspace({
 
     // 2. Top Programs (Bar Chart)
     const programMap = new Map<string, number>();
+    const deptMap = new Map<string, number>();
     studentRows.forEach(s => {
       if (s.enrollmentStatus === "Archived") return;
-      if (s.program) {
+      if (s.program && s.program !== "Unknown") {
         programMap.set(s.program, (programMap.get(s.program) || 0) + 1);
+      }
+      if (s.college && s.college !== "Unknown") {
+        deptMap.set(s.college, (deptMap.get(s.college) || 0) + 1);
       }
     });
     const topPrograms = Array.from(programMap.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 5); // Top 5
+      
+    const topDepartments = Array.from(deptMap.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Top 5
+
+    // Standalone Programs
+    const standaloneProgramMap = new Map<string, number>();
+    studentRows.forEach(s => {
+      if (s.enrollmentStatus === "Archived") return;
+      if (s.college && s.college.toLowerCase().includes("standalone") && s.program && s.program !== "Unknown") {
+        standaloneProgramMap.set(s.program, (standaloneProgramMap.get(s.program) || 0) + 1);
+      }
+    });
+
+    const topStandalonePrograms = Array.from(standaloneProgramMap.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5); // Top 5 Standalone Programs
 
     // 3. Geographic Distribution (Bar Chart)
     const geoMap = new Map<string, number>();
@@ -518,7 +541,7 @@ export function AdminPortalWorkspace({
       { name: 'Unmapped / Missing', value: unmapped, fill: '#f43f5e' }
     ];
 
-    return { admissionDemographics, COLORS, topPrograms, geoDistribution, enrollmentTrends, topFeederSchools, yearLevelDistribution, mappingProgress };
+    return { admissionDemographics, COLORS, topPrograms, topDepartments, topStandalonePrograms, geoDistribution, enrollmentTrends, topFeederSchools, yearLevelDistribution, mappingProgress };
   }, [studentRows, schools]);
 
   const archiveFolders = useMemo(() => {
@@ -758,25 +781,23 @@ export function AdminPortalWorkspace({
                     </CardContent>
                   </Card>
 
-                  {/* Top Programs */}
+                  {/* Top Departments */}
                   <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
                     <CardHeader className="pb-2 pt-5 px-6">
-                      <CardTitle className="text-sm font-semibold text-slate-800">Top Programs</CardTitle>
+                      <CardTitle className="text-sm font-semibold text-slate-800">Top Departments</CardTitle>
                     </CardHeader>
                     <CardContent className="h-72 px-4 pb-4">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData.topPrograms} layout="vertical" margin={{ left: 50, right: 20 }}>
-                          <defs>
-                            <linearGradient id="programGradient" x1="0" y1="0" x2="1" y2="0">
-                              <stop offset="0%" stopColor="#8b5cf6" />
-                              <stop offset="100%" stopColor="#a855f7" />
-                            </linearGradient>
-                          </defs>
+                        <BarChart data={chartData.topDepartments} layout="vertical" margin={{ left: 50, right: 20 }}>
                           <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
                           <XAxis type="number" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
                           <YAxis dataKey="name" type="category" width={90} tick={{ fontSize: 11, fill: '#475569', fontWeight: 500 }} axisLine={false} tickLine={false} />
                           <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
-                          <Bar dataKey="count" fill="url(#programGradient)" radius={[0, 6, 6, 0]} barSize={24} />
+                          <Bar dataKey="count" radius={[0, 6, 6, 0]} barSize={24}>
+                            {chartData.topDepartments.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={getDepartmentColor(entry.name)} />
+                            ))}
+                          </Bar>
                         </BarChart>
                       </ResponsiveContainer>
                     </CardContent>
@@ -830,22 +851,94 @@ export function AdminPortalWorkspace({
                     </CardContent>
                   </Card>
 
-                  {/* GIS Mapping Success */}
+                  {/* School Mapping Status */}
                   <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl">
                     <CardHeader className="pb-2 pt-5 px-6">
-                      <CardTitle className="text-sm font-semibold text-slate-800">Geographic Information System (GIS) Mapping Success</CardTitle>
+                      <CardTitle className="text-sm font-semibold text-slate-800">School Mapping Status</CardTitle>
                     </CardHeader>
                     <CardContent className="h-72 px-2 pb-4">
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
-                          <Pie data={chartData.mappingProgress} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={65} outerRadius={90} label={{ fontSize: 11, fill: '#64748b' }} stroke="none">
+                          <defs>
+                            <linearGradient id="mappedGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#34d399" />
+                              <stop offset="100%" stopColor="#059669" />
+                            </linearGradient>
+                            <linearGradient id="unmappedGradient" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#fb7185" />
+                              <stop offset="100%" stopColor="#e11d48" />
+                            </linearGradient>
+                            <filter id="pieShadow" x="-20%" y="-20%" width="140%" height="140%">
+                              <feDropShadow dx="0" dy="4" stdDeviation="6" floodOpacity="0.15" />
+                            </filter>
+                          </defs>
+                          <Pie 
+                            data={chartData.mappingProgress} 
+                            dataKey="value" 
+                            nameKey="name" 
+                            cx="50%" 
+                            cy="50%" 
+                            innerRadius={65} 
+                            outerRadius={90} 
+                            paddingAngle={5}
+                            stroke="none"
+                            cornerRadius={4}
+                          >
                             {chartData.mappingProgress.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.fill} />
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={index === 0 ? "url(#mappedGradient)" : "url(#unmappedGradient)"}
+                                filter="url(#pieShadow)" 
+                              />
                             ))}
+                            <RechartsLabel
+                              content={({ viewBox }) => {
+                                if (viewBox && "cx" in viewBox && "cy" in viewBox && viewBox.cx !== undefined && viewBox.cy !== undefined) {
+                                  const total = chartData.mappingProgress[0].value + chartData.mappingProgress[1].value;
+                                  const mapped = chartData.mappingProgress[0].value;
+                                  const percentage = total > 0 ? Math.round((mapped / total) * 100) : 0;
+                                  return (
+                                    <text x={viewBox.cx} y={viewBox.cy} textAnchor="middle" dominantBaseline="middle">
+                                      <tspan x={viewBox.cx} y={viewBox.cy - 4} className="fill-slate-700 text-2xl font-bold">
+                                        {percentage}%
+                                      </tspan>
+                                      <tspan x={viewBox.cx} y={viewBox.cy + 16} className="fill-slate-500 text-[10px] font-medium uppercase tracking-wider">
+                                        Mapped
+                                      </tspan>
+                                    </text>
+                                  );
+                                }
+                                return null;
+                              }}
+                            />
                           </Pie>
                           <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
                           <Legend wrapperStyle={{ fontSize: 12, paddingTop: '10px' }} />
                         </PieChart>
+                      </ResponsiveContainer>
+                    </CardContent>
+                  </Card>
+
+                  {/* Standalone Top Programs */}
+                  <Card className="border-white/70 bg-white/70 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-xl lg:col-span-2">
+                    <CardHeader className="pb-2 pt-5 px-6">
+                      <CardTitle className="text-sm font-semibold text-slate-800">
+                        Top Standalone Program: {chartData.topStandalonePrograms[0]?.name || "N/A"}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="h-72 px-4 pb-4">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData.topStandalonePrograms} layout="vertical" margin={{ left: 50, right: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#e2e8f0" />
+                          <XAxis type="number" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                          <YAxis dataKey="name" type="category" width={160} tick={{ fontSize: 11, fill: '#475569', fontWeight: 500 }} axisLine={false} tickLine={false} />
+                          <Tooltip cursor={{ fill: 'transparent' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                          <Bar dataKey="count" radius={[0, 6, 6, 0]} barSize={24}>
+                            {chartData.topStandalonePrograms.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={getPinColorByProgram(entry.name)} />
+                            ))}
+                          </Bar>
+                        </BarChart>
                       </ResponsiveContainer>
                     </CardContent>
                   </Card>

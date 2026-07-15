@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Building2, Plus, Trash2, Edit2, Bookmark, BookmarkCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -100,6 +100,7 @@ export function DepartmentManagementWorkspace() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/departments"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/programs"] });
       toast({ title: "Department updated successfully" });
       setEditingDept(null);
     },
@@ -284,6 +285,7 @@ export function DepartmentManagementWorkspace() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Department</DialogTitle>
+            <DialogDescription className="hidden">Edit department details</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
             <div className="flex flex-col gap-2">
@@ -329,6 +331,7 @@ export function DepartmentManagementWorkspace() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Program</DialogTitle>
+            <DialogDescription className="hidden">Edit program details</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4 py-4">
             <div className="flex flex-col gap-2">

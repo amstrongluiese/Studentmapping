@@ -7,6 +7,7 @@ import {
   distributionMatchesProgramFilters,
   getDominantDepartment,
   getFilteredStudentCount,
+  getDepartmentColor,
   getProgramInfo,
   normalizeStudentProgramValue,
   normalizeProgramCode,
@@ -17,25 +18,7 @@ import {
   type ProgramInfo,
 } from "./programRecognition";
 
-export {
-  ALL_PROGRAM_FILTER,
-  PROGRAM_CATALOG,
-  getFullCatalog,
-  setDynamicCatalog,
-  getDepartmentColor,
-  getDominantDepartment,
-  getFilteredStudentCount,
-  getPinColorByProgram,
-  getProgramDistribution,
-  getProgramInfo,
-  normalizeStudentProgramValue,
-  normalizeProgramCode,
-  programFilterIsActive,
-  programMatchesFilters,
-  type ProgramDistributionEntry,
-  type ProgramFilters,
-  type ProgramInfo,
-} from "./programRecognition";
+export * from "./programRecognition";
 
 export const ACTIVE_GIS_STUDENT_STATUSES = new Set(["Active", "Enrolled", "Officially Enrolled", "OE", "NOE"]);
 
@@ -145,7 +128,7 @@ export function buildProgramAnalytics(
       const currentDepartment = departmentMap.get(department) || {
         department,
         departmentName: entry.departmentName || entry.collegeName || department,
-        color: entry.color,
+        color: getDepartmentColor(department),
         count: 0,
       };
       departmentMap.set(department, { ...currentDepartment, count: currentDepartment.count + entry.count });

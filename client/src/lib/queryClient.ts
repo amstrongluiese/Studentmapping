@@ -3,6 +3,17 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
+    try {
+      const json = JSON.parse(text);
+      if (json.message) throw new Error(json.message);
+    } catch (e) {
+      if (e instanceof Error && e.message !== "Unexpected token 'out of data'") {
+        // re-throw if it was our parsed error
+        if (e.message !== "Unexpected token o in JSON at position 1" && !e.message.startsWith("Unexpected token")) {
+          throw e;
+        }
+      }
+    }
     throw new Error(`${res.status}: ${text}`);
   }
 }

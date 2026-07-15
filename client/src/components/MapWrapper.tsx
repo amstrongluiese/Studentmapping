@@ -231,7 +231,7 @@ function createSchoolIcon(
   const countLabel = isCluster ? `${cluster.schools.length}` : `${cluster.totalStudents}`;
   const primaryTitle = isCluster
     ? `${cluster.schools.length} feeder schools`
-    : cluster.schools[0].name;
+    : cluster.schools[0].schoolName;
   const subtitle = isCluster
     ? `${cluster.totalStudents.toLocaleString()} students in this area`
     : `${cluster.schools[0].municipality || "Laguna"} - ${cluster.schools[0].filteredStudentCount.toLocaleString()} students`;

@@ -13,6 +13,7 @@ export interface ProgramInfo {
   track: string;
   level: string;
   color: string;
+  departmentColor?: string;
   description?: string;
   note?: string;
 }
@@ -258,9 +259,19 @@ export function logProgramRecognitionAudit(
 
 export function getDepartmentColor(departmentOrProgram: string | null | undefined) {
   const programInfo = getProgramInfo(departmentOrProgram);
+  if (programInfo && programInfo.departmentColor) return programInfo.departmentColor;
   if (programInfo) return programInfo.color;
 
   const normalized = normalizeProgramCode(departmentOrProgram);
+  
+  const catalog = getFullCatalog();
+  const depMatch = catalog.find(
+    (p) => normalizeProgramCode(p.department) === normalized || normalizeProgramCode(p.departmentName) === normalized
+  );
+  if (depMatch && depMatch.departmentColor) {
+    return depMatch.departmentColor;
+  }
+
   if (normalized === "COE") return PROGRAM_COLORS.COE;
   if (normalized === "CBA") return PROGRAM_COLORS.CBA;
   if (normalized === "CCS") return PROGRAM_COLORS.CCS;

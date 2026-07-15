@@ -54,17 +54,19 @@ async function refreshCatalog() {
   const deptMap = new Map(deptRecords.map(d => [d.id, d]));
   
   const formatted = dbPrograms.map(p => {
-    const dept = deptMap.get(p.departmentId)!;
+    const dept = deptMap.get(p.departmentId);
     return {
+      ...p,
       code: p.code,
-      college: dept.code,
-      collegeName: dept.name,
-      department: dept.code,
-      departmentName: dept.name,
+      college: dept?.code || "Unknown",
+      collegeName: dept?.name || "Unknown",
+      department: dept?.code || "Unknown",
+      departmentName: dept?.name || "Unknown",
       program: p.name,
       track: p.track || "General",
       level: p.level,
-      color: p.color
+      color: p.color,
+      departmentColor: dept?.color || "#e5e7eb"
     };
   });
   setDynamicCatalog(formatted as any);
@@ -311,81 +313,128 @@ export async function registerRoutes(
   });
 
   app.post("/api/departments", async (req, res) => {
-    const { id, code, name, color, targetValue } = req.body;
-    const db = getDb();
-    
-    if (id) {
-      const updated = await db.update(departments)
-        .set({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() })
-        .where(eq(departments.id, id))
-        .returning();
-      res.json(updated[0]);
-    } else {
-      const existing = await db.select().from(departments).where(eq(departments.code, code)).limit(1);
-      if (existing.length > 0) {
+    try {
+      const { id, code, name, color, targetValue } = req.body;
+      const db = getDb();
+      
+      if (id) {
         const updated = await db.update(departments)
-          .set({ name, color, targetValue: targetValue || 0, updatedAt: new Date() })
-          .where(eq(departments.id, existing[0].id))
+          .set({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() })
+          .where(eq(departments.id, id))
           .returning();
         res.json(updated[0]);
       } else {
-        const inserted = await db.insert(departments)
-          .values({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() })
-          .returning();
-        res.json(inserted[0]);
+        const existing = await db.select().from(departments).where(eq(departments.code, code)).limit(1);
+        if (existing.length > 0) {
+          const updated = await db.update(departments)
+            .set({ name, color, targetValue: targetValue || 0, updatedAt: new Date() })
+            .where(eq(departments.id, existing[0].id))
+            .returning();
+          res.json(updated[0]);
+        } else {
+          const inserted = await db.insert(departments)
+            .values({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() })
+            .returning();
+          res.json(inserted[0]);
+        }
       }
+    } catch (error: any) {
+      if (error.code === '23505') {
+        console.warn(`[POST /api/departments] Duplicate code attempt: ${req.body.code}`);
+        return res.status(400).json({ message: "A department with this code already exists." });
+      }
+      console.error("[POST /api/departments] error:", error);
+      res.status(500).json({ message: error.message || "Failed to save department" });
     }
   });
 
   app.delete("/api/departments/:id", async (req, res) => {
-    const db = getDb();
-    // Also delete associated programs
-    await db.delete(programs).where(eq(programs.departmentId, parseInt(req.params.id)));
-    await db.delete(departments).where(eq(departments.id, parseInt(req.params.id)));
-    res.json({ success: true });
+    try {
+      const db = getDb();
+      // Also delete associated programs
+      await db.delete(programs).where(eq(programs.departmentId, parseInt(req.params.id)));
+      await db.delete(departments).where(eq(departments.id, parseInt(req.params.id)));
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[DELETE /api/departments/:id] error:", error);
+      res.status(500).json({ message: error.message || "Failed to delete department" });
+    }
   });
 
   app.get("/api/programs", async (req, res) => {
     const db = getDb();
-    const records = await db.select().from(programs);
-    res.json(records);
+    const dbPrograms = await db.select().from(programs);
+    const deptRecords = await db.select().from(departments);
+    const deptMap = new Map(deptRecords.map(d => [d.id, d]));
+    
+    const formatted = dbPrograms.map(p => {
+      const dept = deptMap.get(p.departmentId);
+      return {
+        ...p,
+        college: dept?.code || "Unknown",
+        collegeName: dept?.name || "Unknown",
+        department: dept?.code || "Unknown",
+        departmentName: dept?.name || "Unknown",
+        program: p.name,
+        departmentColor: dept?.color || "#e5e7eb"
+      };
+    });
+    res.json(formatted);
   });
 
   app.post("/api/programs", async (req, res) => {
-    const { id, departmentId, code, name, track, level, color, targetValue } = req.body;
-    const db = getDb();
-    
-    if (id) {
-      const updated = await db.update(programs)
-        .set({ departmentId, code, name, track, level, color, targetValue: targetValue || 0, updatedAt: new Date() })
-        .where(eq(programs.id, id))
-        .returning();
-      await refreshCatalog();
-      res.json(updated[0]);
-    } else {
-      const existing = await db.select().from(programs).where(eq(programs.code, code)).limit(1);
-      if (existing.length > 0) {
+    try {
+      const { id, departmentId, code, name, track, level, color, targetValue } = req.body;
+      const db = getDb();
+      
+      if (!departmentId) {
+        return res.status(400).json({ message: "Department ID is required" });
+      }
+
+      if (id) {
         const updated = await db.update(programs)
-          .set({ departmentId, name, track, level, color, targetValue: targetValue || 0, updatedAt: new Date() })
-          .where(eq(programs.id, existing[0].id))
+          .set({ departmentId, code, name, track, level, color, targetValue: targetValue || 0, updatedAt: new Date() })
+          .where(eq(programs.id, id))
           .returning();
         await refreshCatalog();
         res.json(updated[0]);
       } else {
-        const inserted = await db.insert(programs)
-          .values({ departmentId, code, name, track, level: level || "Bachelor", color, targetValue: targetValue || 0, updatedAt: new Date() })
-          .returning();
-        await refreshCatalog();
-        res.json(inserted[0]);
+        const existing = await db.select().from(programs).where(eq(programs.code, code)).limit(1);
+        if (existing.length > 0) {
+          const updated = await db.update(programs)
+            .set({ departmentId, name, track, level, color, targetValue: targetValue || 0, updatedAt: new Date() })
+            .where(eq(programs.id, existing[0].id))
+            .returning();
+          await refreshCatalog();
+          res.json(updated[0]);
+        } else {
+          const inserted = await db.insert(programs)
+            .values({ departmentId, code, name, track, level: level || "Bachelor", color, targetValue: targetValue || 0, updatedAt: new Date() })
+            .returning();
+          await refreshCatalog();
+          res.json(inserted[0]);
+        }
       }
+    } catch (error: any) {
+      if (error.code === '23505') {
+        console.warn(`[POST /api/programs] Duplicate code attempt: ${req.body.code}`);
+        return res.status(400).json({ message: "A program with this code already exists." });
+      }
+      console.error("[POST /api/programs] error:", error);
+      res.status(500).json({ message: error.message || "Failed to save program" });
     }
   });
 
   app.delete("/api/programs/:id", async (req, res) => {
-    const db = getDb();
-    await db.delete(programs).where(eq(programs.id, parseInt(req.params.id)));
-    await refreshCatalog();
-    res.json({ success: true });
+    try {
+      const db = getDb();
+      await db.delete(programs).where(eq(programs.id, parseInt(req.params.id)));
+      await refreshCatalog();
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[DELETE /api/programs/:id] error:", error);
+      res.status(500).json({ message: error.message || "Failed to delete program" });
+    }
   });
 
   app.post("/api/imports/match-resolution", async (req, res) => {
