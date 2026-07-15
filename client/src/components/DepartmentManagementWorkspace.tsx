@@ -313,7 +313,7 @@ export function DepartmentManagementWorkspace() {
             <div className="flex items-center gap-2">
               <Input 
                 type="color" className="w-16 h-10 p-1" 
-                value={editingDept?.color || "#000"} 
+                value={editingDept?.color || "#000000"} 
                 onChange={e => setEditingDept(prev => prev ? {...prev, color: e.target.value} : null)} 
               />
               <span className="text-sm text-slate-500">Department Color</span>
@@ -372,7 +372,7 @@ export function DepartmentManagementWorkspace() {
             <div className="flex items-center gap-2">
               <Input 
                 type="color" className="w-16 h-10 p-1" 
-                value={editingProg?.color || "#000"} 
+                value={editingProg?.color || "#000000"} 
                 onChange={e => setEditingProg(prev => prev ? {...prev, color: e.target.value} : null)} 
               />
               <span className="text-sm text-slate-500">Program Color</span>
