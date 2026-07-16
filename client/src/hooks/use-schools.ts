@@ -177,3 +177,86 @@ export function useImportSchools() {
     }
   });
 }
+
+export function useMergeSchool() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ duplicateId, targetId }: { duplicateId: number; targetId: number }) => {
+      const url = api.schoolRegistry.merge.path.replace(":id", String(duplicateId));
+      const res = await fetch(url, {
+        method: api.schoolRegistry.merge.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId }),
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to merge school");
+      }
+
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/schoolRegistry"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/mappingLogs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/schoolMatchHistory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/studentsProcessed"] });
+      
+      toast({
+        title: "School Merged",
+        description: "The duplicate school has been successfully merged.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Merge Failed",
+        description: error.message || "An unexpected error occurred",
+        variant: "destructive",
+      });
+    },
+  });
+}
+
+export function useBulkMergeSchools() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ pairs }: { pairs: { duplicateId: number; targetId: number }[] }) => {
+      const res = await fetch(api.schoolRegistry.bulkMerge.path, {
+        method: api.schoolRegistry.bulkMerge.method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pairs }),
+        credentials: "include",
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || "Failed to bulk merge schools");
+      }
+
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/schoolRegistry"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/mappingLogs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/schoolMatchHistory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/studentsProcessed"] });
+      
+      toast({
+        title: "Bulk Merge Complete",
+        description: data.message || "Schools successfully merged.",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Bulk Merge Failed",
+        description: error.message || "An unexpected error occurred",
+        variant: "destructive",
+      });
+    },
+  });
+}

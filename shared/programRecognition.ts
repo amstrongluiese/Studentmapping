@@ -62,7 +62,7 @@ export const PROGRAM_MAP: Record<string, ProgramInfo> = {
   BPA: program("BPA", "CBA", "College of Business Administration", "BPA", "", "Bachelor", PROGRAM_COLORS.CBA),
   BSCA: program("BSCA", "CBA", "College of Business Administration", "BSCA", "", "Bachelor", PROGRAM_COLORS.CBA),
   BSREM: program("BSREM", "Standalone", "Standalone Programs", "BSREM", "", "Bachelor", PROGRAM_COLORS.STANDALONE, undefined, "Created by CBA but standalone for filtering"),
-  "BS CRIM": program("BS CRIM", "Standalone", "Standalone Programs", "BS CRIM", "", "Bachelor", PROGRAM_COLORS.STANDALONE),
+  "BS CRIM": program("BS CRIM", "COJ", "College of Criminal Justice", "BS CRIM", "", "Bachelor", PROGRAM_COLORS.UNKNOWN),
   BSCPE: program("BSCPE", "COE", "College of Engineering", "BSCPE", "", "Bachelor", PROGRAM_COLORS.COE),
   BSIE: program("BSIE", "COE", "College of Engineering", "BSIE", "", "Bachelor", PROGRAM_COLORS.COE),
   "BSCS CS": program("BSCS CS", "CCS", "College of Computer Studies", "BSCS", "CS", "Bachelor", PROGRAM_COLORS.CCS),
@@ -87,9 +87,18 @@ export const PROGRAM_MAP: Record<string, ProgramInfo> = {
 export const PROGRAM_CATALOG = Object.values(PROGRAM_MAP);
 
 let dynamicCatalog: ProgramInfo[] = [];
+let dynamicDepartments: Record<string, { code: string; name: string; color: string }> = {};
 
 export function setDynamicCatalog(programs: ProgramInfo[]) {
   dynamicCatalog = programs;
+}
+
+export function setDynamicDepartments(departments: any[]) {
+  dynamicDepartments = {};
+  for (const dept of departments) {
+    dynamicDepartments[normalizeProgramCode(dept.code)] = dept;
+    dynamicDepartments[normalizeProgramCode(dept.name)] = dept;
+  }
 }
 
 export function getFullCatalog(): ProgramInfo[] {
@@ -181,38 +190,53 @@ export function getProgramInfo(value: string | null | undefined): ProgramInfo | 
   const trimmed = value.trim().toUpperCase();
   const catalog = getFullCatalog();
   const lookup = getProgramLookup();
-  if (lookup.has(trimmed)) return lookup.get(trimmed);
   
-  if (PROGRAM_ALIASES[trimmed]) {
-    return lookup.get(PROGRAM_ALIASES[trimmed]);
+  let info: ProgramInfo | undefined = undefined;
+
+  if (lookup.has(trimmed)) info = lookup.get(trimmed);
+  else if (PROGRAM_ALIASES[trimmed]) {
+    info = lookup.get(PROGRAM_ALIASES[trimmed]);
+  } else {
+    const normalized = normalizeProgramCode(trimmed);
+    const exact = lookup.get(normalized);
+    if (exact) info = exact;
+    else {
+      const compact = normalized.replace(/\s+/g, "");
+      const compactMatch = catalog.find((record) => record.code.replace(/\s+/g, "") === compact);
+      if (compactMatch) info = compactMatch;
+      else {
+        const tokens = new Set(trimmed.split(/[\s-]+/));
+        const tokenMatch = catalog.find((record) => {
+          const parts = record.code.split(" ");
+          return parts.every((part) => tokens.has(part));
+        });
+        if (tokenMatch) info = tokenMatch;
+        else if (tokens.has("INFORMATION") && tokens.has("TECHNOLOGY")) info = lookup.get("BSIT MWD");
+        else if (tokens.has("COMPUTER") && tokens.has("ENGINEERING")) info = lookup.get("BSCPE");
+        else if (tokens.has("COMPUTER") && tokens.has("SCIENCE") && tokens.has("DATA")) info = lookup.get("BSCS DS");
+        else if (tokens.has("COMPUTER") && tokens.has("SCIENCE")) info = lookup.get("BSCS CS");
+        else if (tokens.has("ACCOUNTANCY")) info = lookup.get("BSA");
+        else if (tokens.has("CRIMINOLOGY")) info = lookup.get("BS CRIM");
+        else if (tokens.has("TOURISM")) info = lookup.get("BSTM");
+        else if (tokens.has("NURSING") && (tokens.has("AID") || tokens.has("AIDE"))) info = lookup.get("NA");
+      }
+    }
   }
 
-  const normalized = normalizeProgramCode(trimmed);
-  const exact = lookup.get(normalized);
-  if (exact) return exact;
+  if (info) {
+    const deptNorm = normalizeProgramCode(info.department);
+    const dynDept = dynamicDepartments[deptNorm];
+    if (dynDept) {
+      const isDynamic = dynamicCatalog.find(p => p.code === info!.code);
+      return {
+        ...info,
+        departmentColor: dynDept.color,
+        color: isDynamic ? info.color : dynDept.color
+      };
+    }
+  }
 
-  const compact = normalized.replace(/\s+/g, "");
-  const compactMatch = catalog.find((record) => record.code.replace(/\s+/g, "") === compact);
-  if (compactMatch) return compactMatch;
-
-  // 4. Token-based fallback matching
-  const tokens = new Set(trimmed.split(/[\s-]+/));
-  const tokenMatch = catalog.find((record) => {
-    const parts = record.code.split(" ");
-    return parts.every((part) => tokens.has(part));
-  });
-  if (tokenMatch) return tokenMatch;
-
-  if (tokens.has("INFORMATION") && tokens.has("TECHNOLOGY")) return lookup.get("BSIT MWD");
-  if (tokens.has("COMPUTER") && tokens.has("ENGINEERING")) return lookup.get("BSCPE");
-  if (tokens.has("COMPUTER") && tokens.has("SCIENCE") && tokens.has("DATA")) return lookup.get("BSCS DS");
-  if (tokens.has("COMPUTER") && tokens.has("SCIENCE")) return lookup.get("BSCS CS");
-  if (tokens.has("ACCOUNTANCY")) return lookup.get("BSA");
-  if (tokens.has("CRIMINOLOGY")) return lookup.get("BS CRIM");
-  if (tokens.has("TOURISM")) return lookup.get("BSTM");
-  if (tokens.has("NURSING") && (tokens.has("AID") || tokens.has("AIDE"))) return lookup.get("NA");
-
-  return undefined;
+  return info;
 }
 
 export function getProgramRecognitionAudit(
@@ -258,18 +282,25 @@ export function logProgramRecognitionAudit(
 }
 
 export function getDepartmentColor(departmentOrProgram: string | null | undefined) {
-  const programInfo = getProgramInfo(departmentOrProgram);
-  if (programInfo && programInfo.departmentColor) return programInfo.departmentColor;
-  if (programInfo) return programInfo.color;
-
   const normalized = normalizeProgramCode(departmentOrProgram);
+  if (dynamicDepartments[normalized]?.color) return dynamicDepartments[normalized].color;
+
+  const programInfo = getProgramInfo(departmentOrProgram);
+  if (programInfo) {
+    const progDeptNorm = normalizeProgramCode(programInfo.department);
+    if (dynamicDepartments[progDeptNorm]?.color) return dynamicDepartments[progDeptNorm].color;
+    if (programInfo.departmentColor) return programInfo.departmentColor;
+    return programInfo.color;
+  }
   
   const catalog = getFullCatalog();
   const depMatch = catalog.find(
     (p) => normalizeProgramCode(p.department) === normalized || normalizeProgramCode(p.departmentName) === normalized
   );
-  if (depMatch && depMatch.departmentColor) {
-    return depMatch.departmentColor;
+  if (depMatch) {
+    const matchDeptNorm = normalizeProgramCode(depMatch.department);
+    if (dynamicDepartments[matchDeptNorm]?.color) return dynamicDepartments[matchDeptNorm].color;
+    if (depMatch.departmentColor) return depMatch.departmentColor;
   }
 
   if (normalized === "COE") return PROGRAM_COLORS.COE;

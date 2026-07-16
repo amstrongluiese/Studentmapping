@@ -173,6 +173,40 @@ export async function registerRoutes(
     res.status(204).send();
   });
 
+  app.post(api.schoolRegistry.merge.path, async (req, res) => {
+    try {
+      const input = api.schoolRegistry.merge.input.parse(req.body);
+      const duplicateId = Number(req.params.id);
+      await storage.mergeSchoolRegistry(duplicateId, input.targetId);
+      res.json({ success: true, message: `Successfully merged school ${duplicateId} into ${input.targetId}` });
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      res.status(500).json({ message: err instanceof Error ? err.message : "Internal Server Error" });
+    }
+  });
+
+  app.post(api.schoolRegistry.bulkMerge.path, async (req, res) => {
+    try {
+      const input = api.schoolRegistry.bulkMerge.input.parse(req.body);
+      let mergedCount = 0;
+      for (const pair of input.pairs) {
+        if (pair.duplicateId !== pair.targetId) {
+          try {
+            await storage.mergeSchoolRegistry(pair.duplicateId, pair.targetId);
+            mergedCount++;
+          } catch (mergeErr) {
+            console.error(`Failed to merge ${pair.duplicateId} into ${pair.targetId}:`, mergeErr);
+            // Continue with other pairs even if one fails
+          }
+        }
+      }
+      res.json({ success: true, message: `Successfully merged ${mergedCount} schools`, mergedCount });
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      res.status(500).json({ message: err instanceof Error ? err.message : "Internal Server Error" });
+    }
+  });
+
   app.post(api.schoolRegistry.batchDelete.path, async (req, res) => {
     try {
       const input = api.schoolRegistry.batchDelete.input.parse(req.body);

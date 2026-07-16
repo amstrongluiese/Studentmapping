@@ -16,6 +16,7 @@ import {
   isEligibleForGisMapping,
 } from "@shared/gisClassification";
 import { getSchoolStatus, hasCoordinates, normalizeSchoolName, type SchoolStatus } from "@shared/schoolRegistry";
+import { GEO_BOUNDS, isStudentActive, ACTIVE_ENROLLMENT_STATUSES } from "@shared/constants";
 import { normalizeStudentProgramValue } from "@shared/programRecognition";
 import { desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { type InsertSchoolRegistry } from '@shared/schema';
@@ -68,11 +69,12 @@ export interface VerifyMappingInput {
   createAlias?: string;
 }
 
-export const ACTIVE_GIS_STUDENT_STATUSES = ["Active", "Enrolled"];
-
 function normalizeEnrollmentStatus(value?: string | null) {
   const normalized = (value || "").trim().toLowerCase();
   if (normalized === "enrolled") return "Enrolled";
+  if (normalized === "officially enrolled") return "Officially Enrolled";
+  if (normalized === "oe") return "OE";
+  if (normalized === "noe") return "NOE";
   if (normalized === "pending") return "Pending";
   if (normalized === "dropped") return "Dropped";
   if (normalized === "transferred") return "Transferred";
@@ -95,7 +97,7 @@ function parseEnrollmentDate(value?: string | null) {
 }
 
 export function isStudentActiveForGis(status?: string | null) {
-  return ACTIVE_GIS_STUDENT_STATUSES.includes(normalizeEnrollmentStatus(status));
+  return isStudentActive(normalizeEnrollmentStatus(status));
 }
 
 export async function recomputeSchoolStudentCounts() {
@@ -649,7 +651,7 @@ export async function getGisMapData(scholarshipsFilter?: string[], programsFilte
   
   const allSchools = await db.select().from(schoolRegistry).where(eq(schoolRegistry.isActive, true));
   const students = await db.select().from(studentsProcessed).where(
-    inArray(studentsProcessed.enrollmentStatus, ACTIVE_GIS_STUDENT_STATUSES)
+    inArray(studentsProcessed.enrollmentStatus, [...ACTIVE_ENROLLMENT_STATUSES])
   );
 
   const schoolsMap = new Map(allSchools.map(s => [s.id, {

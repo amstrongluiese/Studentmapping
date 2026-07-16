@@ -264,6 +264,7 @@
   animation: fadeInScale 0.24s ease-out both;
   isolation: isolate;
   overflow: visible;
+  will-change: transform, opacity;
 }
 
 .gis-marker-core {

@@ -26,8 +26,8 @@ interface TableToolbarProps {
   onDelete: () => Promise<void>;
   isDeleting: boolean;
   deleteItemName?: string;
-  
   className?: string;
+  children?: React.ReactNode;
 }
 
 export function TableToolbar({
@@ -39,7 +39,8 @@ export function TableToolbar({
   onDelete,
   isDeleting,
   deleteItemName = "records",
-  className
+  className,
+  children
 }: TableToolbarProps) {
   const [open, setOpen] = React.useState(false);
 
@@ -71,6 +72,12 @@ export function TableToolbar({
           </Button>
         )}
       </div>
+      
+      {children && (
+        <div className="flex flex-wrap items-center gap-2">
+          {children}
+        </div>
+      )}
 
       {selectedCount > 0 && (
         <div className="flex items-center gap-2 shrink-0 animate-in fade-in slide-in-from-right-4 duration-200">

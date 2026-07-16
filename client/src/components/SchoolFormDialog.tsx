@@ -31,7 +31,7 @@ import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
 import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
 
-const libraries: "places"[] = ["places"];
+import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_VERSION } from "@/lib/googleMapsConfig";
 
 const LAGUNA_CENTER = { lat: 14.1667, lng: 121.25 };
 
@@ -40,6 +40,7 @@ interface SchoolFormDialogProps {
   onOpenChange: (open: boolean) => void;
   initialData?: SchoolRecord | null;
   defaultCoordinates?: { latitude: number; longitude: number } | null;
+  studentOrigin?: string;
 }
 
 export function SchoolFormDialog({
@@ -47,6 +48,7 @@ export function SchoolFormDialog({
   onOpenChange,
   initialData,
   defaultCoordinates,
+  studentOrigin,
 }: SchoolFormDialogProps) {
   const schoolsQuery = useSchools();
   const existingSchools = schoolsQuery.data || [];
@@ -61,9 +63,10 @@ export function SchoolFormDialog({
   const [markerPos, setMarkerPos] = useState<{ lat: number; lng: number } | null>(null);
 
   const { isLoaded } = useJsApiLoader({
+    version: GOOGLE_MAPS_VERSION,
     id: "google-map-script",
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
-    libraries,
+    libraries: GOOGLE_MAPS_LIBRARIES,
   });
 
   const formSchema = api.schoolRegistry.create.input.extend({
@@ -214,14 +217,57 @@ export function SchoolFormDialog({
     try {
       const geocoder = new window.google.maps.Geocoder();
       const currentMunicipality = form.getValues("municipality")?.trim();
-      const searchQuery = currentMunicipality
-        ? `${name}, ${currentMunicipality}, Philippines`
-        : `${name}, Philippines`;
+      
+      const primaryQuery = `${name}, Philippines`;
+      let fallbackQuery = primaryQuery;
+      if (currentMunicipality) {
+         fallbackQuery = `${name}, ${currentMunicipality}, Philippines`;
+      }
 
-      const response = await geocoder.geocode({ address: searchQuery, region: "ph" });
-      if (!response.results || response.results.length === 0) throw new Error("No results found on Google Maps.");
+      let response;
+      let res;
 
-      const res = response.results[0];
+      const isGeneric = (result: google.maps.GeocoderResult) => {
+        return result.types.includes("administrative_area_level_1") || 
+               result.types.includes("administrative_area_level_2") || 
+               result.types.includes("country") ||
+               result.types.includes("locality");
+      };
+
+      let primaryRes: any = null;
+
+      try {
+        response = await geocoder.geocode({ address: primaryQuery, region: "ph" });
+        if (response.results && response.results.length > 0) {
+           res = response.results[0];
+           primaryRes = res;
+           if (isGeneric(res) && fallbackQuery !== primaryQuery) {
+              res = null; 
+           }
+        }
+      } catch (err) {}
+
+      if (!res && fallbackQuery !== primaryQuery) {
+         try {
+           const fallbackResponse = await geocoder.geocode({ address: fallbackQuery, region: "ph" });
+           if (fallbackResponse.results && fallbackResponse.results.length > 0) {
+              const fallbackRes = fallbackResponse.results[0];
+              if (!isGeneric(fallbackRes) || !primaryRes) {
+                 res = fallbackRes;
+              } else {
+                 res = primaryRes;
+              }
+           }
+         } catch (err) {
+           res = primaryRes;
+         }
+      }
+
+      if (!res && primaryRes) {
+         res = primaryRes;
+      }
+
+      if (!res) throw new Error("No results found on Google Maps.");
       const lat = res.geometry.location.lat();
       const lng = res.geometry.location.lng();
       
@@ -309,6 +355,11 @@ export function SchoolFormDialog({
             <DialogDescription>
               Search the local master directory first. Click on the map to place the pin manually, or use Locate.
             </DialogDescription>
+            {studentOrigin && (
+              <div className="mt-2 bg-primary/10 text-primary px-3 py-2 rounded-md text-sm font-medium">
+                <strong>Supporting Demographics:</strong> Most enrolled students are from {studentOrigin}.
+              </div>
+            )}
           </DialogHeader>
 
           <Form {...(form as any)}>

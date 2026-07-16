@@ -25,6 +25,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { Link } from "wouter";
+import { GEO_BOUNDS, isStudentActive } from "@shared/constants";
 import { api } from "@shared/routes";
 import type { Referral, ReferralInput, SchoolRegistry, Student } from "@shared/schema";
 import { getSchoolStatus, hasCoordinates, normalizeSchoolName } from "@shared/schoolRegistry";
@@ -52,15 +53,19 @@ import MapWrapper, {
   type SchoolCluster,
 } from "@/components/MapWrapper";
 import { SchoolFormDialog } from "@/components/SchoolFormDialog";
+import { DuplicateSchoolReviewModal } from "@/components/DuplicateSchoolReviewModal";
+import { BulkMergeReviewModal } from "@/components/BulkMergeReviewModal";
 import { useDeleteSchool, useSchools, useUpdateSchool } from "@/hooks/use-schools";
 import { useGisOverview, useImportLogs, useProcessedStudents } from "@/hooks/use-gis-admin";
 import { useCreateReferral, useDeleteReferral, useReferrals, useUpdateReferral } from "@/hooks/use-referrals";
 import { useToast } from "@/hooks/use-toast";
+
 import { cn } from "@/lib/utils";
 import { exitFullscreenSafe, getFullscreenElement, requestFullscreenOnElement } from "@/lib/presentationFullscreen";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Badge } from "@/components/ui/badge";
+import { Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -130,6 +135,7 @@ type MainTab = "map" | "admin" | "referrals";
 export default function Dashboard() {
   const { toast } = useToast();
   const { theme, setTheme } = useTheme();
+  const [showAcronymsOnly, setShowAcronymsOnly] = useState(false);
   const schoolsQuery = useSchools();
   const schools = schoolsQuery.data || [];
   const isLoading = schoolsQuery.isLoading;
@@ -158,8 +164,10 @@ export default function Dashboard() {
   const [isPresenting, setIsPresenting] = usePersistentState(`${STORAGE_PREFIX}:presenting`, false);
   const [isTouring, setIsTouring] = usePersistentState(`${STORAGE_PREFIX}:touring`, false);
   const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState(`${STORAGE_PREFIX}:sidebar-collapsed`, false);
+  const [selectedMapSchoolId, setSelectedMapSchoolId] = useState<number | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [bulkMergeOpen, setBulkMergeOpen] = useState(false);
 
   useEffect(() => {
     // Force light theme
@@ -168,6 +176,8 @@ export default function Dashboard() {
     }
   }, [theme, setTheme]);
   const [editingSchool, setEditingSchool] = useState<SchoolRegistry | null>(null);
+  const [reviewingDuplicateSchool, setReviewingDuplicateSchool] = useState<SchoolRegistry | null>(null);
+  const [reviewingOriginalSchool, setReviewingOriginalSchool] = useState<SchoolRegistry | null>(null);
   const [selectedCoords, setSelectedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [registrySearch, setRegistrySearch] = useState("");
   const [clearDrawSignal, setClearDrawSignal] = useState(0);
@@ -252,12 +262,18 @@ export default function Dashboard() {
     () => buildProgramSchools(schools, processedStudents, programFilters),
     [processedStudents, programFilters, schools],
   );
+
+  const filteredProcessedStudents = useMemo(() => {
+    if (!selectedMapSchoolId) return processedStudents;
+    return processedStudents.filter((student) => student.schoolRegistryId === selectedMapSchoolId);
+  }, [processedStudents, selectedMapSchoolId]);
+
   const totalStudents = useMemo(() => {
-    return processedStudents.filter((student) => {
+    return filteredProcessedStudents.filter((student) => {
       // 1. Check if student is active
       if (!isStudentActiveForProgramGis(student)) return false;
 
-      // 2. Check if matches programFilters
+      // 2. Check if matches program filters
       const info = getProgramInfo(student.course);
       if (!info) return !programFilterIsActive(programFilters);
 
@@ -267,30 +283,37 @@ export default function Dashboard() {
       
       return true;
     }).length;
-  }, [processedStudents, programFilters]);
+  }, [filteredProcessedStudents, programFilters]);
 
   const programAnalytics = useMemo(() => {
-    const analytics = buildProgramAnalytics(programSchools, programFilters);
+    const analytics = buildProgramAnalytics(programSchools, programFilters, filteredProcessedStudents);
     return {
       ...analytics,
       totalStudents,
     };
-  }, [programFilters, programSchools, totalStudents]);
+  }, [programFilters, programSchools, totalStudents, filteredProcessedStudents]);
 
-  const mappedSchools = useMemo(() => programSchools.filter(hasCoordinates), [programSchools]);
+
+  const mappedSchools = useMemo(() => {
+    let schools = programSchools.filter(hasCoordinates);
+    if (selectedMapSchoolId) {
+      schools = schools.filter(s => s.id === selectedMapSchoolId);
+    }
+    return schools;
+  }, [programSchools, selectedMapSchoolId]);
 
   const mappedStudentsCount = useMemo(() => {
-    return programSchools
+    return mappedSchools
       .filter((school) => {
-        if (!hasCoordinates(school)) return false;
         if (school.schoolName === "Unspecified") return false;
         const lat = school.latitude;
         const lng = school.longitude;
-        // Coordinates must lie strictly inside Laguna's bounding box
-        return lat >= 13.78 && lat <= 14.58 && lng >= 120.88 && lng <= 121.72;
+        if (lat === null || lng === null) return false;
+        return lat >= GEO_BOUNDS.LAGUNA.minLat && lat <= GEO_BOUNDS.LAGUNA.maxLat && 
+               lng >= GEO_BOUNDS.LAGUNA.minLng && lng <= GEO_BOUNDS.LAGUNA.maxLng;
       })
       .reduce((sum, school) => sum + school.filteredStudentCount, 0);
-  }, [programSchools]);
+  }, [mappedSchools]);
   
   const grandTotalStudents = useMemo(() => {
     // Determine which target to show based on filters
@@ -310,27 +333,68 @@ export default function Dashboard() {
     if (target > 0) return target;
 
     // Fallback if no target set
-    return processedStudents.filter(s => {
-      const normalizedStatus = s.enrollmentStatus || "Active";
-      return (normalizedStatus === "Active" || normalizedStatus === "Enrolled" || normalizedStatus === "Officially Enrolled" || normalizedStatus === "OE");
-    }).length;
+    return processedStudents.filter(s => isStudentActive(s.enrollmentStatus)).length;
   }, [processedStudents, enrollmentTargets, programFilters]);
   const legendOffsetPx = isPresenting || sidebarCollapsed ? 16 : 336;
-  const municipalityCount = useMemo(
-    () => new Set(programSchools.map((school) => (school.municipality || "").trim()).filter(Boolean)).size,
-    [programSchools],
-  );
+  const municipalityCount = useMemo(() => {
+    const schoolsToCount = selectedMapSchoolId 
+      ? programSchools.filter(s => s.id === selectedMapSchoolId)
+      : programSchools;
+    return new Set(schoolsToCount.map((school) => (school.municipality || "").trim()).filter(Boolean)).size;
+  }, [programSchools, selectedMapSchoolId]);
   const sortedProgramSchools = useMemo(() => sortProgramSchools(programSchools, programSort), [programSchools, programSort]);
   const duplicateIds = useMemo(() => findDuplicateSchoolIds(schools), [schools]);
   const filteredSchools = useMemo(() => {
+    let result = schools;
+    if (showAcronymsOnly) {
+      result = result.filter((s) => {
+        const name = s.schoolName.trim();
+        const noSpace = name.replace(/\s+/g, "");
+        if (noSpace.length <= 8 && noSpace === noSpace.toUpperCase()) return true;
+        return false;
+      });
+    }
+
     const query = registrySearch.trim().toLowerCase();
-    if (!query) return schools;
-    return schools.filter((school) =>
+    if (!query) return result;
+    return result.filter((school) =>
       [school.schoolName, school.municipality, school.schoolType, school.isActive]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query)),
     );
-  }, [registrySearch, schools]);
+  }, [registrySearch, schools, showAcronymsOnly]);
+
+  const studentOriginsMap = useMemo(() => {
+    const map = new Map<number, string>();
+    const schoolStudents = new Map<number, { municipality: string; province: string }[]>();
+    
+    for (const s of processedStudents) {
+      if (!s.schoolRegistryId) continue;
+      if (!s.municipality && !s.province) continue;
+      
+      const students = schoolStudents.get(s.schoolRegistryId) || [];
+      students.push({ municipality: s.municipality || "", province: s.province || "" });
+      schoolStudents.set(s.schoolRegistryId, students);
+    }
+  
+    for (const [schoolId, students] of Array.from(schoolStudents.entries())) {
+      const mCount = new Map<string, number>();
+      for (const s of students) {
+        if (s.municipality) mCount.set(s.municipality, (mCount.get(s.municipality) || 0) + 1);
+      }
+      const topMunicipality = Array.from(mCount.entries()).sort((a,b) => b[1] - a[1])[0]?.[0];
+      
+      const pCount = new Map<string, number>();
+      for (const s of students) {
+        if (s.province) pCount.set(s.province, (pCount.get(s.province) || 0) + 1);
+      }
+      const topProvince = Array.from(pCount.entries()).sort((a,b) => b[1] - a[1])[0]?.[0];
+  
+      const origin = [topMunicipality, topProvince].filter(Boolean).join(", ");
+      map.set(schoolId, origin);
+    }
+    return map;
+  }, [processedStudents]);
 
   const openAddSchool = useCallback((coords?: { latitude: number; longitude: number }) => {
     setEditingSchool(null);
@@ -351,16 +415,69 @@ export default function Dashboard() {
       }
       
       const geocoder = new window.google.maps.Geocoder();
-      const searchLocation = school.municipality
-        ? `${school.schoolName}, ${school.municipality}, Philippines`
-        : `${school.schoolName}, Philippines`;
       
-      const response = await geocoder.geocode({ address: searchLocation, region: "ph" });
-      if (!response.results || response.results.length === 0) {
-        throw new Error("No results found on Google Maps.");
+      const primaryQuery = `${school.schoolName}, Philippines`;
+      let fallbackQuery = primaryQuery;
+      
+      if (school.municipality) {
+        fallbackQuery = `${school.schoolName}, ${school.municipality}, Philippines`;
+      } else if (studentOriginsMap.has(school.id)) {
+        fallbackQuery = `${school.schoolName}, ${studentOriginsMap.get(school.id)}, Philippines`;
+      }
+
+      let response;
+      let res;
+      let usedQuery = primaryQuery;
+
+      const isGeneric = (result: google.maps.GeocoderResult) => {
+        return result.types.includes("administrative_area_level_1") || 
+               result.types.includes("administrative_area_level_2") || 
+               result.types.includes("country") ||
+               result.types.includes("locality");
+      };
+
+      let primaryRes: any = null;
+
+      try {
+        // Step 1: Prioritize School Name only
+        response = await geocoder.geocode({ address: primaryQuery, region: "ph" });
+        if (response.results && response.results.length > 0) {
+           res = response.results[0];
+           primaryRes = res;
+           // If it's a generic area (e.g. searching an acronym gives a generic city), we should try the fallback
+           if (isGeneric(res) && fallbackQuery !== primaryQuery) {
+              res = null; // force fallback
+           }
+        }
+      } catch (err) {
+        // failed primary search, proceed to fallback
+      }
+
+      // Step 2: Fallback to localized search (municipality or student origin) if primary failed or was generic
+      if (!res && fallbackQuery !== primaryQuery) {
+         try {
+           const fallbackResponse = await geocoder.geocode({ address: fallbackQuery, region: "ph" });
+           if (fallbackResponse.results && fallbackResponse.results.length > 0) {
+              const fallbackRes = fallbackResponse.results[0];
+              if (!isGeneric(fallbackRes) || !primaryRes) {
+                 res = fallbackRes;
+                 usedQuery = fallbackQuery;
+              } else {
+                 res = primaryRes;
+              }
+           }
+         } catch (err) {
+           res = primaryRes;
+         }
       }
       
-      const res = response.results[0];
+      if (!res && primaryRes) {
+         res = primaryRes;
+      }
+
+      if (!res) {
+        throw new Error("No results found on Google Maps.");
+      }
       const lat = res.geometry.location.lat();
       const lng = res.geometry.location.lng();
 
@@ -395,8 +512,26 @@ export default function Dashboard() {
 
   const removeDuplicate = async (school: SchoolRegistry) => {
     if (!duplicateIds.has(school.id)) return;
-    if (!confirm(`Remove duplicate registry record for ${school.schoolName}?`)) return;
-    await deleteSchool.mutateAsync(school.id);
+    
+    const key = normalizeSchoolName(school.normalizedSchoolName || school.schoolName);
+    const matches = schools.filter(s => normalizeSchoolName(s.normalizedSchoolName || s.schoolName) === key);
+    
+    // Find other matches
+    const otherMatches = matches.filter(s => s.id !== school.id);
+    if (otherMatches.length === 0) return; // Failsafe
+    
+    let original = otherMatches[0];
+    let duplicate = school;
+
+    // Smart swap: if the one clicked is clearly better (has coordinates while the other doesn't),
+    // designate it as the original and the other as the duplicate.
+    if (hasCoordinates(school) && !hasCoordinates(original)) {
+      original = school;
+      duplicate = otherMatches[0];
+    }
+    
+    setReviewingOriginalSchool(original);
+    setReviewingDuplicateSchool(duplicate);
   };
 
   const updateMapSetting = <K extends keyof MapDisplaySettings>(key: K, value: MapDisplaySettings[K]) => {
@@ -547,8 +682,16 @@ export default function Dashboard() {
                     sort={programSort}
                     onFiltersChange={setProgramFilters}
                     onSortChange={setProgramSort}
+                    schoolsList={programSchools.map(s => ({ value: String(s.id), label: s.schoolName }))}
+                    selectedSchoolId={selectedMapSchoolId}
+                    onSchoolChange={setSelectedMapSchoolId}
                   />
-                  <ProgramSchoolList schools={sortedProgramSchools} />
+                  <ProgramSchoolList 
+                    schools={sortedProgramSchools} 
+                    selectedSchoolId={selectedMapSchoolId}
+                    onSelectSchool={(id) => setSelectedMapSchoolId(prev => prev === id ? null : id)}
+                    showDominantProgram={programFilterIsActive(programFilters)}
+                  />
                 </div>
               </aside>
             )}
@@ -598,8 +741,16 @@ export default function Dashboard() {
                   sort={programSort}
                   onFiltersChange={setProgramFilters}
                   onSortChange={setProgramSort}
+                  schoolsList={programSchools.map(s => ({ value: String(s.id), label: s.schoolName }))}
+                  selectedSchoolId={selectedMapSchoolId}
+                  onSchoolChange={setSelectedMapSchoolId}
                 />
-                <ProgramSchoolList schools={sortedProgramSchools} />
+                <ProgramSchoolList 
+                  schools={sortedProgramSchools} 
+                  selectedSchoolId={selectedMapSchoolId}
+                  onSelectSchool={(id) => setSelectedMapSchoolId(prev => prev === id ? null : id)}
+                  showDominantProgram={programFilterIsActive(programFilters)}
+                />
               </div>
             </aside>
             )}
@@ -647,7 +798,7 @@ export default function Dashboard() {
                   setMainTab("admin");
                   setAdminTab("settings");
                 }}
-                schools={sortedProgramSchools}
+                schools={mappedSchools}
                 programFilters={programFilters}
                 programAnalytics={programAnalytics}
                 legendOffsetPx={legendOffsetPx}
@@ -741,12 +892,16 @@ export default function Dashboard() {
                 filteredSchools={filteredSchools}
                 isLoading={isLoading}
                 registrySearch={registrySearch}
+                showAcronymsOnly={showAcronymsOnly}
+                onAcronymsToggle={setShowAcronymsOnly}
                 onAdd={() => openAddSchool()}
                 onDelete={(school) => deleteSchool.mutate(school.id)}
                 onEdit={openEditSchool}
                 onGeolocate={geolocateSchool}
                 onRemoveDuplicate={removeDuplicate}
                 onSearchChange={setRegistrySearch}
+                onBulkMergeOpen={() => setBulkMergeOpen(true)}
+                studentOriginsMap={studentOriginsMap}
               />
             )}
             gisOverview={gisOverview}
@@ -781,7 +936,39 @@ export default function Dashboard() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         initialData={editingSchool}
+        studentOrigin={editingSchool ? studentOriginsMap.get(editingSchool.id) : undefined}
         defaultCoordinates={selectedCoords ? { latitude: selectedCoords.latitude, longitude: selectedCoords.longitude } : null}
+      />
+      
+      <DuplicateSchoolReviewModal
+        open={!!reviewingDuplicateSchool}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReviewingDuplicateSchool(null);
+            setReviewingOriginalSchool(null);
+          }
+        }}
+        duplicateSchool={reviewingDuplicateSchool}
+        originalSchool={reviewingOriginalSchool}
+        studentOriginsMap={studentOriginsMap}
+        onDeleteDuplicate={async (school) => {
+          await deleteSchool.mutateAsync(school.id);
+        }}
+        onEdit={(school) => {
+          setReviewingDuplicateSchool(null);
+          setReviewingOriginalSchool(null);
+          openEditSchool(school);
+        }}
+        onGeocode={geolocateSchool}
+      />
+      
+      <BulkMergeReviewModal
+        open={bulkMergeOpen}
+        onOpenChange={setBulkMergeOpen}
+        schools={schools}
+        duplicateIds={duplicateIds}
+        studentOriginsMap={studentOriginsMap}
+        onGeolocate={geolocateSchool}
       />
     </div>
   );
@@ -890,6 +1077,8 @@ function SchoolRegistry({
   filteredSchools,
   isLoading,
   registrySearch,
+  showAcronymsOnly,
+  onAcronymsToggle,
   onAdd,
   onDelete,
   onEdit,
@@ -902,6 +1091,8 @@ function SchoolRegistry({
   filteredSchools: SchoolRegistry[];
   isLoading: boolean;
   registrySearch: string;
+  showAcronymsOnly: boolean;
+  onAcronymsToggle: (val: boolean) => void;
   onAdd: () => void;
   onDelete: (school: SchoolRegistry) => void;
   onEdit: (school: SchoolRegistry) => void;
@@ -954,10 +1145,22 @@ function SchoolRegistry({
             One GIS entity per school — coordinates, municipality, verification.
           </p>
         </div>
-        <Button className={cn("gap-2", compact ? "h-8 px-3 text-xs" : "h-10")} onClick={onAdd}>
-          <Plus className="h-3.5 w-3.5" />
-          Add school
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant={showAcronymsOnly ? "default" : "outline"}
+            size="sm"
+            onClick={() => onAcronymsToggle(!showAcronymsOnly)}
+            className="h-8 text-xs bg-white text-slate-700 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
+            data-state={showAcronymsOnly ? "on" : "off"}
+          >
+            <Filter className="w-3 h-3 mr-1" />
+            Acronyms Only
+          </Button>
+          <Button className={cn("gap-2", compact ? "h-8 px-3 text-xs" : "h-10")} onClick={onAdd}>
+            <Plus className="h-3.5 w-3.5" />
+            Add school
+          </Button>
+        </div>
       </div>
 
       <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
@@ -1109,14 +1312,20 @@ function ProgramFiltersPanel({
   sort,
   onFiltersChange,
   onSortChange,
+  schoolsList,
+  selectedSchoolId,
+  onSchoolChange,
 }: {
   filters: ProgramFilters;
   options: ReturnType<typeof getProgramOptions>;
   sort: string;
   onFiltersChange: (next: ProgramFilters | ((current: ProgramFilters) => ProgramFilters)) => void;
   onSortChange: (next: string) => void;
+  schoolsList: { value: string; label: string }[];
+  selectedSchoolId: number | null;
+  onSchoolChange: (id: number | null) => void;
 }) {
-  const active = programFilterIsActive(filters);
+  const active = programFilterIsActive(filters) || selectedSchoolId !== null;
   const updateFilter = (key: keyof ProgramFilters, value: string) => {
     onFiltersChange((current) => ({
       ...current,
@@ -1138,7 +1347,10 @@ function ProgramFiltersPanel({
             type="button"
             variant="ghost"
             className="h-7 px-2 text-[11px]"
-            onClick={() => onFiltersChange({ college: ALL_PROGRAM_FILTER, program: ALL_PROGRAM_FILTER, track: ALL_PROGRAM_FILTER })}
+            onClick={() => {
+              onFiltersChange({ college: ALL_PROGRAM_FILTER, program: ALL_PROGRAM_FILTER, track: ALL_PROGRAM_FILTER });
+              onSchoolChange(null);
+            }}
           >
             Reset
           </Button>
@@ -1165,6 +1377,18 @@ function ProgramFiltersPanel({
           onValueChange={(value) => updateFilter("track", value)}
           items={options.tracks}
           allLabel="All Tracks"
+        />
+        <SidebarSelect
+          label="School"
+          value={selectedSchoolId ? String(selectedSchoolId) : ALL_PROGRAM_FILTER}
+          onValueChange={(value) => {
+            if (value !== ALL_PROGRAM_FILTER) {
+              onFiltersChange({ college: ALL_PROGRAM_FILTER, program: ALL_PROGRAM_FILTER, track: ALL_PROGRAM_FILTER });
+            }
+            onSchoolChange(value === ALL_PROGRAM_FILTER ? null : Number(value));
+          }}
+          items={schoolsList}
+          allLabel="All Schools"
         />
         <SidebarSelect
           label="Sort"
@@ -1198,7 +1422,7 @@ function SidebarSelect({
 }) {
   return (
     <div className="space-y-1">
-      <Label className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</Label>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
       <Select value={value} onValueChange={onValueChange}>
         <SelectTrigger className="h-8 rounded-md border-white/50 bg-white/50 text-xs shadow-sm backdrop-blur-sm hover:bg-white/70">
           <SelectValue />
@@ -1214,7 +1438,17 @@ function SidebarSelect({
   );
 }
 
-function ProgramSchoolList({ schools }: { schools: any[] }) {
+function ProgramSchoolList({ 
+  schools, 
+  selectedSchoolId, 
+  onSelectSchool,
+  showDominantProgram,
+}: { 
+  schools: any[]; 
+  selectedSchoolId?: number | null;
+  onSelectSchool?: (id: number) => void;
+  showDominantProgram?: boolean;
+}) {
   return (
     <div className="rounded-xl border border-white/50 bg-white/40 p-3 shadow-sm backdrop-blur-md">
       <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">Schools</p>
@@ -1222,22 +1456,36 @@ function ProgramSchoolList({ schools }: { schools: any[] }) {
         {schools.length === 0 ? (
           <p className="rounded-md border border-white/40 bg-white/50 px-2 py-3 text-center text-xs text-slate-500 shadow-sm backdrop-blur-sm">No schools match the active filters.</p>
         ) : (
-          schools.slice(0, 80).map((school) => (
-            <div key={school.id} className="flex items-center gap-2 rounded-md border border-white/40 bg-white/50 px-2 py-2 shadow-sm backdrop-blur-sm transition-colors hover:bg-white/70">
-              <span
-                className="h-3 w-3 shrink-0 rounded-full"
-                style={{ backgroundColor: school.dominantProgram?.color || "#cbd5e1" }}
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-bold text-slate-900">{school.schoolName}</p>
-                <p className="truncate text-[10px] text-slate-500">{school.municipality || school.province || "—"} · {school.dominantProgram?.code || "Unknown"}</p>
+          schools.slice(0, 80).map((school) => {
+            const isSelected = selectedSchoolId === school.id;
+            return (
+              <div 
+                key={school.id} 
+                onClick={() => onSelectSchool?.(school.id)}
+                className={`flex items-center gap-2 rounded-md border px-2 py-2 shadow-sm backdrop-blur-sm transition-all cursor-pointer ${
+                  isSelected 
+                    ? "border-primary/50 bg-primary/10 shadow-primary/20 scale-[1.02]" 
+                    : "border-white/40 bg-white/50 hover:bg-white/70"
+                }`}
+              >
+                <span
+                  className="h-3 w-3 shrink-0 rounded-full shadow-sm"
+                  style={{ backgroundColor: school.dominantProgram?.color || "#cbd5e1" }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className={`truncate text-xs font-bold ${isSelected ? "text-primary" : "text-slate-900"}`}>{school.schoolName}</p>
+                  <p className="truncate text-[10px] text-slate-500">
+                    {school.municipality || school.province || "—"}
+                    {showDominantProgram && school.dominantProgram?.code ? ` · ${school.dominantProgram.code}` : ""}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className={`text-xs font-black ${isSelected ? "text-primary" : "text-slate-900"}`}>{school.filteredStudentCount.toLocaleString()}</p>
+                  <p className="text-[10px] text-slate-500">of {school.totalStudentCount.toLocaleString()}</p>
+                </div>
               </div>
-              <div className="shrink-0 text-right">
-                <p className="text-xs font-black text-slate-900">{school.filteredStudentCount.toLocaleString()}</p>
-                <p className="text-[10px] text-slate-500">of {school.totalStudentCount.toLocaleString()}</p>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -1699,11 +1947,13 @@ function findDuplicateSchoolIds(schools: SchoolRegistry[]) {
 
 function sortProgramSchools(schools: any[], sort: string) {
   return schools.slice().sort((a, b) => {
+    const nameA = a.schoolName || a.name || "";
+    const nameB = b.schoolName || b.name || "";
     if (sort === "total-desc") return b.totalStudentCount - a.totalStudentCount;
-    if (sort === "name-asc") return a.name.localeCompare(b.name);
-    if (sort === "municipality-asc") return (a.municipality || "").localeCompare(b.municipality || "") || a.name.localeCompare(b.name);
+    if (sort === "name-asc") return nameA.localeCompare(nameB);
+    if (sort === "municipality-asc") return (a.municipality || "").localeCompare(b.municipality || "") || nameA.localeCompare(nameB);
     if (sort === "college-asc") {
-      return (a.dominantDepartment?.departmentName || a.dominantProgram?.collegeName || "Unknown").localeCompare(b.dominantDepartment?.departmentName || b.dominantProgram?.collegeName || "Unknown") || a.name.localeCompare(b.name);
+      return (a.dominantDepartment?.departmentName || a.dominantProgram?.collegeName || "Unknown").localeCompare(b.dominantDepartment?.departmentName || b.dominantProgram?.collegeName || "Unknown") || nameA.localeCompare(nameB);
     }
     return b.filteredStudentCount - a.filteredStudentCount;
   });

@@ -9,8 +9,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-
 import { REGION_4A_DATA } from "@shared/region4a";
+import { inferSchoolType } from "@/lib/utils";
 
 interface BatchGeocodeReviewModalProps {
   open: boolean;
@@ -21,7 +21,7 @@ interface BatchGeocodeReviewModalProps {
   onResolveMatch?: (schoolName: string, selectedSchool: any) => void;
 }
 
-const libraries: "places"[] = ["places"];
+import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_VERSION } from "@/lib/googleMapsConfig";
 
 interface GeocodeResult {
   name: string;
@@ -37,6 +37,7 @@ interface GeocodeResult {
   isEditing?: boolean;
   isDiscarded?: boolean;
   duplicateOf?: any;
+  schoolType?: string;
 }
 
 export function BatchGeocodeReviewModal({
@@ -53,9 +54,10 @@ export function BatchGeocodeReviewModal({
   const [isSaving, setIsSaving] = useState(false);
   
   const { isLoaded, loadError } = useJsApiLoader({
+    version: GOOGLE_MAPS_VERSION,
     id: 'google-map-script',
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
-    libraries
+    libraries: GOOGLE_MAPS_LIBRARIES,
   });
   
   // Track if we've already started processing for this open cycle
@@ -136,7 +138,8 @@ export function BatchGeocodeReviewModal({
     const initialResults: GeocodeResult[] = schoolsToProcess.map(s => ({
       name: s.name,
       studentAddress: s.address,
-      status: "pending"
+      status: "pending",
+      schoolType: inferSchoolType(s.name) || "Unknown"
     }));
     setResults([...initialResults]);
 
@@ -174,27 +177,62 @@ export function BatchGeocodeReviewModal({
         continue; // Skip geocoding if found in local masterlist
       }
 
-      const query = `${school.name} ${school.address || "Laguna"}`;
+      const primaryQuery = `${school.name}, Philippines`;
+      let fallbackQuery = primaryQuery;
+      if (school.address) {
+        fallbackQuery = `${school.name}, ${school.address}, Philippines`;
+      }
       
       try {
-        const geocodeResult: any = await new Promise((resolve, reject) => {
-          geocoder.geocode({ 
-            address: query,
-            bounds: {
-              north: 15.1,
-              south: 13.1,
-              east: 122.7,
-              west: 120.5
-            },
-            componentRestrictions: { country: "ph" }
-          }, (results, status) => {
-            if (status === "OK" && results && results.length > 0) {
-              resolve(results[0]);
-            } else {
-              reject(status);
-            }
-          });
-        });
+        let geocodeResult: any = null;
+
+        const isGeneric = (result: any) => {
+          return result.types.includes("administrative_area_level_1") || 
+                 result.types.includes("administrative_area_level_2") || 
+                 result.types.includes("country") ||
+                 result.types.includes("locality");
+        };
+
+        const executeGeocode = (query: string): Promise<any> => {
+           return new Promise((resolve, reject) => {
+             geocoder.geocode({ address: query, region: "ph" }, (results, status) => {
+               if (status === "OK" && results && results.length > 0) {
+                 resolve(results[0]);
+               } else {
+                 reject(status);
+               }
+             });
+           });
+        };
+
+        let primaryRes: any = null;
+
+        try {
+           const res = await executeGeocode(primaryQuery);
+           primaryRes = res;
+           if (!isGeneric(res) || fallbackQuery === primaryQuery) {
+              geocodeResult = res;
+           }
+        } catch (err) {}
+
+        if (!geocodeResult && fallbackQuery !== primaryQuery) {
+           try {
+              const res = await executeGeocode(fallbackQuery);
+              if (!isGeneric(res) || !primaryRes) {
+                 geocodeResult = res;
+              } else {
+                 geocodeResult = primaryRes;
+              }
+           } catch (err) {
+              geocodeResult = primaryRes;
+           }
+        }
+        
+        if (!geocodeResult && primaryRes) {
+           geocodeResult = primaryRes;
+        }
+
+        if (!geocodeResult) throw new Error("Not found");
 
         const lat = geocodeResult.geometry.location.lat();
         const lng = geocodeResult.geometry.location.lng();
@@ -263,7 +301,8 @@ export function BatchGeocodeReviewModal({
             province: match.province === "Other" ? "Outside Region 4A" : match.province,
             barangay: match.barangay || undefined,
             latitude: match.lat,
-            longitude: match.lng
+            longitude: match.lng,
+            schoolType: match.schoolType && match.schoolType !== "Unknown" ? match.schoolType : undefined
           };
           
           const res = await apiRequest("POST", "/api/schoolRegistry", payload);
@@ -359,9 +398,9 @@ export function BatchGeocodeReviewModal({
 
                 {result.status === "success" && !result.duplicateOf && (
                   <div className="mt-3 pt-3 border-t text-sm">
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-4 gap-4">
                       {result.isEditing ? (
-                        <div className="grid grid-cols-3 gap-2 col-span-3">
+                        <div className="grid grid-cols-4 gap-2 col-span-4">
                           <div className="space-y-1">
                             <span className="text-muted-foreground text-xs">Province</span>
                             <Select 
@@ -453,14 +492,50 @@ export function BatchGeocodeReviewModal({
                               </Select>
                             )}
                           </div>
+                          
+                          <div className="space-y-1">
+                            <span className="text-muted-foreground text-xs">Type</span>
+                            <Select 
+                              value={result.schoolType || "Unknown"} 
+                              onValueChange={(v) => {
+                                const next = [...results];
+                                next[idx].schoolType = v;
+                                setResults(next);
+                              }}
+                            >
+                              <SelectTrigger className="h-8 text-xs bg-white">
+                                <SelectValue placeholder="Type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {["Unknown", "Elementary", "High School", "Senior High School", "College", "University", "Vocational", "Special Education"].map(t => (
+                                  <SelectItem key={t} value={t}>{t}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
                         </div>
                       ) : (
-                        <div className="col-span-3">
-                          <span className="text-muted-foreground text-xs block mb-1">Province / City / Brgy:</span>
-                          <p className="text-sm font-medium">
-                            {result.province}, {result.municipality}
-                            {result.barangay ? `, Brgy. ${result.barangay}` : ""}
-                          </p>
+                        <div className="col-span-4 flex items-center justify-between text-xs">
+                          <div className="flex gap-4">
+                            <div>
+                              <span className="text-muted-foreground">Province: </span>
+                              <span className="font-medium">{result.province || "N/A"}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">City/Muni: </span>
+                              <span className="font-medium">{result.municipality || "N/A"}</span>
+                            </div>
+                            {result.barangay && (
+                              <div>
+                                <span className="text-muted-foreground">Brgy: </span>
+                                <span className="font-medium">{result.barangay}</span>
+                              </div>
+                            )}
+                            <div>
+                              <span className="text-muted-foreground">Type: </span>
+                              <span className="font-medium">{result.schoolType || "Unknown"}</span>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

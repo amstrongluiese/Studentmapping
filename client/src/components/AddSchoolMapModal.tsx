@@ -35,7 +35,7 @@ const defaultCenter = {
   lng: 121.243
 };
 
-const libraries: "places"[] = ["places"];
+import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_VERSION } from "@/lib/googleMapsConfig";
 
 import { REGION_4A_DATA } from "@shared/region4a";
 
@@ -54,9 +54,10 @@ export function AddSchoolMapModal({ open, onOpenChange, defaultSchoolName, stude
 
   // Load Google Maps script
   const { isLoaded } = useJsApiLoader({
+    version: GOOGLE_MAPS_VERSION,
     id: 'google-map-script',
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "", // Use env var
-    libraries
+    libraries: GOOGLE_MAPS_LIBRARIES,
   });
 
   // Initialize places autocomplete

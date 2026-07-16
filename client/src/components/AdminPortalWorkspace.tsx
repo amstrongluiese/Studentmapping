@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import type { Import, SchoolRegistry as School, StudentProcessed } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
+import { GEO_BOUNDS } from "@shared/constants";
 import { ALL_PROGRAM_FILTER, getFullCatalog, setDynamicCatalog, normalizeStudentProgramValue, recognizeProgram, getDepartmentColor, getPinColorByProgram } from "@shared/programIntelligence";
 import { formatAdmissionLabel, parseStudentNumberTag } from "@/lib/adminPortalUtils";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -578,8 +579,8 @@ export function AdminPortalWorkspace({
         if (studentMappingFilter === ALL_PROGRAM_FILTER) return true;
         const matchedSchool = row.schoolRegistryId ? schools.find(s => s.id === row.schoolRegistryId) : null;
         const isMapped = matchedSchool && hasCoordinates(matchedSchool) && 
-                         matchedSchool.latitude >= 13.78 && matchedSchool.latitude <= 14.58 && 
-                         matchedSchool.longitude >= 120.88 && matchedSchool.longitude <= 121.72;
+                         matchedSchool.latitude >= GEO_BOUNDS.LAGUNA.minLat && matchedSchool.latitude <= GEO_BOUNDS.LAGUNA.maxLat && 
+                         matchedSchool.longitude >= GEO_BOUNDS.LAGUNA.minLng && matchedSchool.longitude <= GEO_BOUNDS.LAGUNA.maxLng;
         if (studentMappingFilter === "Mapped") return isMapped;
         if (studentMappingFilter === "Unmapped & Distant") return !isMapped;
         return true;

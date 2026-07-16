@@ -20,6 +20,7 @@ export interface IStorage {
   updateSchoolRegistry(id: number, updates: Partial<InsertSchoolRegistry>): Promise<SchoolRegistry>;
   deleteSchoolRegistry(id: number): Promise<void>;
   importSchools(schools: InsertSchoolRegistry[]): Promise<SchoolImportResult>;
+  mergeSchoolRegistry(duplicateId: number, targetId: number): Promise<void>;
 
   getStudents(): Promise<Student[]>;
   getStudentByNumber(studentNumber: string): Promise<Student | undefined>;
@@ -61,7 +62,61 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteSchoolRegistry(id: number): Promise<void> {
+    const { studentsProcessed, studentImports, mappingLogs, schoolAliases, schoolMatchHistory } = await import("@shared/schema");
+
+    await getDb().update(studentsProcessed)
+      .set({ schoolRegistryId: null })
+      .where(eq(studentsProcessed.schoolRegistryId, id));
+
+    await getDb().update(studentImports)
+      .set({ matchedSchoolId: null })
+      .where(eq(studentImports.matchedSchoolId, id));
+
+    await getDb().update(mappingLogs)
+      .set({ schoolRegistryId: null })
+      .where(eq(mappingLogs.schoolRegistryId, id));
+
+    await getDb().update(schoolMatchHistory)
+      .set({ officialSchoolId: null })
+      .where(eq(schoolMatchHistory.officialSchoolId, id));
+
+    await getDb().delete(schoolAliases)
+      .where(eq(schoolAliases.schoolRegistryId, id));
+
     await getDb().delete(schoolRegistry).where(eq(schoolRegistry.id, id));
+  }
+
+  async mergeSchoolRegistry(duplicateId: number, targetId: number): Promise<void> {
+    if (duplicateId === targetId) {
+      throw new Error("Cannot merge a school into itself.");
+    }
+    const { studentsProcessed, studentImports, mappingLogs, schoolAliases, schoolMatchHistory } = await import("@shared/schema");
+    
+    // 1. Reassign students processed
+    await getDb().update(studentsProcessed)
+      .set({ schoolRegistryId: targetId })
+      .where(eq(studentsProcessed.schoolRegistryId, duplicateId));
+
+    // 2. Reassign student imports
+    await getDb().update(studentImports)
+      .set({ matchedSchoolId: targetId })
+      .where(eq(studentImports.matchedSchoolId, duplicateId));
+
+    // 3. Reassign mapping logs
+    await getDb().update(mappingLogs)
+      .set({ schoolRegistryId: targetId })
+      .where(eq(mappingLogs.schoolRegistryId, duplicateId));
+
+    // 4. Reassign school match history
+    await getDb().update(schoolMatchHistory)
+      .set({ officialSchoolId: targetId })
+      .where(eq(schoolMatchHistory.officialSchoolId, duplicateId));
+
+    // 5. Delete duplicate's aliases (to avoid unique constraint errors if original already has them)
+    await getDb().delete(schoolAliases).where(eq(schoolAliases.schoolRegistryId, duplicateId));
+
+    // 6. Finally, delete the duplicate school
+    await getDb().delete(schoolRegistry).where(eq(schoolRegistry.id, duplicateId));
   }
 
   async importSchools(records: InsertSchoolRegistry[]): Promise<SchoolImportResult> {

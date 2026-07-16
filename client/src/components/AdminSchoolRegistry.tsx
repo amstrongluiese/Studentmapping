@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Edit, Plus, RefreshCw, Trash2, MapPin, Upload, Download } from "lucide-react";
+import { Edit, Plus, RefreshCw, Trash2, MapPin, Upload, Download, Merge, Filter } from "lucide-react";
 import type { SchoolRegistry as School } from "@shared/schema";
 import { api } from "@shared/routes";
 import { getSchoolStatus, hasCoordinates } from "@shared/schoolRegistry";
@@ -32,12 +32,16 @@ interface AdminSchoolRegistryProps {
   filteredSchools: School[];
   isLoading: boolean;
   registrySearch: string;
+  showAcronymsOnly?: boolean;
+  onAcronymsToggle?: (val: boolean) => void;
   onAdd: () => void;
   onDelete: (school: School) => void;
   onEdit: (school: School) => void;
   onGeolocate: (school: School) => void;
   onRemoveDuplicate: (school: School) => void;
   onSearchChange: (value: string) => void;
+  onBulkMergeOpen?: () => void;
+  studentOriginsMap?: Map<number, string>;
 }
 
 export function AdminSchoolRegistry({
@@ -46,12 +50,16 @@ export function AdminSchoolRegistry({
   filteredSchools,
   isLoading,
   registrySearch,
+  showAcronymsOnly,
+  onAcronymsToggle,
   onAdd,
   onDelete,
   onEdit,
   onGeolocate,
   onRemoveDuplicate,
   onSearchChange,
+  onBulkMergeOpen,
+  studentOriginsMap,
 }: AdminSchoolRegistryProps) {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
@@ -254,6 +262,15 @@ export function AdminSchoolRegistry({
                 )}
               </TabsTrigger>
             </TabsList>
+            <Button 
+              variant="outline" 
+              className={cn("gap-2 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800", compact ? "h-9 px-3 text-xs" : "h-10")} 
+              onClick={onBulkMergeOpen}
+              disabled={duplicateIds.size === 0}
+            >
+              <Merge className="h-3.5 w-3.5" />
+              Auto-Merge Duplicates {duplicateIds.size > 0 && `(${duplicateIds.size})`}
+            </Button>
             <Button className={cn("gap-2", compact ? "h-9 px-3 text-xs" : "h-10")} onClick={onAdd}>
               <Plus className="h-3.5 w-3.5" />
               Add school
@@ -263,15 +280,15 @@ export function AdminSchoolRegistry({
 
         <TabsContent value="masterlist" className="m-0 space-y-3">
           <TableToolbar
-        searchQuery={registrySearch}
-        onSearchChange={onSearchChange}
-        searchPlaceholder="Search schools, municipalities, type, or status..."
-        selectedCount={selectedIds.size}
-        onClearSelection={() => setSelectedIds(new Set())}
-        onDelete={handleBulkDelete}
-        isDeleting={isDeleting}
-        deleteItemName="schools"
-      />
+            searchQuery={registrySearch}
+            onSearchChange={onSearchChange}
+            searchPlaceholder="Search schools, municipalities, type, or status..."
+            selectedCount={selectedIds.size}
+            onClearSelection={() => setSelectedIds(new Set())}
+            onDelete={handleBulkDelete}
+            isDeleting={isDeleting}
+            deleteItemName="schools"
+          />
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -280,7 +297,7 @@ export function AdminSchoolRegistry({
             One GIS entity per school - coordinates, municipality, verification.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleExportJson} className="gap-2 shadow-sm h-9">
             <Download className="w-4 h-4" />
             Export JSON
@@ -304,6 +321,24 @@ export function AdminSchoolRegistry({
 
       <div className="flex flex-col gap-2 rounded-lg bg-slate-50/80 p-2">
         <div className="flex flex-wrap items-center gap-2">
+          {onAcronymsToggle && (
+            <Button 
+              variant={showAcronymsOnly ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                onAcronymsToggle(!showAcronymsOnly);
+                if (!showAcronymsOnly) {
+                  onSearchChange("");
+                }
+              }}
+              className="h-8 text-xs bg-white text-slate-700 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground shadow-sm px-3"
+              data-state={showAcronymsOnly ? "on" : "off"}
+            >
+              <Filter className="w-3 h-3 mr-2" />
+              Acronyms Only
+            </Button>
+          )}
+
           {/* Status */}
           <Select value={registryStatusFilter} onValueChange={(v) => { setRegistryStatusFilter(v); setRegistryPage(1); }}>
             <SelectTrigger className="h-8 w-[175px] text-xs">
@@ -560,6 +595,8 @@ export function AdminSchoolRegistry({
         onOpenChange={setIsReviewModalOpen}
         schoolsToProcess={schoolsToReview}
         onComplete={() => setSelectedIds(new Set())}
+        studentOriginsMap={studentOriginsMap}
+        onEditSchool={onEdit}
       />
     </div>
   );

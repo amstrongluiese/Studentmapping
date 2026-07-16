@@ -13,6 +13,7 @@ import {
   normalizeProgramCode,
   programFilterIsActive,
   programMatchesFilters,
+  toDistributionEntry,
   type ProgramDistributionEntry,
   type ProgramFilters,
   type ProgramInfo,
@@ -112,17 +113,22 @@ export function buildProgramAnalytics(
     program: ALL_PROGRAM_FILTER,
     track: ALL_PROGRAM_FILTER,
   },
+  processedStudents?: StudentProcessed[],
 ): ProgramAnalytics {
   const programMap = new Map<string, ProgramDistributionEntry>();
   const departmentMap = new Map<string, { department: string; departmentName: string; color: string; count: number }>();
   const municipalityMap = new Map<string, number>();
   const trackMap = new Map<string, number>();
 
-  for (const school of schools) {
-    municipalityMap.set(school.municipality || "Unspecified", (municipalityMap.get(school.municipality || "Unspecified") || 0) + school.filteredStudentCount);
-    for (const entry of school.programDistribution.filter((item) => distributionMatchesFilters(item, filters))) {
+  if (processedStudents) {
+    for (const student of processedStudents) {
+      if (!isStudentActiveForProgramGis(student)) continue;
+      const info = getProgramInfo(student.course);
+      const entry = toDistributionEntry(info);
+      if (!distributionMatchesFilters(entry, filters)) continue;
+
       const currentProgram = programMap.get(entry.code) || { ...entry, count: 0 };
-      programMap.set(entry.code, { ...currentProgram, count: currentProgram.count + entry.count });
+      programMap.set(entry.code, { ...currentProgram, count: currentProgram.count + 1 });
 
       const department = entry.department || entry.college || "Unknown";
       const currentDepartment = departmentMap.get(department) || {
@@ -131,15 +137,40 @@ export function buildProgramAnalytics(
         color: getDepartmentColor(department),
         count: 0,
       };
-      departmentMap.set(department, { ...currentDepartment, count: currentDepartment.count + entry.count });
+      departmentMap.set(department, { ...currentDepartment, count: currentDepartment.count + 1 });
 
       const track = entry.track || "General";
-      trackMap.set(track, (trackMap.get(track) || 0) + entry.count);
+      trackMap.set(track, (trackMap.get(track) || 0) + 1);
+    }
+  } else {
+    for (const school of schools) {
+      for (const entry of school.programDistribution.filter((item) => distributionMatchesFilters(item, filters))) {
+        const currentProgram = programMap.get(entry.code) || { ...entry, count: 0 };
+        programMap.set(entry.code, { ...currentProgram, count: currentProgram.count + entry.count });
+
+        const department = entry.department || entry.college || "Unknown";
+        const currentDepartment = departmentMap.get(department) || {
+          department,
+          departmentName: entry.departmentName || entry.collegeName || department,
+          color: getDepartmentColor(department),
+          count: 0,
+        };
+        departmentMap.set(department, { ...currentDepartment, count: currentDepartment.count + entry.count });
+
+        const track = entry.track || "General";
+        trackMap.set(track, (trackMap.get(track) || 0) + entry.count);
+      }
     }
   }
 
+  for (const school of schools) {
+    municipalityMap.set(school.municipality || "Unspecified", (municipalityMap.get(school.municipality || "Unspecified") || 0) + school.filteredStudentCount);
+  }
+
   return {
-    totalStudents: schools.reduce((sum, school) => sum + school.filteredStudentCount, 0),
+    totalStudents: processedStudents
+      ? processedStudents.filter(s => isStudentActiveForProgramGis(s) && programMatchesFilters(getProgramInfo(s.course), filters)).length
+      : schools.reduce((sum, school) => sum + school.filteredStudentCount, 0),
     totalSchools: schools.length,
     topFeederSchoolRegistry: schools.slice().sort((a, b) => b.filteredStudentCount - a.filteredStudentCount)[0],
     topMunicipality: Array.from(municipalityMap.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)[0],

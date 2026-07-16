@@ -9,12 +9,17 @@ import NotFound from "@/pages/not-found";
 import Dashboard from "./pages/Dashboard";
 import ReferralClient from "./pages/ReferralClient";
 import StudentManagement from "./pages/StudentManagement";
-import { setDynamicCatalog } from "@shared/programIntelligence";
+import { setDynamicCatalog, setDynamicDepartments } from "@shared/programIntelligence";
 
 function AppRouter() {
   const { data: dynamicProgs } = useQuery({ queryKey: ["/api/programs"] });
+  const { data: dynamicDepts } = useQuery({ queryKey: ["/api/departments"] });
+  
   if (dynamicProgs) {
     setDynamicCatalog(dynamicProgs as any);
+  }
+  if (dynamicDepts) {
+    setDynamicDepartments(dynamicDepts as any);
   }
 
   return (

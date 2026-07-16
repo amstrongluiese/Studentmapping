@@ -123,11 +123,15 @@ const batchDeleteInputSchema = z.object({
 const studentManagementStatusSchema = z.enum([
   "Active",
   "Enrolled",
+  "Officially Enrolled",
+  "OE",
+  "NOE",
   "Pending",
   "Dropped",
   "Transferred",
   "Graduated",
   "Archived",
+  "For Verification",
 ]);
 
 const studentManagementUpdateSchema = z.object({
@@ -244,6 +248,30 @@ export const api = {
       responses: {
         204: z.void(),
         404: errorSchemas.notFound,
+      },
+    },
+    merge: {
+      method: 'POST' as const,
+      path: '/api/schoolRegistry/:id/merge' as const,
+      input: z.object({ targetId: z.number() }),
+      responses: {
+        200: z.object({ success: z.boolean(), message: z.string() }),
+        400: errorSchemas.validation,
+        404: errorSchemas.notFound,
+      },
+    },
+    bulkMerge: {
+      method: 'POST' as const,
+      path: '/api/schoolRegistry/bulkMerge' as const,
+      input: z.object({
+        pairs: z.array(z.object({
+          duplicateId: z.number(),
+          targetId: z.number()
+        }))
+      }),
+      responses: {
+        200: z.object({ success: z.boolean(), message: z.string(), mergedCount: z.number() }),
+        400: errorSchemas.validation,
       },
     },
     batchDelete: {

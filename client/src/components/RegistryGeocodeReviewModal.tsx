@@ -6,18 +6,21 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, CheckCircle2, XCircle, MapPin, AlertCircle, Trash2, Edit2, RefreshCw, X } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useJsApiLoader } from "@react-google-maps/api";
 import type { SchoolRegistry as School } from "@shared/schema";
+import { inferSchoolType } from "@/lib/utils";
 
-const libraries: "places"[] = ["places"];
+import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_VERSION } from "@/lib/googleMapsConfig";
 
 interface RegistryGeocodeReviewModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   schoolsToProcess: School[];
   onComplete: () => void;
+  studentOriginsMap?: Map<number, string>;
+  onEditSchool?: (school: School) => void;
 }
 
 interface GeocodeResult {
@@ -35,16 +38,7 @@ interface GeocodeResult {
   isEditingQuery?: boolean;
   editQueryDraft?: string;
   duplicateOf?: string;
-}
-
-function inferSchoolType(name: string): string | undefined {
-  const lower = name.toLowerCase();
-  if (lower.includes("university") || lower.includes("univ")) return "University";
-  if (lower.includes("college") || lower.includes("coll")) return "College";
-  if (lower.includes("senior high") || lower.includes("shs")) return "Senior High School";
-  if (lower.includes("high school") || lower.includes("nhs") || lower.includes("jhs") || lower.includes("academy") || lower.includes("institute")) return "High School";
-  if (lower.includes("elementary") || lower.includes("es") || lower.includes("school")) return "Elementary";
-  return undefined;
+  schoolType?: string;
 }
 
 function findDuplicate(lat: number, lng: number, currentId: number, allSchools: School[]): string | undefined {
@@ -63,13 +57,74 @@ function findDuplicate(lat: number, lng: number, currentId: number, allSchools: 
 
 async function geocodeSingle(
   geocoder: google.maps.Geocoder,
-  searchQuery: string
+  searchQuery: string,
+  originalSchoolName?: string,
+  fallbackLocationHint?: string
 ): Promise<{
   lat: number; lng: number; foundAddress: string; municipality: string; province: string;
+  actualQueryUsed: string;
 }> {
-  const response = await geocoder.geocode({ address: searchQuery, region: "ph" });
-  if (!response.results || response.results.length === 0) throw new Error("No results found on Google Maps.");
-  const res = response.results[0];
+  let response;
+  let actualQueryUsed = searchQuery;
+  let res;
+
+  const isGeneric = (result: google.maps.GeocoderResult) => {
+    return result.types.includes("administrative_area_level_1") || 
+           result.types.includes("administrative_area_level_2") || 
+           result.types.includes("country") ||
+           result.types.includes("locality");
+  };
+
+  let primaryRes: any = null;
+
+  try {
+    // Step 1: Try the primary query
+    response = await geocoder.geocode({ address: searchQuery, region: "ph" });
+    if (response.results && response.results.length > 0) {
+       res = response.results[0];
+       primaryRes = res;
+       
+       // If generic and we have an unedited query + a fallback hint, force fallback
+       if (isGeneric(res) && originalSchoolName && searchQuery === `${originalSchoolName}, Philippines` && fallbackLocationHint) {
+          res = null;
+       }
+    }
+  } catch (err) {
+    // primary search failed, proceed to fallback if eligible
+  }
+
+  // Step 2: Fallback to localized search if primary failed or was generic
+  if (!res && originalSchoolName && searchQuery === `${originalSchoolName}, Philippines` && fallbackLocationHint) {
+     const fallbackQuery = `${originalSchoolName}, ${fallbackLocationHint}, Philippines`;
+     try {
+       const fallbackResponse = await geocoder.geocode({ address: fallbackQuery, region: "ph" });
+       if (fallbackResponse.results && fallbackResponse.results.length > 0) {
+          const fallbackRes = fallbackResponse.results[0];
+          // ONLY accept fallback if it is NOT generic, or if the primary search didn't even find a generic area
+          if (!isGeneric(fallbackRes) || !primaryRes) {
+             res = fallbackRes;
+             actualQueryUsed = fallbackQuery;
+          } else {
+             // Fallback is also generic, but we had a primary generic result (like "Camarines Norte").
+             // Stick to the primary result!
+             res = primaryRes;
+          }
+       }
+     } catch (err) {
+       // fallback failed, stick to primary generic if exists
+       res = primaryRes;
+     }
+  }
+
+  // If fallback was never attempted but res was cleared to null (to force fallback), restore it if fallback was skipped
+  if (!res && primaryRes) {
+     res = primaryRes;
+  }
+
+  if (!res) {
+     throw new Error("No results found on Google Maps.");
+  }
+  
   const lat = res.geometry.location.lat();
   const lng = res.geometry.location.lng();
   let municipality = "";
@@ -79,7 +134,7 @@ async function geocodeSingle(
     if (comp.types.includes("administrative_area_level_2")) province = comp.long_name;
     if (!province && comp.types.includes("administrative_area_level_1")) province = comp.long_name;
   }
-  return { lat, lng, foundAddress: res.formatted_address, municipality, province };
+  return { lat, lng, foundAddress: res.formatted_address, municipality, province, actualQueryUsed };
 }
 
 export function RegistryGeocodeReviewModal({
@@ -87,6 +142,8 @@ export function RegistryGeocodeReviewModal({
   onOpenChange,
   schoolsToProcess,
   onComplete,
+  studentOriginsMap,
+  onEditSchool
 }: RegistryGeocodeReviewModalProps) {
   const { toast } = useToast();
   const [results, setResults] = useState<GeocodeResult[]>([]);
@@ -96,9 +153,10 @@ export function RegistryGeocodeReviewModal({
   const { data: allSchools = [] } = useQuery<School[]>({ queryKey: ["/api/schoolRegistry"] });
 
   const { isLoaded } = useJsApiLoader({
+    version: GOOGLE_MAPS_VERSION,
     id: "google-map-script",
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "",
-    libraries,
+    libraries: GOOGLE_MAPS_LIBRARIES,
   });
 
   const hasStartedRef = useRef(false);
@@ -116,10 +174,13 @@ export function RegistryGeocodeReviewModal({
 
   const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  const buildQuery = (school: School) =>
-    school.municipality
-      ? `${school.schoolName}, ${school.municipality}, Philippines`
-      : `${school.schoolName}, Philippines`;
+  const buildQuery = (school: School) => `${school.schoolName}, Philippines`;
+
+  const getFallbackHint = (school: School) => {
+    if (school.municipality) return school.municipality;
+    if (studentOriginsMap?.has(school.id)) return studentOriginsMap.get(school.id);
+    return undefined;
+  };
 
   const startBatchGeocode = async () => {
     if (!window.google?.maps?.places) {
@@ -133,6 +194,7 @@ export function RegistryGeocodeReviewModal({
       name: s.schoolName,
       searchQuery: buildQuery(s),
       status: "pending",
+      schoolType: inferSchoolType(s.schoolName) || s.schoolType || "Unknown",
     }));
     setResults([...initial]);
 
@@ -144,11 +206,20 @@ export function RegistryGeocodeReviewModal({
         return next;
       });
       try {
-        const geo = await geocodeSingle(geocoder, initial[i].searchQuery);
+        const originalSchool = schoolsToProcess.find(s => s.id === initial[i].schoolId);
+        const hint = originalSchool ? getFallbackHint(originalSchool) : undefined;
+        
+        const geo = await geocodeSingle(geocoder, initial[i].searchQuery, initial[i].name, hint);
         const dupName = findDuplicate(geo.lat, geo.lng, initial[i].schoolId, allSchools);
         setResults((cur) => {
           const next = [...cur];
-          next[i] = { ...next[i], status: "success", ...geo, duplicateOf: dupName };
+          next[i] = { 
+            ...next[i], 
+            status: "success", 
+            ...geo,
+            searchQuery: geo.actualQueryUsed, // Update the query string if fallback was used
+            duplicateOf: dupName 
+          };
           return next;
         });
       } catch (err: any) {
@@ -174,11 +245,20 @@ export function RegistryGeocodeReviewModal({
     });
     try {
       const query = results[index].searchQuery;
-      const geo = await geocodeSingle(geocoder, query);
+      const originalSchool = schoolsToProcess.find(s => s.id === results[index].schoolId);
+      const hint = originalSchool ? getFallbackHint(originalSchool) : undefined;
+      
+      const geo = await geocodeSingle(geocoder, query, results[index].name, hint);
       const dupName = findDuplicate(geo.lat, geo.lng, results[index].schoolId, allSchools);
       setResults((cur) => {
         const next = [...cur];
-        next[index] = { ...next[index], status: "success", ...geo, duplicateOf: dupName };
+        next[index] = { 
+          ...next[index], 
+          status: "success", 
+          ...geo,
+          searchQuery: geo.actualQueryUsed,
+          duplicateOf: dupName 
+        };
         return next;
       });
     } catch (err: any) {
@@ -237,10 +317,13 @@ export function RegistryGeocodeReviewModal({
     try {
       await Promise.all(
         toSave.map((r) => {
-          const original = schoolsToProcess.find((s) => s.id === r.schoolId);
-          let schoolType = original?.schoolType;
+          let schoolType = r.schoolType;
           if (!schoolType || schoolType === "Unknown") {
-            schoolType = inferSchoolType(r.name) || "Unknown";
+            const original = schoolsToProcess.find((s) => s.id === r.schoolId);
+            schoolType = original?.schoolType || undefined;
+            if (!schoolType || schoolType === "Unknown") {
+              schoolType = inferSchoolType(r.name) || "Unknown";
+            }
           }
 
           return apiRequest("PUT", `/api/schoolRegistry/${r.schoolId}`, {
@@ -290,13 +373,13 @@ export function RegistryGeocodeReviewModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-hidden">
-          <ScrollArea className="h-full max-h-[58vh]">
+        <div className="flex-1 overflow-y-auto bg-white relative">
             <div className="min-w-full divide-y divide-slate-100">
               {/* Header */}
               <div className="grid grid-cols-12 gap-3 px-4 py-2.5 bg-slate-50/80 text-[10px] font-semibold uppercase tracking-wide text-slate-500 sticky top-0 z-10 shadow-sm">
-                <div className="col-span-3">School Name</div>
-                <div className="col-span-4">Search Query (editable)</div>
+                <div className="col-span-2">School Name</div>
+                <div className="col-span-2">Type</div>
+                <div className="col-span-3">Search Query (editable)</div>
                 <div className="col-span-3">Resolved Address / Municipality</div>
                 <div className="col-span-2 text-right">Actions</div>
               </div>
@@ -308,7 +391,7 @@ export function RegistryGeocodeReviewModal({
                     }`}
                 >
                   {/* School name + status */}
-                  <div className="col-span-3 flex items-start gap-2 min-w-0">
+                  <div className="col-span-2 flex items-start gap-2 min-w-0">
                     <div className="mt-0.5 shrink-0">
                       {result.status === "pending" && <div className="h-4 w-4 rounded-full border-2 border-slate-200" />}
                       {result.status === "processing" && <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />}
@@ -319,6 +402,11 @@ export function RegistryGeocodeReviewModal({
                       <p className={`text-xs font-semibold truncate ${result.isDiscarded ? "line-through text-slate-400" : "text-slate-900"}`}>
                         {result.name}
                       </p>
+                      {studentOriginsMap?.has(result.schoolId) && (
+                        <p className="text-[9px] text-primary/80 truncate mt-0.5" title={`Mostly from ${studentOriginsMap.get(result.schoolId)}`}>
+                          From: {studentOriginsMap.get(result.schoolId)}
+                        </p>
+                      )}
                       {result.status === "failed" && (
                         <p className="text-[10px] text-rose-600 mt-0.5 flex items-center gap-0.5 truncate">
                           <AlertCircle className="h-2.5 w-2.5 shrink-0" />
@@ -328,8 +416,32 @@ export function RegistryGeocodeReviewModal({
                     </div>
                   </div>
 
+                  {/* Institution Type Dropdown */}
+                  <div className="col-span-2 flex items-center min-w-0">
+                    <Select
+                      value={result.schoolType || "Unknown"}
+                      onValueChange={(val) => {
+                        setResults((cur) => {
+                          const next = [...cur];
+                          next[index] = { ...next[index], schoolType: val };
+                          return next;
+                        });
+                      }}
+                      disabled={result.isDiscarded}
+                    >
+                      <SelectTrigger className="h-7 text-[10px] w-full px-2">
+                        <SelectValue placeholder="Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {["Unknown", "Elementary", "High School", "Senior High School", "College", "University", "Vocational", "Special Education"].map(t => (
+                          <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   {/* Search query — editable */}
-                  <div className="col-span-4 flex items-center gap-1.5">
+                  <div className="col-span-3 flex items-center gap-1.5 min-w-0">
                     {result.isEditingQuery ? (
                       <div className="flex w-full items-center gap-1">
                         <Input
@@ -407,6 +519,20 @@ export function RegistryGeocodeReviewModal({
 
                   {/* Actions */}
                   <div className="col-span-2 flex justify-end items-center gap-1">
+                    {onEditSchool && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"
+                        onClick={() => {
+                          const originalSchool = schoolsToProcess.find(s => s.id === result.schoolId);
+                          if (originalSchool) onEditSchool(originalSchool);
+                        }}
+                        title="Edit School Details"
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     {result.status === "success" && (
                       <Button
                         variant="ghost"
@@ -422,7 +548,6 @@ export function RegistryGeocodeReviewModal({
                 </div>
               ))}
             </div>
-          </ScrollArea>
         </div>
 
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
