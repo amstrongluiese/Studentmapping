@@ -293,6 +293,7 @@ export function AdminPortalWorkspace({
     setDynamicCatalog(dynamicProgs as any);
   }
 
+  const { data: departments = [] } = useQuery<any[]>({ queryKey: ["/api/departments"] });
   const { data: studentsRaw } = useQuery<StudentProcessed[]>({ queryKey: ["/api/students"] });
 
   const startEditStudent = (student: StudentProcessed) => {
@@ -399,7 +400,7 @@ export function AdminPortalWorkspace({
     };
   }, [schools, schoolsLoading, gisOverview, processedStudents]);
 
-  const studentRows = useMemo(() => processedStudents.map((student) => enrichStudentRow(student, schools)), [processedStudents, schools]);
+  const studentRows = useMemo(() => processedStudents.map((student) => enrichStudentRow(student, schools)), [processedStudents, schools, departments]);
   const studentOptions = useMemo(() => ({
     colleges: uniqueSorted([...getFullCatalog().map((program) => program.college), ...studentRows.map((row) => row.college)].filter(Boolean)),
     programs: uniqueSorted([...getFullCatalog().map((program) => program.program), ...studentRows.map((row) => row.program)].filter(Boolean)),
@@ -543,7 +544,7 @@ export function AdminPortalWorkspace({
     ];
 
     return { admissionDemographics, COLORS, topPrograms, topDepartments, topStandalonePrograms, geoDistribution, enrollmentTrends, topFeederSchools, yearLevelDistribution, mappingProgress };
-  }, [studentRows, schools]);
+  }, [studentRows, schools, departments]);
 
   const archiveFolders = useMemo(() => {
     const folders = new Map<string, number>();

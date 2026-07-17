@@ -148,6 +148,7 @@ export default function Dashboard() {
   const { data: enrollmentTargets = [] } = useQuery<{ targetType: string; targetName: string; targetValue: number }[]>({ 
     queryKey: ["/api/enrollment-targets"] 
   });
+  const { data: departments = [] } = useQuery<any[]>({ queryKey: ["/api/departments"] });
   const updateSchool = useUpdateSchool();
   const deleteSchool = useDeleteSchool();
   const createReferral = useCreateReferral();
@@ -257,10 +258,10 @@ export default function Dashboard() {
     }
   }, [mainTab]);
 
-  const programOptions = useMemo(() => getProgramOptions(processedStudents), [processedStudents]);
+  const programOptions = useMemo(() => getProgramOptions(processedStudents), [processedStudents, departments]);
   const programSchools = useMemo(
     () => buildProgramSchools(schools, processedStudents, programFilters),
-    [processedStudents, programFilters, schools],
+    [processedStudents, programFilters, schools, departments],
   );
 
   const filteredProcessedStudents = useMemo(() => {
@@ -283,7 +284,7 @@ export default function Dashboard() {
       
       return true;
     }).length;
-  }, [filteredProcessedStudents, programFilters]);
+  }, [filteredProcessedStudents, programFilters, departments]);
 
   const programAnalytics = useMemo(() => {
     const analytics = buildProgramAnalytics(programSchools, programFilters, filteredProcessedStudents);
@@ -291,7 +292,7 @@ export default function Dashboard() {
       ...analytics,
       totalStudents,
     };
-  }, [programFilters, programSchools, totalStudents, filteredProcessedStudents]);
+  }, [programFilters, programSchools, totalStudents, filteredProcessedStudents, departments]);
 
 
   const mappedSchools = useMemo(() => {
