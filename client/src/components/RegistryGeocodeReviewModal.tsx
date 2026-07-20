@@ -4,13 +4,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, CheckCircle2, XCircle, MapPin, AlertCircle, Trash2, Edit2, RefreshCw, X } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, MapPin, AlertCircle, Trash2, Edit2, RefreshCw, X, AlertTriangle } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useJsApiLoader } from "@react-google-maps/api";
 import type { SchoolRegistry as School } from "@shared/schema";
 import { inferSchoolType } from "@/lib/utils";
+import { detectLocationMismatch, isAmbiguousSchoolName, buildSmartGeocodeQuery } from "@shared/locationIntelligence";
 
 import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_VERSION } from "@/lib/googleMapsConfig";
 
@@ -39,6 +40,9 @@ interface GeocodeResult {
   editQueryDraft?: string;
   duplicateOf?: string;
   schoolType?: string;
+  /** Location mismatch detection */
+  mismatchStatus?: "ok" | "name-mismatch" | "multi-campus" | "retried" | "manually-edited";
+  mismatchMessage?: string;
 }
 
 function findDuplicate(lat: number, lng: number, currentId: number, allSchools: School[]): string | undefined {
@@ -124,6 +128,12 @@ async function geocodeSingle(
   if (!res) {
      throw new Error("No results found on Google Maps.");
   }
+
+  // STRICT GEOCODING (Task 4): If the result is just a generic city/province instead of the actual school,
+  // we strictly reject it so the user can manually pin it instead of dropping it in the middle of nowhere.
+  if (isGeneric(res)) {
+     throw new Error("Strict Mode: Found generic city/province bounds instead of an exact establishment. Please pin manually.");
+  }
   
   const lat = res.geometry.location.lat();
   const lng = res.geometry.location.lng();
@@ -172,9 +182,48 @@ export function RegistryGeocodeReviewModal({
     }
   }, [open, schoolsToProcess, isLoaded]);
 
+  // Keep results in sync with any manual edits done via SchoolFormDialog
+  useEffect(() => {
+    if (results.length === 0 || allSchools.length === 0) return;
+
+    setResults(currentResults => {
+      let hasChanges = false;
+      const newResults = currentResults.map(r => {
+        const dbSchool = allSchools.find(s => s.id === r.schoolId);
+        if (dbSchool && dbSchool.source === "Google Geocoding Manual Assist" && dbSchool.latitude && dbSchool.longitude) {
+          // If the DB already has manual coordinates, but our result doesn't reflect this
+          if (r.mismatchStatus !== "manually-edited") {
+            hasChanges = true;
+            return {
+              ...r,
+              status: "success",
+              lat: dbSchool.latitude,
+              lng: dbSchool.longitude,
+              municipality: dbSchool.municipality || r.municipality,
+              province: dbSchool.province || r.province,
+              foundAddress: dbSchool.address || "Manually set via map",
+              isDiscarded: true, // Auto-discard so we don't overwrite the manual edit on batch save
+              mismatchStatus: "manually-edited",
+              mismatchMessage: "Manually corrected. Skipped for batch save.",
+            } as GeocodeResult;
+          }
+        }
+        return r;
+      });
+      return hasChanges ? newResults : currentResults;
+    });
+  }, [allSchools]);
+
   const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  const buildQuery = (school: School) => `${school.schoolName}, Philippines`;
+  const buildQuery = (school: School) => {
+    const studentHint = studentOriginsMap?.get(school.id);
+    const smart = buildSmartGeocodeQuery(school.schoolName, {
+      municipality: school.municipality || undefined,
+      studentOriginHint: studentHint,
+    });
+    return smart.query;
+  };
 
   const getFallbackHint = (school: School) => {
     if (school.municipality) return school.municipality;
@@ -211,14 +260,54 @@ export function RegistryGeocodeReviewModal({
         
         const geo = await geocodeSingle(geocoder, initial[i].searchQuery, initial[i].name, hint);
         const dupName = findDuplicate(geo.lat, geo.lng, initial[i].schoolId, allSchools);
+        
+        // ── Location Mismatch Detection ──────────────────────────────────
+        const studentHint = studentOriginsMap?.get(initial[i].schoolId);
+        const mismatch = detectLocationMismatch(
+          initial[i].name,
+          geo.province || "",
+          geo.municipality || "",
+          studentHint,
+        );
+        
+        let mismatchStatus: GeocodeResult["mismatchStatus"] = "ok";
+        let mismatchMessage: string | undefined;
+        
+        if (mismatch.hasMismatch) {
+          mismatchStatus = "name-mismatch";
+          mismatchMessage = mismatch.message;
+        } else if (mismatch.isAmbiguous) {
+          mismatchStatus = "multi-campus";
+          mismatchMessage = mismatch.message;
+        }
+        
+        // For ambiguous schools (AMA, STI, etc.): if first geocode was a generic
+        // query and we have student origin data, auto-retry with enriched query
+        let finalGeo = geo;
+        if (mismatch.isAmbiguous && mismatch.suggestedQuery && mismatch.suggestedQuery !== initial[i].searchQuery) {
+          try {
+            await delay(300);
+            const retryGeo = await geocodeSingle(geocoder, mismatch.suggestedQuery, initial[i].name, hint);
+            finalGeo = retryGeo;
+            mismatchStatus = "retried";
+            mismatchMessage = `Auto-retried with student demographics: ${studentHint}`;
+          } catch {
+            // Keep original result on retry failure
+          }
+        }
+        
+        const finalDupName = findDuplicate(finalGeo.lat, finalGeo.lng, initial[i].schoolId, allSchools);
+        
         setResults((cur) => {
           const next = [...cur];
           next[i] = { 
             ...next[i], 
             status: "success", 
-            ...geo,
-            searchQuery: geo.actualQueryUsed, // Update the query string if fallback was used
-            duplicateOf: dupName 
+            ...finalGeo,
+            searchQuery: finalGeo.actualQueryUsed,
+            duplicateOf: finalDupName,
+            mismatchStatus,
+            mismatchMessage, 
           };
           return next;
         });
@@ -510,6 +599,33 @@ export function RegistryGeocodeReviewModal({
                           <Badge variant="outline" className="mt-1 max-w-fit border-amber-200 bg-amber-50 text-[9px] text-amber-700">
                             Possible duplicate of: {result.duplicateOf}
                           </Badge>
+                        )}
+                        {/* Location mismatch badges */}
+                        {result.mismatchStatus === "name-mismatch" && (
+                          <Badge variant="outline" className="mt-1 max-w-fit border-rose-200 bg-rose-50 text-[9px] text-rose-700 flex items-center gap-0.5">
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                            Name mismatch
+                          </Badge>
+                        )}
+                        {result.mismatchStatus === "multi-campus" && (
+                          <Badge variant="outline" className="mt-1 max-w-fit border-blue-200 bg-blue-50 text-[9px] text-blue-700">
+                            Multi-campus — verify branch
+                          </Badge>
+                        )}
+                        {result.mismatchStatus === "retried" && (
+                          <Badge variant="outline" className="mt-1 max-w-fit border-emerald-200 bg-emerald-50 text-[9px] text-emerald-700">
+                            ✓ Auto-located via student demographics
+                          </Badge>
+                        )}
+                        {result.mismatchStatus === "manually-edited" && (
+                          <Badge variant="outline" className="mt-1 max-w-fit border-purple-200 bg-purple-50 text-[9px] text-purple-700">
+                            ✏️ Manually edited
+                          </Badge>
+                        )}
+                        {result.mismatchMessage && result.mismatchStatus !== "ok" && (
+                          <p className="text-[9px] text-slate-500 mt-0.5 line-clamp-2" title={result.mismatchMessage}>
+                            {result.mismatchMessage}
+                          </p>
                         )}
                       </>
                     ) : (

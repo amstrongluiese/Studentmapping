@@ -1,4 +1,4 @@
-import { boolean, pgTable, text, serial, integer, doublePrecision, timestamp } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text, serial, integer, doublePrecision, timestamp, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -9,7 +9,7 @@ export const schoolRegistry = pgTable("school_registry", {
   normalizedSchoolName: text("normalized_school_name").notNull().default(""),
   schoolType: text("school_type"),
   sector: text("sector"),
-  municipality: text("municipality").notNull().default("Laguna"),
+  municipality: text("municipality").notNull().default("Unspecified"),
   province: text("province").notNull().default("Laguna"),
   barangay: text("barangay"),
   address: text("address"),
@@ -19,7 +19,10 @@ export const schoolRegistry = pgTable("school_registry", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (table) => ({
+  nameIdx: index("school_registry_name_idx").on(table.schoolName),
+  municipalityIdx: index("school_registry_municipality_idx").on(table.municipality),
+}));
 
 export const students = pgTable("students", {
   id: serial("id").primaryKey(),
@@ -62,7 +65,7 @@ export const studentsRaw = pgTable("students_raw", {
   lastSchoolName: text("last_school_name").notNull(),
   lastSchoolType: text("last_school_type"),
   studentType: text("student_type"),
-  municipality: text("municipality").notNull().default("Laguna"),
+  municipality: text("municipality").notNull().default("Unspecified"),
   province: text("province").notNull().default("Laguna"),
   previousSchool: text("previous_school"),
   contactNumber: text("contact_number"),
@@ -84,7 +87,7 @@ export const studentImports = pgTable("student_imports", {
   admissionType: text("admission_type"),
   program: text("program"),
   scholarship: text("scholarship"),
-  municipality: text("municipality").notNull().default("Laguna"),
+  municipality: text("municipality").notNull().default("Unspecified"),
   importedAt: timestamp("imported_at").notNull().defaultNow(),
   importSource: text("import_source").notNull(),
   importStatus: text("import_status").notNull().default("Pending"), // Pending, Matched, Unmatched, Applied
@@ -111,7 +114,7 @@ export const studentsProcessed = pgTable("students_processed", {
   requirements: text("requirements"),
   lastSchoolType: text("last_school_type"),
   schoolRegistryId: integer("school_registry_id").references(() => schoolRegistry.id),
-  municipality: text("municipality").notNull().default("Laguna"),
+  municipality: text("municipality").notNull().default("Unspecified"),
   province: text("province").notNull().default("Laguna"),
   yearLevel: text("year_level"),
   enrollmentStatus: text("enrollment_status").notNull().default("Active"),
@@ -121,7 +124,12 @@ export const studentsProcessed = pgTable("students_processed", {
   mappingStatus: text("mapping_status").notNull().default("pending"),
   syncedAt: timestamp("synced_at").notNull().defaultNow(),
   processedAt: timestamp("processed_at").notNull().defaultNow(),
-});
+}, (table) => ({
+  schoolRegistryIdx: index("students_processed_school_id_idx").on(table.schoolRegistryId),
+  municipalityIdx: index("students_processed_municipality_idx").on(table.municipality),
+  courseIdx: index("students_processed_course_idx").on(table.course),
+  studentNumberIdx: index("students_processed_student_no_idx").on(table.studentNumber),
+}));
 
 /** Alternate normalized names → canonical school registry entry. */
 export const schoolAliases = pgTable("school_aliases", {
@@ -142,7 +150,9 @@ export const mappingLogs = pgTable("mapping_logs", {
   message: text("message").notNull(),
   details: text("details"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-});
+}, (table) => ({
+  schoolRegistryIdx: index("mapping_logs_school_id_idx").on(table.schoolRegistryId),
+}));
 
 export const departments = pgTable("departments", {
   id: serial("id").primaryKey(),

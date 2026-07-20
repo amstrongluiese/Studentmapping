@@ -1,8 +1,9 @@
 import { useState, useMemo } from "react";
-import { Edit, Plus, RefreshCw, Trash2, MapPin, Upload, Download, Merge, Filter } from "lucide-react";
+import { Edit, Plus, RefreshCw, Trash2, MapPin, Upload, Download, Merge, Filter, AlertTriangle } from "lucide-react";
 import type { SchoolRegistry as School } from "@shared/schema";
 import { api } from "@shared/routes";
 import { getSchoolStatus, hasCoordinates } from "@shared/schoolRegistry";
+import { detectLocationMismatch, isAmbiguousSchoolName } from "@shared/locationIntelligence";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -158,14 +159,42 @@ export function AdminSchoolRegistry({
     return Array.from(set).sort();
   }, [filteredSchools]);
 
+  // Compute location mismatch map for all schools
+  const mismatchMap = useMemo(() => {
+    const map = new Map<number, { hasMismatch: boolean; isAmbiguous: boolean; message?: string }>();
+    for (const school of filteredSchools) {
+      if (!hasCoordinates(school)) continue;
+      const studentHint = studentOriginsMap?.get(school.id);
+      const result = detectLocationMismatch(
+        school.schoolName,
+        school.province || "",
+        school.municipality || "",
+        studentHint,
+      );
+      if (result.hasMismatch || result.isAmbiguous) {
+        map.set(school.id, {
+          hasMismatch: result.hasMismatch,
+          isAmbiguous: result.isAmbiguous || false,
+          message: result.message,
+        });
+      }
+    }
+    return map;
+  }, [filteredSchools, studentOriginsMap]);
+
   const processedSchools = useMemo(() => {
     return filteredSchools
       .filter((school) => {
         // Status filter
         if (registryStatusFilter !== "All") {
-          const status = duplicateIds.has(school.id) ? "Duplicate Entry" : getSchoolStatus(school);
-          if (registryStatusFilter === "Verified" && !(school.isActive && hasCoordinates(school))) return false;
-          if (registryStatusFilter !== "Verified" && status !== registryStatusFilter) return false;
+          if (registryStatusFilter === "Location Mismatch") {
+            if (!mismatchMap.has(school.id)) return false;
+          } else if (registryStatusFilter === "Verified" && !(school.isActive && hasCoordinates(school))) {
+            return false;
+          } else if (registryStatusFilter !== "Verified") {
+            const status = duplicateIds.has(school.id) ? "Duplicate Entry" : getSchoolStatus(school);
+            if (status !== registryStatusFilter) return false;
+          }
         }
         // Municipality filter
         if (registryMunicipalityFilter !== "All") {
@@ -188,7 +217,7 @@ export function AdminSchoolRegistry({
         }
         return b.id - a.id;
       });
-  }, [filteredSchools, duplicateIds, registryStatusFilter, registryMunicipalityFilter, registryTypeFilter, registrySort]);
+  }, [filteredSchools, duplicateIds, registryStatusFilter, registryMunicipalityFilter, registryTypeFilter, registrySort, mismatchMap]);
 
   const pageSize = 25;
   const totalPages = Math.max(1, Math.ceil(processedSchools.length / pageSize));
@@ -351,6 +380,7 @@ export function AdminSchoolRegistry({
               <SelectItem value="Auto-Located">🔍 Auto-Located</SelectItem>
               <SelectItem value="Needs Review">🔄 Needs Review</SelectItem>
               <SelectItem value="Duplicate Entry">🗂 Duplicate Entry</SelectItem>
+              <SelectItem value="Location Mismatch">🚩 Location Mismatch {mismatchMap.size > 0 && `(${mismatchMap.size})`}</SelectItem>
             </SelectContent>
           </Select>
 
@@ -452,7 +482,7 @@ export function AdminSchoolRegistry({
                     <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Municipality</TableHead>
                     <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Province</TableHead>
                     <TableHead className="whitespace-nowrap text-right text-[10px] font-semibold uppercase tracking-wide">Students</TableHead>
-                    <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Frosh / Xfer</TableHead>
+                    <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Freshmen / Transferees</TableHead>
                     <TableHead className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide">Verification</TableHead>
                     <TableHead className="whitespace-nowrap text-right text-[10px] font-semibold uppercase tracking-wide">Actions</TableHead>
                   </>
@@ -498,6 +528,20 @@ export function AdminSchoolRegistry({
                         <p className="text-xs text-muted-foreground">{school.schoolType || "Unknown"}</p>
                       ) : (
                         <p className="truncate text-[10px] text-muted-foreground">{school.schoolType}</p>
+                      )}
+                      {mismatchMap.has(school.id) && (
+                        <Badge variant="outline" className={cn(
+                          "mt-0.5 max-w-fit text-[9px] flex items-center gap-0.5",
+                          mismatchMap.get(school.id)!.hasMismatch
+                            ? "border-rose-200 bg-rose-50 text-rose-700"
+                            : "border-blue-200 bg-blue-50 text-blue-700"
+                        )} title={mismatchMap.get(school.id)!.message}>
+                          {mismatchMap.get(school.id)!.hasMismatch ? (
+                            <><AlertTriangle className="h-2.5 w-2.5" /> Name mismatch</>
+                          ) : (
+                            "Multi-campus"
+                          )}
+                        </Badge>
                       )}
                     </TableCell>
                     {compact ? (

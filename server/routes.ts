@@ -2,6 +2,7 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { getDb } from "./db";
 import { storage } from "./storage";
+import { detectLocationMismatch, isAmbiguousSchoolName, extractLocationHintsFromName, buildSmartGeocodeQuery } from "@shared/locationIntelligence";
 import { api } from "@shared/routes";
 import {
   imports,
@@ -225,6 +226,94 @@ export async function registerRoutes(
       if (err instanceof z.ZodError) return res.status(400).json({ success: false, deletedCount: 0, skippedCount: 0, message: err.errors[0].message });
       if (err instanceof Error) return res.status(500).json({ success: false, deletedCount: 0, skippedCount: 0, message: err.message });
       throw err;
+    }
+  });
+
+  // ── Location Mismatch Validation ──────────────────────────────────────
+  app.post("/api/schoolRegistry/validate-locations", async (req, res) => {
+    try {
+      const { schoolIds } = req.body || {};
+      const allSchools = await storage.listSchoolRegistry();
+      const db = getDb();
+
+      // Filter to requested IDs or all schools with coordinates
+      let targetSchools = allSchools.filter(s => 
+        s.latitude !== null && s.longitude !== null && s.isActive
+      );
+      if (Array.isArray(schoolIds) && schoolIds.length > 0) {
+        const idSet = new Set(schoolIds.map(Number));
+        targetSchools = targetSchools.filter(s => idSet.has(s.id));
+      }
+
+      // Build student origins map from processed students
+      const processedRows = await db.select({
+        schoolRegistryId: studentsProcessed.schoolRegistryId,
+        municipality: studentsProcessed.municipality,
+        province: studentsProcessed.province,
+      }).from(studentsProcessed);
+
+      const schoolStudents = new Map<number, { municipality: string; province: string }[]>();
+      for (const row of processedRows) {
+        if (!row.schoolRegistryId) continue;
+        if (!row.municipality && !row.province) continue;
+        const students = schoolStudents.get(row.schoolRegistryId) || [];
+        students.push({ municipality: row.municipality || "", province: row.province || "" });
+        schoolStudents.set(row.schoolRegistryId, students);
+      }
+
+      const studentOriginsMap = new Map<number, string>();
+      for (const [schoolId, students] of Array.from(schoolStudents.entries())) {
+        const mCount = new Map<string, number>();
+        for (const s of students) {
+          if (s.municipality) mCount.set(s.municipality, (mCount.get(s.municipality) || 0) + 1);
+        }
+        const topMunicipality = Array.from(mCount.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+        const pCount = new Map<string, number>();
+        for (const s of students) {
+          if (s.province) pCount.set(s.province, (pCount.get(s.province) || 0) + 1);
+        }
+        const topProvince = Array.from(pCount.entries()).sort((a, b) => b[1] - a[1])[0]?.[0];
+        const origin = [topMunicipality, topProvince].filter(Boolean).join(", ");
+        if (origin) studentOriginsMap.set(schoolId, origin);
+      }
+
+      // Validate each school
+      const results = targetSchools.map(school => {
+        const studentOrigin = studentOriginsMap.get(school.id);
+        const mismatch = detectLocationMismatch(
+          school.schoolName,
+          school.province || "",
+          school.municipality || "",
+          studentOrigin,
+        );
+        const hints = extractLocationHintsFromName(school.schoolName);
+        const ambiguous = isAmbiguousSchoolName(school.schoolName);
+
+        return {
+          schoolId: school.id,
+          schoolName: school.schoolName,
+          currentMunicipality: school.municipality,
+          currentProvince: school.province,
+          latitude: school.latitude,
+          longitude: school.longitude,
+          studentOrigin: studentOrigin || null,
+          locationHints: hints.map(h => h.place),
+          isAmbiguous: ambiguous,
+          ...mismatch,
+        };
+      });
+
+      // Only return results with issues
+      const issues = results.filter(r => r.hasMismatch || r.isAmbiguous);
+
+      res.json({
+        total: targetSchools.length,
+        issueCount: issues.length,
+        results: issues,
+      });
+    } catch (err) {
+      console.error("[validate-locations] error:", err);
+      res.status(500).json({ message: err instanceof Error ? err.message : "Validation failed" });
     }
   });
 

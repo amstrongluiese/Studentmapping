@@ -4,6 +4,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { api } from "@shared/routes";
 import { type SchoolRegistry as SchoolRecord } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
+import { detectLocationMismatch, isAmbiguousSchoolName, buildSmartGeocodeQuery, type MismatchResult } from "@shared/locationIntelligence";
 import {
   Dialog,
   DialogContent,
@@ -21,17 +22,31 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCreateSchool, useSchools, useUpdateSchool } from "@/hooks/use-schools";
 import {
   SchoolNameAutocomplete,
   type SchoolSearchSelection,
 } from "@/components/SchoolNameAutocomplete";
-import { Loader2, MapPin, School as SchoolIcon, Sparkles, Navigation } from "lucide-react";
+import { Loader2, MapPin, School as SchoolIcon, Sparkles, Navigation, AlertTriangle, Info } from "lucide-react";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
 import { GoogleMap, Marker, useJsApiLoader } from "@react-google-maps/api";
 
 import { GOOGLE_MAPS_LIBRARIES, GOOGLE_MAPS_VERSION } from "@/lib/googleMapsConfig";
+import { inferSchoolType } from "@/lib/utils";
+
+const INSTITUTION_TYPES = [
+  "Unknown",
+  "Elementary",
+  "High School",
+  "Senior High School",
+  "College",
+  "University",
+  "Vocational",
+  "Special Education",
+  "Feeder Institution",
+] as const;
 
 const LAGUNA_CENTER = { lat: 14.1667, lng: 121.25 };
 
@@ -61,6 +76,7 @@ export function SchoolFormDialog({
   const selectionConfirmedRef = useRef(false);
   const [mapCenter, setMapCenter] = useState(LAGUNA_CENTER);
   const [markerPos, setMarkerPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [mismatchWarning, setMismatchWarning] = useState<MismatchResult | null>(null);
 
   const { isLoaded } = useJsApiLoader({
     version: GOOGLE_MAPS_VERSION,
@@ -110,6 +126,7 @@ export function SchoolFormDialog({
       selectionConfirmedRef.current = Boolean(initialData);
       setSelectedSavedSchoolId(initialData?.id ?? null);
       setGeocodePreview(null);
+      setMismatchWarning(null);
       
       const lat = initialData?.latitude ?? defaultCoordinates?.latitude ?? LAGUNA_CENTER.lat;
       const lng = initialData?.longitude ?? defaultCoordinates?.longitude ?? LAGUNA_CENTER.lng;
@@ -297,11 +314,33 @@ export function SchoolFormDialog({
         form.setValue("province", detectedProvince, { shouldDirty: true });
       }
 
+      // Auto-detect institution type from school name
+      const currentType = form.getValues("institutionType");
+      if (!currentType || currentType === "Unknown" || currentType === "Feeder Institution") {
+        const detected = inferSchoolType(name);
+        if (detected) {
+          form.setValue("institutionType", detected, { shouldDirty: true });
+        }
+      }
+
       const pos = { lat, lng };
       setMarkerPos(pos);
       setMapCenter(pos);
       setGeocodePreview(res.formatted_address);
       selectionConfirmedRef.current = true;
+
+      // ── Location Mismatch Detection ──────────────────────────────────
+      const mismatchCheck = detectLocationMismatch(
+        name,
+        detectedProvince || "",
+        detectedMunicipality || "",
+        studentOrigin,
+      );
+      if (mismatchCheck.hasMismatch || mismatchCheck.isAmbiguous) {
+        setMismatchWarning(mismatchCheck);
+      } else {
+        setMismatchWarning(null);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unable to geolocate school.";
       toast({ title: "Geolocation failed", description: message, variant: "destructive" });
@@ -529,6 +568,45 @@ export function SchoolFormDialog({
                 </div>
               </div>
 
+              {/* Location Mismatch Warning */}
+              {mismatchWarning && (
+                <div className={`rounded-lg border p-3 ${
+                  mismatchWarning.hasMismatch
+                    ? "border-amber-300 bg-amber-50 dark:bg-amber-950/30"
+                    : "border-blue-200 bg-blue-50 dark:bg-blue-950/30"
+                }`}>
+                  <div className="flex items-start gap-2">
+                    {mismatchWarning.hasMismatch ? (
+                      <AlertTriangle className="h-4 w-4 mt-0.5 text-amber-600 shrink-0" />
+                    ) : (
+                      <Info className="h-4 w-4 mt-0.5 text-blue-600 shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-semibold ${
+                        mismatchWarning.hasMismatch ? "text-amber-800" : "text-blue-800"
+                      }`}>
+                        {mismatchWarning.hasMismatch
+                          ? "⚠️ Possible Location Mismatch"
+                          : "ℹ️ Multi-Campus School Detected"}
+                      </p>
+                      <p className={`text-xs mt-1 ${
+                        mismatchWarning.hasMismatch ? "text-amber-700" : "text-blue-700"
+                      }`}>
+                        {mismatchWarning.message}
+                      </p>
+                      {mismatchWarning.suggestedQuery && (
+                        <p className="text-xs mt-1.5 text-slate-600">
+                          💡 <strong>Suggested query:</strong>{" "}
+                          <code className="bg-white/60 px-1 py-0.5 rounded text-[10px] font-mono">
+                            {mismatchWarning.suggestedQuery}
+                          </code>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control as any}
@@ -536,9 +614,21 @@ export function SchoolFormDialog({
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Institution Type</FormLabel>
-                      <FormControl>
-                        <Input placeholder="e.g. Feeder Institution" {...field} />
-                      </FormControl>
+                      <Select
+                        value={field.value || "Unknown"}
+                        onValueChange={(val) => field.onChange(val)}
+                      >
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {INSTITUTION_TYPES.map((t) => (
+                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
