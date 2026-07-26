@@ -1,6 +1,23 @@
-import { boolean, pgTable, text, serial, integer, doublePrecision, timestamp, index } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text, serial, integer, doublePrecision, timestamp, index, varchar, json } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  password: text("password").notNull(),
+  role: text("role").notNull().default("user"), // admin, user
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const session = pgTable("session", {
+  sid: varchar("sid").primaryKey(),
+  sess: json("sess").notNull(),
+  expire: timestamp("expire", { precision: 6 }).notNull(),
+}, (table) => ({
+  expireIdx: index("IDX_session_expire").on(table.expire),
+}));
 
 export const schoolRegistry = pgTable("school_registry", {
   id: serial("id").primaryKey(),
@@ -19,6 +36,8 @@ export const schoolRegistry = pgTable("school_registry", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: integer("deleted_by").references(() => users.id),
 }, (table) => ({
   nameIdx: index("school_registry_name_idx").on(table.schoolName),
   municipalityIdx: index("school_registry_municipality_idx").on(table.municipality),
@@ -29,6 +48,8 @@ export const students = pgTable("students", {
   studentNumber: text("student_number").notNull().unique(),
   name: text("name").notNull(),
   referralCode: text("referral_code").notNull().unique(),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: integer("deleted_by").references(() => users.id),
 });
 
 export const referrals = pgTable("referrals", {
@@ -40,6 +61,8 @@ export const referrals = pgTable("referrals", {
   notes: text("notes"),
   status: text("status").notNull().default("pending"), // pending, approved, rejected
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: integer("deleted_by").references(() => users.id),
 });
 
 /** GIS import/sync run metadata (not referral-related). */
@@ -67,6 +90,7 @@ export const studentsRaw = pgTable("students_raw", {
   studentType: text("student_type"),
   municipality: text("municipality").notNull().default("Unspecified"),
   province: text("province").notNull().default("Laguna"),
+  barangay: text("barangay"),
   previousSchool: text("previous_school"),
   contactNumber: text("contact_number"),
   schedule: text("schedule"),
@@ -88,6 +112,7 @@ export const studentImports = pgTable("student_imports", {
   program: text("program"),
   scholarship: text("scholarship"),
   municipality: text("municipality").notNull().default("Unspecified"),
+  barangay: text("barangay"),
   importedAt: timestamp("imported_at").notNull().defaultNow(),
   importSource: text("import_source").notNull(),
   importStatus: text("import_status").notNull().default("Pending"), // Pending, Matched, Unmatched, Applied
@@ -116,6 +141,7 @@ export const studentsProcessed = pgTable("students_processed", {
   schoolRegistryId: integer("school_registry_id").references(() => schoolRegistry.id),
   municipality: text("municipality").notNull().default("Unspecified"),
   province: text("province").notNull().default("Laguna"),
+  barangay: text("barangay"),
   yearLevel: text("year_level"),
   enrollmentStatus: text("enrollment_status").notNull().default("Active"),
   enrollmentDate: timestamp("enrollment_date").notNull().defaultNow(),
@@ -129,6 +155,8 @@ export const studentsProcessed = pgTable("students_processed", {
   municipalityIdx: index("students_processed_municipality_idx").on(table.municipality),
   courseIdx: index("students_processed_course_idx").on(table.course),
   studentNumberIdx: index("students_processed_student_no_idx").on(table.studentNumber),
+  municipalityCourseIdx: index("students_processed_mun_course_idx").on(table.municipality, table.course),
+  municipalityYearLevelIdx: index("students_processed_mun_yl_idx").on(table.municipality, table.yearLevel),
 }));
 
 /** Alternate normalized names → canonical school registry entry. */
@@ -194,6 +222,17 @@ export const systemSettings = pgTable("system_settings", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+/** Audit logs for DPA compliance (tracking PII access) */
+export const dataAccessLogs = pgTable("data_access_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  action: text("action").notNull(), // e.g. 'VIEW', 'EXPORT', 'UPDATE'
+  targetTable: text("target_table").notNull(),
+  recordId: text("record_id"), // Can be string or number, stored as text
+  ipAddress: text("ip_address"),
+  accessedAt: timestamp("accessed_at").notNull().defaultNow(),
+});
+
 export const schoolStatusSchema = z.enum([
   "Verified",
   "Auto-Located",
@@ -210,6 +249,7 @@ export const insertSchoolRegistrySchema = createInsertSchema(schoolRegistry, {
 }).omit({ id: true, createdAt: true, updatedAt: true });
 export const insertStudentSchema = createInsertSchema(students).omit({ id: true });
 export const insertReferralSchema = createInsertSchema(referrals).omit({ id: true, createdAt: true });
+export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 
 export type InsertSchoolRegistry = z.infer<typeof insertSchoolRegistrySchema>;
 export type SchoolRegistry = typeof schoolRegistry.$inferSelect;
@@ -217,6 +257,9 @@ export type SchoolRegistry = typeof schoolRegistry.$inferSelect;
 export type InsertStudent = z.infer<typeof insertStudentSchema>;
 export type Student = typeof students.$inferSelect;
 export type StudentInput = z.infer<typeof insertStudentSchema>;
+
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
 
 export type InsertReferral = z.infer<typeof insertReferralSchema>;
 export type Referral = typeof referrals.$inferSelect;

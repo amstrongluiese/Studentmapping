@@ -3,22 +3,11 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { testDatabaseConnection, initializeDatabase } from "./db";
+import { testDatabaseConnection, initializeDatabase, getDb } from "./db";
+import { dataAccessLogs } from "@shared/schema";
+import { setupAuth } from "./auth";
 
 dotenv.config();
-
-
-import { syncExcelToJSON } from "./syncMasterDirectory";
-import * as fs from "fs";
-import * as path from "path";
-
-// Auto-sync JSON from Excel on boot if JSON doesn't exist
-const excelPath = path.join(process.cwd(), "Geocoded_Schools_2026.xlsx");
-const jsonPath = path.join(process.cwd(), "server", "data", "schools_directory.json");
-
-// Removed old sync
-
-// reloadMasterDirectory();
 
 const app = express();
 const httpServer = createServer(app);
@@ -74,6 +63,17 @@ app.use((req, res, next) => {
       }
 
       log(logLine);
+
+      // Async log to DB for audit trailing (Data Privacy Act compliance)
+      if (req.isAuthenticated && req.isAuthenticated() && req.user && req.method !== 'OPTIONS') {
+        const user = req.user as any;
+        getDb().insert(dataAccessLogs).values({
+          userId: user.id,
+          action: req.method,
+          targetTable: path,
+          ipAddress: req.ip || req.connection.remoteAddress || 'unknown',
+        }).execute().catch(err => console.error("Audit log failed:", err));
+      }
     }
   });
 
@@ -84,21 +84,19 @@ app.use((req, res, next) => {
   initializeDatabase();
 
   await testDatabaseConnection();
+  setupAuth(app);
 
-  // const { ensureGisSchema } = await import("./ensureGisSchema");
-  // await ensureGisSchema();
-
-  if (fs.existsSync(excelPath)) {
-    console.log("[startup] Generating initial schools_directory.json from Excel and importing to DB...");
-    const schoolsData = syncExcelToJSON(excelPath);
-    const { storage } = await import("./storage");
-    const count = await storage.listSchoolRegistry();
-    if (count.length === 0) {
-       console.log("[startup] School registry is empty. Importing...");
-       await storage.importSchools(schoolsData as any);
-       console.log("[startup] Imported", schoolsData.length, "schools.");
+  // Protect all API routes except auth and public ones
+  app.use("/api", (req, res, next) => {
+    const publicPaths = ["/login", "/logout", "/user", "/programs", "/departments", "/referrals", "/students/register", "/settings"];
+    if (publicPaths.some(p => req.path.startsWith(p))) {
+      return next();
     }
-  }
+    if (req.isAuthenticated && req.isAuthenticated()) {
+      return next();
+    }
+    res.status(401).json({ message: "Unauthorized" });
+  });
 
   await registerRoutes(httpServer, app);
 
@@ -143,12 +141,10 @@ app.use((req, res, next) => {
             return;
           }
           currentPort += 1;
-          // slight delay before retrying to avoid races
           setTimeout(attempt, 120);
           return;
         }
 
-        // rethrow other errors
         throw err;
       };
 

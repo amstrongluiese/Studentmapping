@@ -19,8 +19,10 @@ import {
   schoolRegistry,
   students,
   referrals,
+  users,
 } from "@shared/schema";
-import { eq, and, count, desc, inArray } from "drizzle-orm";
+import { eq, and, count, desc, inArray, not, isNull, or } from "drizzle-orm";
+import { isAdmin, hashPassword, comparePasswords } from "./auth";
 import { normalizeSchoolName } from "@shared/schoolRegistry";
 import { SchoolMatchingEngine } from "./schoolMatcher";
 import { z } from "zod";
@@ -82,6 +84,53 @@ export async function registerRoutes(
   // Seed DB with default programs on startup
   await seedPrograms();
   await refreshCatalog();
+
+  // Admin routes
+  app.get("/api/users", isAdmin, async (req, res) => {
+    const allUsers = await getDb().select({ id: users.id, username: users.username, role: users.role, isActive: users.isActive, createdAt: users.createdAt }).from(users).orderBy(desc(users.createdAt));
+    res.json(allUsers);
+  });
+
+  app.post("/api/users", isAdmin, async (req, res) => {
+    try {
+      const { username, password, role, isActive } = req.body;
+      const db = getDb();
+      const existing = await db.select().from(users).where(eq(users.username, username)).limit(1);
+      if (existing.length > 0) return res.status(400).json({ message: "Username already exists" });
+      const hashedPassword = await hashPassword(password);
+      const [user] = await db.insert(users).values({ username, password: hashedPassword, role: role || "admin", isActive: isActive ?? true }).returning({ id: users.id, username: users.username, role: users.role, isActive: users.isActive });
+      res.json(user);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to create user" });
+    }
+  });
+
+  app.put("/api/users/:id", isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { password, role, isActive } = req.body;
+      const updates: any = {};
+      if (password) updates.password = await hashPassword(password);
+      if (role) updates.role = role;
+      if (isActive !== undefined) updates.isActive = isActive;
+      
+      const [user] = await getDb().update(users).set(updates).where(eq(users.id, Number(id))).returning({ id: users.id, username: users.username, role: users.role, isActive: users.isActive });
+      res.json(user);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to update user" });
+    }
+  });
+
+  app.delete("/api/users/:id", isAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      if (Number(id) === (req.user as any)?.id) return res.status(400).json({ message: "Cannot delete your own account" });
+      await getDb().delete(users).where(eq(users.id, Number(id)));
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete user" });
+    }
+  });
 
   // School routes
   app.get(api.schoolRegistry.list.path, async (req, res) => {
@@ -346,8 +395,9 @@ export async function registerRoutes(
           fullName: getVal(["name", "full name", "fullname", "student name", "student_name"]),
           previousSchool: getVal(["school", "previous", "graduated", "feeder"]),
           program: getVal(["program", "course", "strand", "degree"]),
-          scholarship: getVal(["scholarship", "iskolar", "grant", "scholar"]),
+          scholarship: getVal(["scholarship", "iskolar", "grant", "scholar", "iskolar ni kap"]),
           municipality: getVal(["municipality", "city", "town", "address"]),
+          barangay: getVal(["barangay", "brgy"]),
           strand: getVal(["strand"]),
           schedule: getVal(["schedule", "sched"]),
           contactNumber: getVal(["contact", "contact no", "number", "phone"]),
@@ -880,20 +930,48 @@ export async function registerRoutes(
   app.post("/api/students/processed/archive-all", async (req, res) => {
     try {
       const db = getDb();
-      // Update all students that are not currently archived
+      // Update all students that are not currently archived or have null statuses
       await db.update(studentsProcessed)
         .set({
           enrollmentStatus: "Archived",
           archivedAt: new Date()
         })
         .where(
-          inArray(studentsProcessed.enrollmentStatus, ["Active", "Enrolled", "Pending", "Unknown"])
+          or(
+            not(eq(studentsProcessed.enrollmentStatus, "Archived")),
+            isNull(studentsProcessed.enrollmentStatus)
+          )
         );
+
+      // Clear the staging area so new imports start fresh
+      await db.delete(studentImports);
 
       res.json({ success: true, message: "Successfully archived all current student records." });
     } catch (err) {
       console.error("Archive error:", err);
       res.status(500).json({ success: false, message: "Failed to archive student data." });
+    }
+  });
+
+  app.post("/api/admin/verify-password", async (req, res) => {
+    if (!req.user) return res.status(401).json({ success: false, message: "Unauthorized" });
+    const { password } = req.body;
+    
+    try {
+      const db = getDb();
+      const [user] = await db.select().from(users).where(eq(users.id, req.user.id)).limit(1);
+      
+      if (!user) return res.status(401).json({ success: false, message: "User not found" });
+      
+      const isValid = await comparePasswords(password, user.password);
+      if (isValid) {
+        return res.json({ success: true });
+      } else {
+        return res.status(401).json({ success: false, message: "Incorrect password" });
+      }
+    } catch (err) {
+      console.error("Verify password error:", err);
+      return res.status(500).json({ success: false, message: "Verification failed" });
     }
   });
 
@@ -967,6 +1045,40 @@ export async function registerRoutes(
   });
 
   // await seedDatabase(); // Removed to prevent wiping DB on every boot
+    
+    // System Settings Endpoints
+    app.get("/api/settings", async (req, res) => {
+      try {
+        const records = await getDb().select().from(systemSettings);
+        const settingsMap = records.reduce((acc, curr) => {
+          acc[curr.key] = curr.value;
+          return acc;
+        }, {} as Record<string, string>);
+        res.json(settingsMap);
+      } catch (err: any) {
+        res.status(500).json({ message: "Failed to fetch settings" });
+      }
+    });
+
+    app.post("/api/settings", isAdmin, async (req, res) => {
+      try {
+        const updates = req.body;
+        for (const [key, value] of Object.entries(updates)) {
+          if (typeof value !== "string") continue;
+          
+          const existing = await getDb().select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
+          if (existing.length > 0) {
+            await getDb().update(systemSettings).set({ value }).where(eq(systemSettings.key, key));
+          } else {
+            await getDb().insert(systemSettings).values({ key, value });
+          }
+        }
+        res.json({ message: "Settings updated successfully" });
+      } catch (err: any) {
+        res.status(500).json({ message: "Failed to update settings" });
+      }
+    });
+
   return httpServer;
 }
 

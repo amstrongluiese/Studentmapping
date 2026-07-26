@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 import path from "path";
 
 export default defineConfig({
+  cacheDir: path.resolve(import.meta.dirname, ".vite_cache"),
+  optimizeDeps: { force: true },
   base: "/",
 
   plugins: [react()],
@@ -26,8 +28,11 @@ export default defineConfig({
 
   server: {
     host: "0.0.0.0",
-    port: 5173,
-
+    port: 5000,
+    watch: {
+      usePolling: true,
+      ignored: ["**/node_modules/**", "**/.vite_cache/**", "**/server/uploads/**"],
+    },
     fs: {
       strict: true,
       deny: ["**/.*"],

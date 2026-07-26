@@ -26,7 +26,7 @@ import {
   Users,
   ChevronLeft,
   ChevronRight,
-  Target, Building2, Folder, RotateCcw,
+  Target, Building2, Folder, RotateCcw, LogOut
 } from "lucide-react";
 import type { Import, SchoolRegistry as School, StudentProcessed } from "@shared/schema";
 import { hasCoordinates } from "@shared/schoolRegistry";
@@ -70,8 +70,13 @@ import { TableToolbar } from "@/components/ui/table-toolbar";
 import { cn } from "@/lib/utils";
 import { SchoolMatchingQueue } from "./SchoolMatchingQueue";
 import { DepartmentManagementWorkspace } from "./DepartmentManagementWorkspace";
+import { useAuth } from "@/hooks/use-auth";
+import { ThemeToggle } from "./ThemeToggle";
+import { AdminAccountsSettings } from "./AdminAccountsSettings";
+import { AdminThemeSettings } from "./AdminThemeSettings";
+import { AdminScholarManagement } from "./AdminScholarManagement";
 
-export type AdminPortalSection = "overview" | "students" | "feed" | "queue" | "registry" | "import-logs" | "targets" | "settings" | "archives";
+export type AdminPortalSection = "overview" | "students" | "scholars" | "feed" | "queue" | "registry" | "import-logs" | "targets" | "settings" | "archives";
 
 export interface AdminPortalWorkspaceProps {
   section: AdminPortalSection;
@@ -89,8 +94,7 @@ export interface AdminPortalWorkspaceProps {
   schoolsLoading: boolean;
   schoolsUpdatedAt: number;
   duplicateIds: Set<number>;
-  renderIntegrationControls: () => ReactNode;
-  renderGisWorkspaceSettings: () => ReactNode;
+  renderIntegrationControls?: () => ReactNode;
   renderSchoolRegistry: () => ReactNode;
   onAddSchool: () => void;
   onEditSchool: (school: School) => void;
@@ -116,6 +120,7 @@ function sectionTabs(queueCount: number): { value: AdminPortalSection; label: st
   return [
     { value: "overview", label: "Overview", short: "Overview", icon: <LayoutDashboard className="h-4 w-4" /> },
     { value: "students", label: "Students", short: "Students", icon: <Users className="h-4 w-4" /> },
+    { value: "scholars", label: "Scholar Management", short: "Scholars", icon: <GraduationCap className="h-4 w-4" /> },
     { value: "registry", label: "School Registry", short: "Registry", icon: <Database className="h-4 w-4" /> },
     { value: "import-logs", label: "Import Logs", short: "Logs", icon: <ClipboardList className="h-4 w-4" /> },
     { value: "targets", label: "Dept Management", short: "Depts", icon: <Building2 className="h-4 w-4" /> },
@@ -140,7 +145,6 @@ export function AdminPortalWorkspace({
   schoolsUpdatedAt,
   duplicateIds,
   renderIntegrationControls,
-  renderGisWorkspaceSettings,
   renderSchoolRegistry,
   onAddSchool,
   onEditSchool,
@@ -148,10 +152,11 @@ export function AdminPortalWorkspace({
   onDeleteSchool,
   onRemoveDuplicate,
 }: AdminPortalWorkspaceProps) {
-  const [settingsPanel, setSettingsPanel] = useState<"integrations" | "map">("integrations");
+  const [settingsPanel, setSettingsPanel] = useState<"integrations" | "map" | "admins" | "themes">("integrations");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [studentsTab, setStudentsTab] = useState<"directory" | "feed">("directory");
   const { toast } = useToast();
+  const { logout, user } = useAuth();
 
   const [feedSearch, setFeedSearch] = useState("");
   const [feedSelected, setFeedSelected] = useState<Set<number>>(new Set());
@@ -181,6 +186,40 @@ export function AdminPortalWorkspace({
   const [isDeletingLogs, setIsDeletingLogs] = useState(false);
 
   const [selectedArchiveFolder, setSelectedArchiveFolder] = useState<string | null>(null);
+
+  const [passwordPrompt, setPasswordPrompt] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    action: (() => void) | null;
+  }>({
+    isOpen: false,
+    title: "",
+    description: "",
+    action: null
+  });
+  const [adminPassword, setAdminPassword] = useState("");
+  const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
+
+  const confirmWithPassword = async () => {
+    if (!passwordPrompt.action) return;
+    setIsVerifyingPassword(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/verify-password", { password: adminPassword });
+      if (!res.ok) throw new Error("Verification failed");
+      const data = await res.json();
+      if (!data.success) throw new Error(data.message || "Invalid password");
+      
+      passwordPrompt.action();
+      
+      setPasswordPrompt({ isOpen: false, title: "", description: "", action: null });
+      setAdminPassword("");
+    } catch (e) {
+      toast({ title: "Verification Failed", description: "Incorrect admin password.", variant: "destructive" });
+    } finally {
+      setIsVerifyingPassword(false);
+    }
+  };
 
   const deleteFeed = async () => {
     try {
@@ -1274,6 +1313,14 @@ export function AdminPortalWorkspace({
             </div>
           </TabsContent>
 
+          <TabsContent value="scholars" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
+            <ScrollArea className="h-full">
+              <div className="p-4 sm:p-6 lg:p-8">
+                <AdminScholarManagement />
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
           <TabsContent value="registry" className="m-0 mt-0 min-h-0 flex-1 data-[state=inactive]:hidden">
             <ScrollArea className="h-full">
               <div className="p-3 sm:p-4">{renderSchoolRegistry()}</div>
@@ -1373,30 +1420,56 @@ export function AdminPortalWorkspace({
           </TabsContent>
 
           <TabsContent value="settings" className="m-0 mt-0 min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-            <div className="flex shrink-0 items-center gap-2 px-4 pt-4 pb-2">
-              <button
-                onClick={() => setSettingsPanel("integrations")}
-                className={cn("flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold rounded-full transition-all", settingsPanel === "integrations" ? "bg-teal-500 text-white shadow-sm" : "text-slate-600 hover:bg-white/50")}
-              >
-                <Database className="h-3.5 w-3.5" />
-                API Data Settings
-              </button>
-              <button
-                onClick={() => setSettingsPanel("map")}
-                className={cn("flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold rounded-full transition-all", settingsPanel === "map" ? "bg-teal-500 text-white shadow-sm" : "text-slate-600 hover:bg-white/50")}
-              >
-                <MapPinned className="h-3.5 w-3.5" />
-                Map Settings
-              </button>
+            <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-4 pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSettingsPanel("integrations")}
+                  className={cn("flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold rounded-full transition-all", settingsPanel === "integrations" ? "bg-teal-500 text-white shadow-sm" : "text-slate-600 hover:bg-white/50")}
+                >
+                  <Database className="h-3.5 w-3.5" />
+                  API Data Settings
+                </button>
+
+                {user?.role === "admin" && (
+                  <>
+                    <button
+                      onClick={() => setSettingsPanel("admins")}
+                      className={cn("flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold rounded-full transition-all", settingsPanel === "admins" ? "bg-teal-500 text-white shadow-sm" : "text-slate-600 hover:bg-white/50")}
+                    >
+                      <UserCircle2 className="h-3.5 w-3.5" />
+                      Admin Accounts
+                    </button>
+                    <button
+                      onClick={() => setSettingsPanel("themes")}
+                      className={cn("flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold rounded-full transition-all", settingsPanel === "themes" ? "bg-teal-500 text-white shadow-sm" : "text-slate-600 hover:bg-white/50")}
+                    >
+                      <LayoutDashboard className="h-3.5 w-3.5" />
+                      Themes
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-muted-foreground mr-2 hidden sm:inline-block">
+                  Welcome, {user?.username}
+                </span>
+                <ThemeToggle />
+                <Button variant="ghost" size="icon" onClick={() => logout()} title="Logout">
+                  <LogOut className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <ScrollArea className="flex-1 min-h-0 w-full h-full">
               <div className="flex h-full w-full flex-col p-0 m-0 min-h-0">
                 <section className={cn("flex min-h-[600px] min-w-0 flex-col h-full w-full items-start", settingsPanel !== "integrations" && "hidden")}>
                   {renderIntegrationControls()}
                 </section>
-                <section className={cn("min-w-0 p-4", settingsPanel !== "map" && "hidden")}>
-                  <h3 className="mb-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Map Settings</h3>
-                  {renderGisWorkspaceSettings()}
+
+                <section className={cn("min-w-0 p-4", settingsPanel !== "admins" && "hidden")}>
+                  <AdminAccountsSettings />
+                </section>
+                <section className={cn("min-w-0 p-4", settingsPanel !== "themes" && "hidden")}>
+                  <AdminThemeSettings />
                 </section>
               </div>
             </ScrollArea>
@@ -1463,6 +1536,46 @@ export function AdminPortalWorkspace({
               </DialogFooter>
             </DialogContent>
           </Dialog>
+
+          <Dialog open={passwordPrompt.isOpen} onOpenChange={(open) => {
+            if (!open) {
+              setPasswordPrompt({ isOpen: false, title: "", description: "", action: null });
+              setAdminPassword("");
+            }
+          }}>
+            <DialogContent className="max-w-sm rounded-lg">
+              <DialogHeader>
+                <DialogTitle>{passwordPrompt.title}</DialogTitle>
+                <DialogDescription>{passwordPrompt.description}</DialogDescription>
+              </DialogHeader>
+              <div className="py-4">
+                <Input
+                  type="password"
+                  placeholder="Enter Admin Password"
+                  value={adminPassword}
+                  onChange={(e) => setAdminPassword(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && adminPassword) confirmWithPassword();
+                  }}
+                  className="font-mono text-center tracking-widest bg-slate-50"
+                  autoFocus
+                />
+              </div>
+              <DialogFooter>
+                <Button variant="ghost" onClick={() => {
+                  setPasswordPrompt({ isOpen: false, title: "", description: "", action: null });
+                  setAdminPassword("");
+                }}>
+                  Cancel
+                </Button>
+                <Button variant="default" onClick={confirmWithPassword} disabled={!adminPassword || isVerifyingPassword}>
+                  {isVerifyingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Verify & Confirm
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
           <TabsContent value="archives" className="m-0 mt-0 flex min-h-0 flex-1 flex-col overflow-hidden data-[state=inactive]:hidden">
             <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 sm:p-4">
               <div className="flex items-center justify-between">
@@ -1527,18 +1640,30 @@ export function AdminPortalWorkspace({
                     </Button>
                     <div className="flex items-center gap-2">
                       <Button variant="outline" className="gap-2 border-emerald-200 text-emerald-700 hover:bg-emerald-50" onClick={() => {
-                        if (!confirm(`Restore all students from ${selectedArchiveFolder}?`)) return;
-                        const folderStudents = studentRows.filter(s => s.enrollmentStatus === "Archived" && (s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt))) === selectedArchiveFolder);
-                        updateStudentStatusByIds(folderStudents.map(s => s.id), "Active");
-                        setSelectedArchiveFolder(null);
+                        setPasswordPrompt({
+                          isOpen: true,
+                          title: `Restore Students from ${selectedArchiveFolder}`,
+                          description: "Please enter your admin password to confirm restoring these students to the active registry.",
+                          action: () => {
+                            const folderStudents = studentRows.filter(s => s.enrollmentStatus === "Archived" && (s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt))) === selectedArchiveFolder);
+                            updateStudentStatusByIds(folderStudents.map(s => s.id), "Active");
+                            setSelectedArchiveFolder(null);
+                          }
+                        });
                       }}>
                         <RotateCcw className="h-4 w-4" /> Restore Folder
                       </Button>
                       <Button variant="outline" className="gap-2 border-rose-200 text-rose-700 hover:bg-rose-50" onClick={() => {
-                        if (!confirm(`Permanently delete all students from ${selectedArchiveFolder}? This cannot be undone.`)) return;
-                        const folderStudents = studentRows.filter(s => s.enrollmentStatus === "Archived" && (s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt))) === selectedArchiveFolder);
-                        deleteStudentsByIds(folderStudents.map(s => s.id));
-                        setSelectedArchiveFolder(null);
+                        setPasswordPrompt({
+                          isOpen: true,
+                          title: `Permanently Delete Students from ${selectedArchiveFolder}`,
+                          description: "Please enter your admin password to confirm permanently deleting these students. This action cannot be undone.",
+                          action: () => {
+                            const folderStudents = studentRows.filter(s => s.enrollmentStatus === "Archived" && (s.archivedAt ? toInputDate(s.archivedAt) : (s.processedAt ? toInputDate(s.processedAt) : toInputDate(s.syncedAt))) === selectedArchiveFolder);
+                            deleteStudentsByIds(folderStudents.map(s => s.id));
+                            setSelectedArchiveFolder(null);
+                          }
+                        });
                       }}>
                         <Trash2 className="h-4 w-4" /> Delete Folder
                       </Button>

@@ -159,37 +159,14 @@ export function AdminSchoolRegistry({
     return Array.from(set).sort();
   }, [filteredSchools]);
 
-  // Compute location mismatch map for all schools
-  const mismatchMap = useMemo(() => {
-    const map = new Map<number, { hasMismatch: boolean; isAmbiguous: boolean; message?: string }>();
-    for (const school of filteredSchools) {
-      if (!hasCoordinates(school)) continue;
-      const studentHint = studentOriginsMap?.get(school.id);
-      const result = detectLocationMismatch(
-        school.schoolName,
-        school.province || "",
-        school.municipality || "",
-        studentHint,
-      );
-      if (result.hasMismatch || result.isAmbiguous) {
-        map.set(school.id, {
-          hasMismatch: result.hasMismatch,
-          isAmbiguous: result.isAmbiguous || false,
-          message: result.message,
-        });
-      }
-    }
-    return map;
-  }, [filteredSchools, studentOriginsMap]);
+
 
   const processedSchools = useMemo(() => {
     return filteredSchools
       .filter((school) => {
         // Status filter
         if (registryStatusFilter !== "All") {
-          if (registryStatusFilter === "Location Mismatch") {
-            if (!mismatchMap.has(school.id)) return false;
-          } else if (registryStatusFilter === "Verified" && !(school.isActive && hasCoordinates(school))) {
+          if (registryStatusFilter === "Verified" && !(school.isActive && hasCoordinates(school))) {
             return false;
           } else if (registryStatusFilter !== "Verified") {
             const status = duplicateIds.has(school.id) ? "Duplicate Entry" : getSchoolStatus(school);
@@ -217,12 +194,35 @@ export function AdminSchoolRegistry({
         }
         return b.id - a.id;
       });
-  }, [filteredSchools, duplicateIds, registryStatusFilter, registryMunicipalityFilter, registryTypeFilter, registrySort, mismatchMap]);
+  }, [filteredSchools, duplicateIds, registryStatusFilter, registryMunicipalityFilter, registryTypeFilter, registrySort]);
 
-  const pageSize = 25;
+  const pageSize = 50;
   const totalPages = Math.max(1, Math.ceil(processedSchools.length / pageSize));
   const currentPage = Math.min(registryPage, totalPages);
-  const pageRows = processedSchools.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const pageRows = useMemo(() => processedSchools.slice((currentPage - 1) * pageSize, currentPage * pageSize), [processedSchools, currentPage, pageSize]);
+
+  // Compute location mismatch map for the CURRENT PAGE only (massive performance boost)
+  const mismatchMap = useMemo(() => {
+    const map = new Map<number, { hasMismatch: boolean; isAmbiguous: boolean; message?: string }>();
+    for (const school of pageRows) {
+      if (!hasCoordinates(school)) continue;
+      const studentHint = studentOriginsMap?.get(school.id);
+      const result = detectLocationMismatch(
+        school.schoolName,
+        school.province || "",
+        school.municipality || "",
+        studentHint,
+      );
+      if (result.hasMismatch || result.isAmbiguous) {
+        map.set(school.id, {
+          hasMismatch: result.hasMismatch,
+          isAmbiguous: result.isAmbiguous || false,
+          message: result.message,
+        });
+      }
+    }
+    return map;
+  }, [pageRows, studentOriginsMap]);
 
   const { data: importProgress } = useQuery<any>({
     queryKey: ["/api/imports/progress"],
@@ -380,7 +380,6 @@ export function AdminSchoolRegistry({
               <SelectItem value="Auto-Located">🔍 Auto-Located</SelectItem>
               <SelectItem value="Needs Review">🔄 Needs Review</SelectItem>
               <SelectItem value="Duplicate Entry">🗂 Duplicate Entry</SelectItem>
-              <SelectItem value="Location Mismatch">🚩 Location Mismatch {mismatchMap.size > 0 && `(${mismatchMap.size})`}</SelectItem>
             </SelectContent>
           </Select>
 

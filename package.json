@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "cross-env NODE_ENV=development tsx server/index.ts",
+    "dev": "cross-env BROWSERSLIST_IGNORE_OLD_DATA=true NODE_OPTIONS=--no-deprecation NODE_ENV=development tsx watch --ignore .vite_cache --ignore server/uploads --ignore client server/index.ts",
     "build": "tsx script/build.ts",
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
@@ -43,6 +43,7 @@
     "@radix-ui/react-tooltip": "^1.2.0",
     "@react-google-maps/api": "^2.20.8",
     "@tanstack/react-query": "^5.60.5",
+    "@tanstack/react-virtual": "^3.14.8",
     "@turf/turf": "^7.3.5",
     "@types/leaflet": "^1.9.21",
     "class-variance-authority": "^0.7.1",

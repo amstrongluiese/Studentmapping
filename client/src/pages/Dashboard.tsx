@@ -169,6 +169,7 @@ export default function Dashboard() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bulkMergeOpen, setBulkMergeOpen] = useState(false);
+  const [mapViewMode, setMapViewMode] = usePersistentState<"schools" | "scholars">(`${STORAGE_PREFIX}:map-view-mode`, "schools");
 
   useEffect(() => {
     // Force light theme
@@ -259,10 +260,35 @@ export default function Dashboard() {
   }, [mainTab]);
 
   const programOptions = useMemo(() => getProgramOptions(processedStudents), [processedStudents, departments]);
-  const programSchools = useMemo(
-    () => buildProgramSchools(schools, processedStudents, programFilters),
-    [processedStudents, programFilters, schools, departments],
-  );
+  const programSchools = useMemo(() => {
+    if (mapViewMode === "scholars") {
+      const scholars = processedStudents.filter(s => {
+        if (!s.iskolarNiKap) return false;
+        const v = s.iskolarNiKap.toLowerCase().trim();
+        return v === 'yes' || v === 'true' || v === '1' || v === 'iskolar';
+      });
+
+      const scholarCounts = new Map<number, number>();
+      const barangays = schools.filter(s => s.schoolType === "Barangay");
+
+      for (const student of scholars) {
+        if (!student.barangay) continue;
+        const b = barangays.find(b => b.schoolName === student.barangay && b.municipality === student.municipality);
+        if (b) {
+          scholarCounts.set(b.id, (scholarCounts.get(b.id) || 0) + 1);
+        }
+      }
+
+      return barangays.map(b => ({
+        ...b,
+        studentCount: scholarCounts.get(b.id) || 0,
+        filteredStudentCount: scholarCounts.get(b.id) || 0,
+        programDistribution: [],
+        dominantProgram: null,
+      })).filter(b => b.studentCount > 0);
+    }
+    return buildProgramSchools(schools, processedStudents, programFilters);
+  }, [schools, processedStudents, programFilters, mapViewMode]);
 
   const filteredProcessedStudents = useMemo(() => {
     if (!selectedMapSchoolId) return processedStudents;
@@ -317,7 +343,6 @@ export default function Dashboard() {
   }, [mappedSchools]);
   
   const grandTotalStudents = useMemo(() => {
-    // Determine which target to show based on filters
     let target = 0;
     
     if (programFilters.program && programFilters.program !== ALL_PROGRAM_FILTER) {
@@ -603,7 +628,6 @@ export default function Dashboard() {
               </TabsList>
             </Tabs>
             <div className="relative z-[1700] flex min-w-0 flex-1 justify-end">
-              <ThemeToggle />
             </div>
           </div>
         </div>
@@ -640,6 +664,62 @@ export default function Dashboard() {
               </Button>
             )}
 
+            {/* PRESENTATION SETTINGS OVERLAY */}
+            {isPresenting && (
+              <div className="absolute left-1/2 top-4 z-[9999] flex -translate-x-1/2 items-center gap-4 rounded-full border border-white/40 bg-white/70 px-6 py-2 shadow-lg backdrop-blur-xl transition-all duration-300">
+                <div className="flex items-center gap-2 border-r border-slate-300/50 pr-4">
+                  <MonitorPlay className="h-4 w-4 text-slate-700" />
+                  <span className="text-sm font-bold text-slate-800">Presentation Active</span>
+                </div>
+                
+                <div className="flex items-center gap-4 px-2">
+                  <div className="flex items-center gap-2">
+                    <Switch 
+                      id="clean-fs" 
+                      checked={presentationSettings.cleanFullscreen} 
+                      onCheckedChange={(checked) => setPresentationSettings(c => ({ ...c, cleanFullscreen: checked }))} 
+                      className="scale-75 data-[state=checked]:bg-slate-900" 
+                    />
+                    <Label htmlFor="clean-fs" className="cursor-pointer text-xs font-semibold text-slate-700">Clean fullscreen</Label>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <Switch 
+                      id="marker-only" 
+                      checked={presentationSettings.markerOnly} 
+                      onCheckedChange={(checked) => {
+                        setPresentationSettings(c => ({ ...c, markerOnly: checked }));
+                        updateMapSetting("overlays", !checked);
+                      }}
+                      className="scale-75 data-[state=checked]:bg-slate-900"
+                    />
+                    <Label htmlFor="marker-only" className="cursor-pointer text-xs font-semibold text-slate-700">Marker-only</Label>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Switch 
+                      id="tour-mode" 
+                      checked={isTouring} 
+                      onCheckedChange={setIsTouring}
+                      className="scale-75 data-[state=checked]:bg-slate-900"
+                    />
+                    <Label htmlFor="tour-mode" className="cursor-pointer text-xs font-semibold text-slate-700">Tour</Label>
+                  </div>
+                </div>
+
+                <div className="pl-2">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="h-7 rounded-full px-4 text-[11px] font-bold shadow-sm"
+                    onClick={() => applyPresentation(false)}
+                  >
+                    Exit Presentation
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {mobileSidebarOpen && (
               <aside
                 className="absolute left-0 top-0 z-[1160] flex h-full w-[min(320px,calc(100vw-1rem))] flex-col overflow-y-auto border-r border-white/30 bg-white/40 p-3 shadow-xl backdrop-blur-md lg:hidden"
@@ -658,6 +738,21 @@ export default function Dashboard() {
                   >
                     <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                   </Button>
+                </div>
+
+                <div className="mb-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white p-1">
+                  <button
+                    className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all", mapViewMode === "schools" ? "bg-slate-100 text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                    onClick={() => setMapViewMode("schools")}
+                  >
+                    Schools
+                  </button>
+                  <button
+                    className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all", mapViewMode === "scholars" ? "bg-primary text-white shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                    onClick={() => setMapViewMode("scholars")}
+                  >
+                    Scholars (Barangays)
+                  </button>
                 </div>
 
                 <div className="space-y-2.5">
@@ -715,6 +810,22 @@ export default function Dashboard() {
                 >
                   <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.5} />
                 </Button>
+              </div>
+
+              <div className="mb-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white p-1">
+                <button
+                  className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all", mapViewMode === "schools" ? "bg-slate-100 text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                  onClick={() => setMapViewMode("schools")}
+                >
+                  Schools
+                </button>
+                <button
+                  className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all flex items-center justify-center gap-1.5", mapViewMode === "scholars" ? "bg-primary text-white shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                  onClick={() => setMapViewMode("scholars")}
+                >
+                  <GraduationCap className="h-3.5 w-3.5" />
+                  Scholars (Barangays)
+                </button>
               </div>
 
               <div className="space-y-2.5">
@@ -840,19 +951,6 @@ export default function Dashboard() {
                   <SettingSwitch label="Program legend" checked={mapSettings.programLegend ?? defaultMapSettings.programLegend} onChange={(checked) => updateMapSetting("programLegend", checked)} />
                 </SettingsCard>
 
-                <SettingsCard icon={<MonitorPlay className="h-4 w-4" />} title="Presentation" description="Fullscreen and tour defaults.">
-                  <SettingSwitch label="Presentation mode" checked={isPresenting} onChange={applyPresentation} />
-                  <SettingSwitch label="Clean fullscreen" checked={presentationSettings.cleanFullscreen} onChange={(checked) => setPresentationSettings((current) => ({ ...current, cleanFullscreen: checked }))} />
-                  <SettingSwitch
-                    label="Marker-only mode"
-                    checked={presentationSettings.markerOnly}
-                    onChange={(checked) => {
-                      setPresentationSettings((current) => ({ ...current, markerOnly: checked }));
-                      updateMapSetting("overlays", !checked);
-                    }}
-                  />
-                  <SettingSwitch label="Guided feeder tour" checked={isTouring} onChange={setIsTouring} />
-                </SettingsCard>
 
                 <SettingsCard icon={<Database className="h-4 w-4" />} title="Import behavior" description="Applied when processing admissions rows.">
                   <SettingSwitch label="Auto-geolocate missing schools" checked={importSettings.autoGeocode} onChange={(checked) => setImportSettings((current) => ({ ...current, autoGeocode: checked }))} />
