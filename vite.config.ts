@@ -4,7 +4,6 @@ import path from "path";
 
 export default defineConfig({
   cacheDir: path.resolve(import.meta.dirname, ".vite_cache"),
-  optimizeDeps: { force: true },
   base: "/",
 
   plugins: [react()],

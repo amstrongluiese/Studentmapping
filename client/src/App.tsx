@@ -6,7 +6,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import NotFound from "@/pages/not-found";
 import Dashboard from "./pages/Dashboard";
-import ReferralClient from "./pages/ReferralClient";
 import StudentManagement from "./pages/StudentManagement";
 import { setDynamicCatalog, setDynamicDepartments } from "@shared/programIntelligence";
 import AuthPage from "./pages/Auth";
@@ -26,7 +25,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    return <Redirect to="/auth" />;
+    return <Redirect to="/auth" replace />;
   }
 
   return <>{children}</>;
@@ -56,7 +55,6 @@ function AppRouter() {
           <Dashboard />
         </ProtectedRoute>
       </Route>
-      <Route path="/referral" component={ReferralClient} />
       <Route path="/students">
         <ProtectedRoute>
           <StudentManagement />

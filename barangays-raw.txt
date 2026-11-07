@@ -1,0 +1,681 @@
+Barangay I, Alaminos
+Barangay II, Alaminos
+Barangay III, Alaminos
+Barangay IV, Alaminos
+Del Carmen, Alaminos
+Palma, Alaminos
+San Agustin, Alaminos
+San Andres, Alaminos
+San Benito, Alaminos
+San Gregorio, Alaminos
+San Ildefonso, Alaminos
+San Juan, Alaminos
+San Miguel, Alaminos
+San Roque, Alaminos
+Santa Rosa, Alaminos
+Bitin, Bay
+Calo, Bay
+Dila, Bay
+Maitim, Bay
+Masaya, Bay
+Paciano Rizal, Bay
+Puypuy, Bay
+San Agustin, Bay
+San Antonio, Bay
+San Isidro, Bay
+San Nicolas, Bay
+Santa Cruz, Bay
+Santo Domingo, Bay
+Tagumpay, Bay
+Tranca, Bay
+Biñan, Biñan
+Bungahan, Biñan
+Canlalay, Biñan
+Casile, Biñan
+De La Paz, Biñan
+Ganado, Biñan
+Langkiwa, Biñan
+Loma, Biñan
+Malaban, Biñan
+Malamig, Biñan
+Mampalasan, Biñan
+Platero, Biñan
+Poblacion, Biñan
+San Antonio, Biñan
+San Francisco, Biñan
+San Jose, Biñan
+San Vicente, Biñan
+Santo Domingo, Biñan
+Santo Niño, Biñan
+Santo Tomas, Biñan
+Soro-soro, Biñan
+Timbao, Biñan
+Tubigan, Biñan
+Zapote, Biñan
+Baclaran, Cabuyao
+Banaybanay, Cabuyao
+Banlic, Cabuyao
+Barangay Dos, Cabuyao
+Barangay Tres, Cabuyao
+Barangay Uno, Cabuyao
+Bigaa, Cabuyao
+Butong, Cabuyao
+Casile, Cabuyao
+Diezmo, Cabuyao
+Gulod, Cabuyao
+Mamatid, Cabuyao
+Marinig, Cabuyao
+Niugan, Cabuyao
+Pittland, Cabuyao
+Pulo, Cabuyao
+Sala, Cabuyao
+San Isidro, Cabuyao
+Bagong Kalsada, Calamba
+Banadero, Calamba
+Banlic, Calamba
+Barandal, Calamba
+Barangay 1, Calamba
+Barangay 2, Calamba
+Barangay 3, Calamba
+Barangay 4, Calamba
+Barangay 5, Calamba
+Barangay 6, Calamba
+Barangay 7, Calamba
+Batino, Calamba
+Bubuyan, Calamba
+Bucal, Calamba
+Bunggo, Calamba
+Burol, Calamba
+Camaligan, Calamba
+Canlubang, Calamba
+Halang, Calamba
+Hornalan, Calamba
+Kay-Anlog, Calamba
+La Mesa, Calamba
+Laguerta, Calamba
+Lawa, Calamba
+Lecheria, Calamba
+Lingga, Calamba
+Looc, Calamba
+Mabato, Calamba
+Majada Labas, Calamba
+Makiling, Calamba
+Mapagong, Calamba
+Masili, Calamba
+Maunong, Calamba
+Mayapa, Calamba
+Milagrosa, Calamba
+Paciano Rizal, Calamba
+Palingon, Calamba
+Palo-Alto, Calamba
+Pansol, Calamba
+Parian, Calamba
+Prinza, Calamba
+Punta, Calamba
+Puting Lupa, Calamba
+Real, Calamba
+Saimsim, Calamba
+Sampiruhan, Calamba
+San Cristobal, Calamba
+San Jose, Calamba
+San Juan, Calamba
+Sirang Lupa, Calamba
+Sucol, Calamba
+Turbina, Calamba
+Ulango, Calamba
+Uwisan, Calamba
+Balayhangin, Calauan
+Bangyas, Calauan
+Dayap, Calauan
+Hanggan, Calauan
+Imok, Calauan
+Kanluran, Calauan
+Lamot 1, Calauan
+Lamot 2, Calauan
+Limao, Calauan
+Mabacan, Calauan
+Masiit, Calauan
+Paliparan, Calauan
+Perez, Calauan
+Prinza, Calauan
+San Isidro, Calauan
+Santo Tomas, Calauan
+Silangan, Calauan
+Anglas, Cavinti
+Bangco, Cavinti
+Bukal, Cavinti
+Bulajo, Cavinti
+Cansuso, Cavinti
+Duhat, Cavinti
+Inao-awan, Cavinti
+Kanluran Talaongan, Cavinti
+Labayo, Cavinti
+Layasin, Cavinti
+Layug, Cavinti
+Mahipon, Cavinti
+Paowin, Cavinti
+Poblacion, Cavinti
+Silangan Talaongan, Cavinti
+Sisilmin, Cavinti
+Sumucab, Cavinti
+Tibatib, Cavinti
+Udia, Cavinti
+Asana, Famy
+Bacong-Sigsigan, Famy
+Bagong Pag-asa, Famy
+Balitoc, Famy
+Banaba, Famy
+Batuhan, Famy
+Bulihan, Famy
+Caballero, Famy
+Calumpang, Famy
+Cuebang Bato, Famy
+Damayan, Famy
+Kapatalan, Famy
+Kataypuanan, Famy
+Liyang, Famy
+Maate, Famy
+Magdalo, Famy
+Mayatba, Famy
+Minayutan, Famy
+Salangbato, Famy
+Tunhac, Famy
+Longos, Kalayaan
+San Antonio, Kalayaan
+San Juan, Kalayaan
+Bagong Anyo, Liliw
+Bayate, Liliw
+Bongkol, Liliw
+Bubukal, Liliw
+Cabuyao, Liliw
+Calumpang, Liliw
+Culoy, Liliw
+Dagatan, Liliw
+Daniw, Liliw
+Dita, Liliw
+Ibabang Palina, Liliw
+Ibabang San Roque, Liliw
+Ibabang Sungi, Liliw
+Ibabang Taykin, Liliw
+Ilayang Palina, Liliw
+Ilayang San Roque, Liliw
+Ilayang Sungi, Liliw
+Ilayang Taykin, Liliw
+Kanlurang Bukal, Liliw
+Laguan, Liliw
+Luquin, Liliw
+Malabo-Kalantukan, Liliw
+Masikap, Liliw
+Maslun, Liliw
+Mojon, Liliw
+Novaliches, Liliw
+Oples, Liliw
+Pag-asa, Liliw
+Palayan, Liliw
+Rizal, Liliw
+San Isidro, Liliw
+Silangang Bukal, Liliw
+Tuy-Baanan, Liliw
+Anos, Los Baños
+Bagong Silang, Los Baños
+Bambang, Los Baños
+Batong Malake, Los Baños
+Baybayin, Los Baños
+Bayog, Los Baños
+Lalakay, Los Baños
+Maahas, Los Baños
+Malinta, Los Baños
+Mayondon, Los Baños
+Putho Tuntungin, Los Baños
+San Antonio, Los Baños
+Tadlak, Los Baños
+Timugan, Los Baños
+Barangay Zone I, Luisiana
+Barangay Zone II, Luisiana
+Barangay Zone III, Luisiana
+Barangay Zone IV, Luisiana
+Barangay Zone V, Luisiana
+Barangay Zone VI, Luisiana
+Barangay Zone VII, Luisiana
+Barangay Zone VIII, Luisiana
+De La Paz, Luisiana
+San Antonio, Luisiana
+San Buenaventura, Luisiana
+San Diego, Luisiana
+San Isidro, Luisiana
+San Jose, Luisiana
+San Juan, Luisiana
+San Luis, Luisiana
+San Pablo, Luisiana
+San Pedro, Luisiana
+San Rafael, Luisiana
+San Roque, Luisiana
+San Salvador, Luisiana
+Santo Domingo, Luisiana
+Santo Tomas, Luisiana
+Bagong Silang, Lumban
+Balimbingan, Lumban
+Balubad, Lumban
+Caliraya, Lumban
+Concepcion, Lumban
+Lewin, Lumban
+Maracta, Lumban
+Maytalang I, Lumban
+Maytalang II, Lumban
+Primera Parang, Lumban
+Primera Pulo, Lumban
+Salac, Lumban
+Santo Niño, Lumban
+Segunda Parang, Lumban
+Segunda Pulo, Lumban
+Wawa, Lumban
+Amuyong, Mabitac
+Bayanihan, Mabitac
+Lambac, Mabitac
+Libis ng Nayon, Mabitac
+Lucong, Mabitac
+Maligaya, Mabitac
+Masikap, Mabitac
+Matalatala, Mabitac
+Nanguma, Mabitac
+Numero, Mabitac
+Paagahan, Mabitac
+Pag-asa, Mabitac
+San Antonio, Mabitac
+San Miguel, Mabitac
+Sinagtala, Mabitac
+Alipit, Magdalena
+Baanan, Magdalena
+Balanac, Magdalena
+Bucal, Magdalena
+Buenavista, Magdalena
+Bungkol, Magdalena
+Buo, Magdalena
+Burlungan, Magdalena
+Cigaras, Magdalena
+Halayhayin, Magdalena
+Ibabang Atingay, Magdalena
+Ibabang Butnong, Magdalena
+Ilayang Atingay, Magdalena
+Ilayang Butnong, Magdalena
+Ilog, Magdalena
+Malaking Ambling, Magdalena
+Malinao, Magdalena
+Maravilla, Magdalena
+Munting Ambling, Magdalena
+Poblacion, Magdalena
+Sabang, Magdalena
+Salasad, Magdalena
+Tanawan, Magdalena
+Tipunan, Magdalena
+Amonoy, Majayjay
+Bakia, Majayjay
+Balanac, Majayjay
+Balayong, Majayjay
+Banilad, Majayjay
+Banti, Majayjay
+Bitaoy, Majayjay
+Botocan, Majayjay
+Bukal, Majayjay
+Burgos, Majayjay
+Burol, Majayjay
+Coralao, Majayjay
+Gagalot, Majayjay
+Ibabang Banga, Majayjay
+Ibabang Bayucain, Majayjay
+Ilayang Banga, Majayjay
+Ilayang Bayucain, Majayjay
+Isabang, Majayjay
+Malinao, Majayjay
+May-it, Majayjay
+Munting Kawayan, Majayjay
+Olla, Majayjay
+Oobi, Majayjay
+Origuel, Majayjay
+Panalaban, Majayjay
+Pangil, Majayjay
+Panglan, Majayjay
+Piit, Majayjay
+Pook, Majayjay
+Rizal, Majayjay
+San Francisco, Majayjay
+San Isidro, Majayjay
+San Miguel, Majayjay
+San Roque, Majayjay
+Santa Catalina, Majayjay
+Suba, Majayjay
+Talortor, Majayjay
+Tanawan, Majayjay
+Taytay, Majayjay
+Villa Nogales, Majayjay
+Abo, Nagcarlan
+Alibungbungan, Nagcarlan
+Alumbrado, Nagcarlan
+Balayong, Nagcarlan
+Balimbing, Nagcarlan
+Balinacon, Nagcarlan
+Bambang, Nagcarlan
+Banago, Nagcarlan
+Banca-banca, Nagcarlan
+Bangcuro, Nagcarlan
+Banilad, Nagcarlan
+Bayaquitos, Nagcarlan
+Buboy, Nagcarlan
+Buenavista, Nagcarlan
+Buhanginan, Nagcarlan
+Bukal, Nagcarlan
+Bunga, Nagcarlan
+Cabuyew, Nagcarlan
+Calumpang, Nagcarlan
+Kanluran Kabubuhayan, Nagcarlan
+Kanluran Lazaan, Nagcarlan
+Labangan, Nagcarlan
+Lagulo, Nagcarlan
+Lawaguin, Nagcarlan
+Maiit, Nagcarlan
+Malaya, Nagcarlan
+Malinao, Nagcarlan
+Manaol, Nagcarlan
+Maravilla, Nagcarlan
+Nagcalbang, Nagcarlan
+Oples, Nagcarlan
+Palayan, Nagcarlan
+Palina, Nagcarlan
+Poblacion I, Nagcarlan
+Poblacion II, Nagcarlan
+Poblacion III, Nagcarlan
+Sabang, Nagcarlan
+San Francisco, Nagcarlan
+Santa Lucia, Nagcarlan
+Sibulan, Nagcarlan
+Silangan Ilaya, Nagcarlan
+Silangan Kabubuhayan, Nagcarlan
+Silangan Lazaan, Nagcarlan
+Silangan Napapatid, Nagcarlan
+Sinipian, Nagcarlan
+Sulsuguin, Nagcarlan
+Talahib, Nagcarlan
+Talangan, Nagcarlan
+Taytay, Nagcarlan
+Tipacan, Nagcarlan
+Wakat, Nagcarlan
+Yukos, Nagcarlan
+Bagumbayan, Paete
+Bangkusay, Paete
+Ermita, Paete
+Ibaba del Norte, Paete
+Ibaba del Sur, Paete
+Ilaya del Norte, Paete
+Ilaya del Sur, Paete
+Maytoong, Paete
+Quinale, Paete
+Anibong, Pagsanjan
+Barangay I, Pagsanjan
+Barangay II, Pagsanjan
+Biñan, Pagsanjan
+Buboy, Pagsanjan
+Cabanbanan, Pagsanjan
+Calusiche, Pagsanjan
+Dingin, Pagsanjan
+Lambac, Pagsanjan
+Layugan, Pagsanjan
+Magdapio, Pagsanjan
+Maulawin, Pagsanjan
+Pinagsanjan, Pagsanjan
+Sabang, Pagsanjan
+Sampaloc, Pagsanjan
+San Isidro, Pagsanjan
+Banilan, Pakil
+Baño, Pakil
+Burgos, Pakil
+Casa Real, Pakil
+Casinsin, Pakil
+Dorado, Pakil
+Gonzales, Pakil
+Kabulusan, Pakil
+Matikiw, Pakil
+Rizal, Pakil
+Saray, Pakil
+Taft, Pakil
+Tavera, Pakil
+Balian, Pangil
+Dambo, Pangil
+Galalan, Pangil
+Isla, Pangil
+Mabato-Azufre, Pangil
+Natividad, Pangil
+San Jose, Pangil
+Sulib, Pangil
+Aplaya, Pila
+Bagong Pook, Pila
+Bukal, Pila
+Bulilan Norte, Pila
+Bulilan Sur, Pila
+Concepcion, Pila
+Labuin, Pila
+Linga, Pila
+Masico, Pila
+Mojon, Pila
+Pansol, Pila
+Pinagbayanan, Pila
+San Antonio, Pila
+San Miguel, Pila
+Santa Clara Norte, Pila
+Santa Clara Sur, Pila
+Tubuan, Pila
+Antipolo, Rizal
+East Poblacion, Rizal
+Entablado, Rizal
+Laguan, Rizal
+Paule 1, Rizal
+Paule 2, Rizal
+Pook, Rizal
+Tala, Rizal
+Talaga, Rizal
+Tuy, Rizal
+West Poblacion, Rizal
+Atisan, San Pablo
+Bagong Bayan II-A, San Pablo
+Bagong Pook VI-C, San Pablo
+Barangay I-A, San Pablo
+Barangay I-B, San Pablo
+Barangay II-A, San Pablo
+Barangay II-B, San Pablo
+Barangay II-C, San Pablo
+Barangay II-D, San Pablo
+Barangay II-E, San Pablo
+Barangay II-F, San Pablo
+Barangay III-A, San Pablo
+Barangay III-B, San Pablo
+Barangay III-C, San Pablo
+Barangay III-D, San Pablo
+Barangay III-E, San Pablo
+Barangay III-F, San Pablo
+Barangay IV-A, San Pablo
+Barangay IV-B, San Pablo
+Barangay IV-C, San Pablo
+Barangay V-A, San Pablo
+Barangay V-B, San Pablo
+Barangay V-C, San Pablo
+Barangay V-D, San Pablo
+Barangay VI-A, San Pablo
+Barangay VI-B, San Pablo
+Barangay VI-D, San Pablo
+Barangay VI-E, San Pablo
+Barangay VII-A, San Pablo
+Barangay VII-B, San Pablo
+Barangay VII-C, San Pablo
+Barangay VII-D, San Pablo
+Barangay VII-E, San Pablo
+Bautista, San Pablo
+Concepcion, San Pablo
+Del Remedio, San Pablo
+Dolores, San Pablo
+San Antonio 1, San Pablo
+San Antonio 2, San Pablo
+San Bartolome, San Pablo
+San Buenaventura, San Pablo
+San Crispin, San Pablo
+San Cristobal, San Pablo
+San Diego, San Pablo
+San Francisco, San Pablo
+San Gabriel, San Pablo
+San Gregorio, San Pablo
+San Ignacio, San Pablo
+San Isidro, San Pablo
+San Joaquin, San Pablo
+San Jose, San Pablo
+San Juan, San Pablo
+San Lorenzo, San Pablo
+San Lucas 1, San Pablo
+San Lucas 2, San Pablo
+San Marcos, San Pablo
+San Mateo, San Pablo
+San Miguel, San Pablo
+San Nicolas, San Pablo
+San Pedro, San Pablo
+San Rafael, San Pablo
+San Roque, San Pablo
+San Vicente, San Pablo
+Santa Ana, San Pablo
+Santa Catalina, San Pablo
+Santa Cruz, San Pablo
+Santa Elena, San Pablo
+Santa Felomina, San Pablo
+Santa Isabel, San Pablo
+Santa Maria, San Pablo
+Santa Maria Magdalena, San Pablo
+Santa Monica, San Pablo
+Santa Veronica, San Pablo
+Santiago I, San Pablo
+Santiago II, San Pablo
+Santisimo Rosario, San Pablo
+Santo Angel, San Pablo
+Santo Cristo, San Pablo
+Santo Niño, San Pablo
+Soledad, San Pablo
+Bagong Silang, San Pedro
+Calendola, San Pedro
+Chrysanthemum, San Pedro
+Cuyab, San Pedro
+Estrella, San Pedro
+Fatima, San Pedro
+G.S.I.S., San Pedro
+Landayan, San Pedro
+Langgam, San Pedro
+Laram, San Pedro
+Magsaysay, San Pedro
+Maharlika, San Pedro
+Narra, San Pedro
+Nueva, San Pedro
+Pacita 1, San Pedro
+Pacita 2, San Pedro
+Poblacion, San Pedro
+Riverside, San Pedro
+Rosario, San Pedro
+Sampaguita Village, San Pedro
+San Antonio, San Pedro
+San Lorenzo Ruiz, San Pedro
+San Roque, San Pedro
+San Vicente, San Pedro
+Santo Niño, San Pedro
+United Bayanihan, San Pedro
+United Better Living, San Pedro
+Alipit, Santa Cruz
+Bagumbayan, Santa Cruz
+Barangay I, Santa Cruz
+Barangay II, Santa Cruz
+Barangay III, Santa Cruz
+Barangay IV, Santa Cruz
+Barangay V, Santa Cruz
+Bubukal, Santa Cruz
+Calios, Santa Cruz
+Duhat, Santa Cruz
+Gatid, Santa Cruz
+Jasaan, Santa Cruz
+Labuin, Santa Cruz
+Malinao, Santa Cruz
+Oogong, Santa Cruz
+Pagsawitan, Santa Cruz
+Palasan, Santa Cruz
+Patimbao, Santa Cruz
+San Jose, Santa Cruz
+San Juan, Santa Cruz
+San Pablo Norte, Santa Cruz
+San Pablo Sur, Santa Cruz
+Santisima Cruz, Santa Cruz
+Santo Angel Central, Santa Cruz
+Santo Angel Norte, Santa Cruz
+Santo Angel Sur, Santa Cruz
+Adia, Santa Maria
+Bagong Pook, Santa Maria
+Bagumbayan, Santa Maria
+Barangay I, Santa Maria
+Barangay II, Santa Maria
+Barangay III, Santa Maria
+Barangay IV, Santa Maria
+Bubukal, Santa Maria
+Cabooan, Santa Maria
+Calangay, Santa Maria
+Cambuja, Santa Maria
+Coralan, Santa Maria
+Cueva, Santa Maria
+Inayapan, Santa Maria
+Jose Laurel, Sr., Santa Maria
+Jose Rizal, Santa Maria
+Kayhakat, Santa Maria
+Macasipac, Santa Maria
+Masinao, Santa Maria
+Mataling-ting, Santa Maria
+Pao-o, Santa Maria
+Parang ng Buho, Santa Maria
+Santiago, Santa Maria
+Talangka, Santa Maria
+Tungkod, Santa Maria
+Aplaya, Santa Rosa
+Balibago, Santa Rosa
+Caingin, Santa Rosa
+Dila, Santa Rosa
+Dita, Santa Rosa
+Don Jose, Santa Rosa
+Ibaba, Santa Rosa
+Kanluran, Santa Rosa
+Labas, Santa Rosa
+Macabling, Santa Rosa
+Malitlit, Santa Rosa
+Malusak, Santa Rosa
+Market Area, Santa Rosa
+Pook, Santa Rosa
+Pulong Santa Cruz, Santa Rosa
+Santo Domingo, Santa Rosa
+Sinalhan, Santa Rosa
+Tagapo, Santa Rosa
+Acevida, Siniloan
+Bagong Pag-asa, Siniloan
+Bagumbarangay, Siniloan
+Buhay, Siniloan
+G. Redor, Siniloan
+Gen. Luna, Siniloan
+Halayhayin, Siniloan
+J. Rizal, Siniloan
+Kapatalan, Siniloan
+Laguio, Siniloan
+Liyang, Siniloan
+Llavac, Siniloan
+Macatad, Siniloan
+Magsaysay, Siniloan
+Mayatba, Siniloan
+Mendiola, Siniloan
+P. Burgos, Siniloan
+Pandeno, Siniloan
+Salubungan, Siniloan
+Wawa, Siniloan
+Banca-banca, Victoria
+Daniw, Victoria
+Masapang, Victoria
+Nanhaya, Victoria
+Pagalangan, Victoria
+San Benito, Victoria
+San Felix, Victoria
+San Francisco, Victoria
+San Roque, Victoria

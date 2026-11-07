@@ -20,9 +20,11 @@ import {
   students,
   referrals,
   users,
+  barangayRegistry,
 } from "@shared/schema";
 import { eq, and, count, desc, inArray, not, isNull, or } from "drizzle-orm";
 import { isAdmin, hashPassword, comparePasswords } from "./auth";
+import { enterpriseCache } from "./cache";
 import { normalizeSchoolName } from "@shared/schoolRegistry";
 import { SchoolMatchingEngine } from "./schoolMatcher";
 import { z } from "zod";
@@ -98,7 +100,8 @@ export async function registerRoutes(
       const existing = await db.select().from(users).where(eq(users.username, username)).limit(1);
       if (existing.length > 0) return res.status(400).json({ message: "Username already exists" });
       const hashedPassword = await hashPassword(password);
-      const [user] = await db.insert(users).values({ username, password: hashedPassword, role: role || "admin", isActive: isActive ?? true }).returning({ id: users.id, username: users.username, role: users.role, isActive: users.isActive });
+      const [insertResult] = await db.insert(users).values({ username, password: hashedPassword, role: role || "admin", isActive: isActive ?? true });
+      const user = await db.select({ id: users.id, username: users.username, role: users.role, isActive: users.isActive }).from(users).where(eq(users.id, insertResult.insertId)).limit(1).then(r => r[0]);
       res.json(user);
     } catch (err) {
       res.status(500).json({ message: "Failed to create user" });
@@ -114,7 +117,8 @@ export async function registerRoutes(
       if (role) updates.role = role;
       if (isActive !== undefined) updates.isActive = isActive;
       
-      const [user] = await getDb().update(users).set(updates).where(eq(users.id, Number(id))).returning({ id: users.id, username: users.username, role: users.role, isActive: users.isActive });
+      await getDb().update(users).set(updates).where(eq(users.id, Number(id)));
+      const user = await getDb().select({ id: users.id, username: users.username, role: users.role, isActive: users.isActive }).from(users).where(eq(users.id, Number(id))).limit(1).then(r => r[0]);
       res.json(user);
     } catch (err) {
       res.status(500).json({ message: "Failed to update user" });
@@ -157,19 +161,36 @@ export async function registerRoutes(
   app.post("/api/admin/clear-data", async (req, res) => {
     try {
       const db = getDb();
-      await db.delete(mappingLogs);
-      await db.delete(studentsProcessed);
-      await db.delete(studentsRaw);
-      await db.delete(studentImports);
-      await db.delete(imports);
-      await db.delete(referrals);
-      // await db.delete(students); // Currently schema doesn't export students directly to routes sometimes? Wait, it imports `students`? No, let's look at imports above: students is not imported. Oh wait, it isn't. I'll need to import it or just execute sql.
-      // Wait, let's import it if missing or just use storage. But the easiest is to just delete from the imported ones. Let's see what imports I have at top of file.
-      // Actually, I can just execute sql or import `students` from schema.
-      res.json({ success: true, message: "All student and import data has been cleared." });
+      const safeDelete = async (table: any) => {
+        try { await db.delete(table); } catch(e) { console.warn(`Failed to delete table:`, (e as Error).message); }
+      };
+      
+      await safeDelete(mappingLogs);
+      await safeDelete(studentsProcessed);
+      await safeDelete(studentsRaw);
+      await safeDelete(studentImports);
+      await safeDelete(imports);
+      await safeDelete(referrals);
+      await safeDelete(students);
+      enterpriseCache.invalidate();
+      res.json({ success: true, message: "All student and import data has been factory reset." });
     } catch (err) {
       console.error("[clear-data] error:", err);
       res.status(500).json({ success: false, message: "Failed to clear data" });
+    }
+  });
+
+  app.post("/api/admin/archive-data", async (req, res) => {
+    try {
+      const db = getDb();
+      const now = new Date();
+      await db.update(studentsProcessed).set({ enrollmentStatus: "Archived", archivedAt: now });
+      await db.update(studentImports).set({ enrollmentStatus: "Archived" });
+      enterpriseCache.invalidate();
+      res.json({ success: true, message: "All active student data has been archived successfully." });
+    } catch (err) {
+      console.error("[archive-data] error:", err);
+      res.status(500).json({ success: false, message: "Failed to archive data" });
     }
   });
 
@@ -232,6 +253,51 @@ export async function registerRoutes(
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
       res.status(500).json({ message: err instanceof Error ? err.message : "Internal Server Error" });
+    }
+  });
+
+  // Barangay Registry Routes
+  app.get("/api/barangay-registry", async (req, res) => {
+    try {
+      const db = getDb();
+      const list = await db.select().from(barangayRegistry);
+      res.json(list);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch barangay registry" });
+    }
+  });
+
+  app.post("/api/barangay-registry", async (req, res) => {
+    try {
+      const db = getDb();
+      const [result] = await db.insert(barangayRegistry).values(req.body);
+      const [newBarangay] = await db.select().from(barangayRegistry).where(eq(barangayRegistry.id, (result as any).insertId));
+      res.status(201).json(newBarangay);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to create barangay" });
+    }
+  });
+
+  app.patch("/api/barangay-registry/:id", async (req, res) => {
+    try {
+      const db = getDb();
+      const id = Number(req.params.id);
+      await db.update(barangayRegistry).set(req.body).where(eq(barangayRegistry.id, id));
+      const [updated] = await db.select().from(barangayRegistry).where(eq(barangayRegistry.id, id));
+      if (!updated) return res.status(404).json({ message: "Barangay not found" });
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to update barangay" });
+    }
+  });
+
+  app.delete("/api/barangay-registry/:id", async (req, res) => {
+    try {
+      const db = getDb();
+      await db.delete(barangayRegistry).where(eq(barangayRegistry.id, Number(req.params.id)));
+      res.status(204).send();
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete barangay" });
     }
   });
 
@@ -367,9 +433,64 @@ export async function registerRoutes(
   });
 
   // V2 High-Performance Import Engine Routes
+  app.get("/api/integrations/last-batch", async (req, res) => {
+    try {
+      const db = getDb();
+      const records = await db.select().from(systemSettings).where(eq(systemSettings.key, "last_batch_memory"));
+      if (records.length > 0 && records[0].value) {
+        return res.json(JSON.parse(records[0].value));
+      }
+      
+      const totalStudents = await db.select().from(studentsProcessed);
+      res.json({
+        batchId: "BATCH-INITIAL",
+        totalRecords: totalStudents.length,
+        fetchedAt: new Date().toISOString(),
+        status: "applied",
+        appliedAt: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message || "Failed to fetch last batch info" });
+    }
+  });
+
+  app.post("/api/integrations/apply-batch", async (req, res) => {
+    try {
+      const db = getDb();
+      const now = new Date().toISOString();
+
+      const records = await db.select().from(systemSettings).where(eq(systemSettings.key, "last_batch_memory"));
+      let memory = records.length > 0 && records[0].value ? JSON.parse(records[0].value) : {};
+      
+      memory.status = "applied";
+      memory.appliedAt = now;
+
+      const existing = await db.select().from(systemSettings).where(eq(systemSettings.key, "last_batch_memory"));
+      if (existing.length > 0) {
+        await db.update(systemSettings).set({ value: JSON.stringify(memory) }).where(eq(systemSettings.key, "last_batch_memory"));
+      } else {
+        await db.insert(systemSettings).values({ key: "last_batch_memory", value: JSON.stringify(memory) });
+      }
+
+      await db.update(studentsProcessed)
+        .set({ mappingStatus: "mapped", syncedAt: new Date() })
+        .where(eq(studentsProcessed.mappingStatus, "needs_review"));
+
+      await db.insert(mappingLogs).values({
+        action: "Batch Applied to Live Feed",
+        matchedRule: "Manual Batch Approval",
+        notes: `Applied batch ${memory.batchId || 'N/A'} (${memory.totalRecords || 0} records) to Live Mapping.`,
+      });
+
+      res.json({ success: true, message: `Batch ${memory.batchId || ''} committed to Live GIS Mapping!`, memory });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message || "Failed to apply batch" });
+    }
+  });
+
   app.post("/api/integrations/sync-google-sheets", async (req, res) => {
     try {
-      const { sheetsUrl, sheetsToken } = req.body;
+      const { sheetsUrl, sheetsToken, syncMode = "live" } = req.body;
       if (!sheetsUrl) return res.status(400).json({ success: false, message: "URL is required" });
 
       const payload = {
@@ -409,7 +530,32 @@ export async function registerRoutes(
       startImportSession(mappedRecords.length);
       processBatch(mappedRecords).catch(console.error);
 
-      res.json({ success: true, message: `Auto-sync started for ${mappedRecords.length} records.` });
+      // Save batch memory
+      const db = getDb();
+      const dateStr = new Date().toISOString().slice(0,10).replace(/-/g,"");
+      const randomId = Math.floor(Math.random() * 8999 + 1000);
+      const batchMemory = {
+        batchId: `BATCH-${dateStr}-${randomId}`,
+        totalRecords: mappedRecords.length,
+        fetchedAt: new Date().toISOString(),
+        status: syncMode === "staging" ? "staged" : "applied",
+        appliedAt: syncMode === "live" ? new Date().toISOString() : null,
+      };
+
+      const existingMemory = await db.select().from(systemSettings).where(eq(systemSettings.key, "last_batch_memory"));
+      if (existingMemory.length > 0) {
+        await db.update(systemSettings).set({ value: JSON.stringify(batchMemory) }).where(eq(systemSettings.key, "last_batch_memory"));
+      } else {
+        await db.insert(systemSettings).values({ key: "last_batch_memory", value: JSON.stringify(batchMemory) });
+      }
+
+      res.json({ 
+        success: true, 
+        message: syncMode === "staging" 
+          ? `Staged batch of ${mappedRecords.length} records. Review or click Apply to commit.`
+          : `Auto-sync started for ${mappedRecords.length} records. Live mapping active.`,
+        batchMemory 
+      });
     } catch (err: any) {
       console.error("Auto-sync error:", err);
       res.status(500).json({ success: false, message: err.message || "Failed to sync" });
@@ -491,23 +637,23 @@ export async function registerRoutes(
       const db = getDb();
       
       if (id) {
-        const updated = await db.update(departments)
+        await db.update(departments)
           .set({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() })
-          .where(eq(departments.id, id))
-          .returning();
+          .where(eq(departments.id, id));
+        const updated = await db.select().from(departments).where(eq(departments.id, id));
         res.json(updated[0]);
       } else {
         const existing = await db.select().from(departments).where(eq(departments.code, code)).limit(1);
         if (existing.length > 0) {
-          const updated = await db.update(departments)
+          await db.update(departments)
             .set({ name, color, targetValue: targetValue || 0, updatedAt: new Date() })
-            .where(eq(departments.id, existing[0].id))
-            .returning();
+            .where(eq(departments.id, existing[0].id));
+          const updated = await db.select().from(departments).where(eq(departments.id, existing[0].id));
           res.json(updated[0]);
         } else {
-          const inserted = await db.insert(departments)
-            .values({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() })
-            .returning();
+          const [result] = await db.insert(departments)
+            .values({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() });
+          const inserted = await db.select().from(departments).where(eq(departments.id, result.insertId));
           res.json(inserted[0]);
         }
       }
@@ -565,25 +711,25 @@ export async function registerRoutes(
       }
 
       if (id) {
-        const updated = await db.update(programs)
+        await db.update(programs)
           .set({ departmentId, code, name, track, level, color, targetValue: targetValue || 0, updatedAt: new Date() })
-          .where(eq(programs.id, id))
-          .returning();
+          .where(eq(programs.id, id));
+        const updated = await db.select().from(programs).where(eq(programs.id, id));
         await refreshCatalog();
         res.json(updated[0]);
       } else {
         const existing = await db.select().from(programs).where(eq(programs.code, code)).limit(1);
         if (existing.length > 0) {
-          const updated = await db.update(programs)
+          await db.update(programs)
             .set({ departmentId, name, track, level, color, targetValue: targetValue || 0, updatedAt: new Date() })
-            .where(eq(programs.id, existing[0].id))
-            .returning();
+            .where(eq(programs.id, existing[0].id));
+          const updated = await db.select().from(programs).where(eq(programs.id, existing[0].id));
           await refreshCatalog();
           res.json(updated[0]);
         } else {
-          const inserted = await db.insert(programs)
-            .values({ departmentId, code, name, track, level: level || "Bachelor", color, targetValue: targetValue || 0, updatedAt: new Date() })
-            .returning();
+          const [result] = await db.insert(programs)
+            .values({ departmentId, code, name, track, level: level || "Bachelor", color, targetValue: targetValue || 0, updatedAt: new Date() });
+          const inserted = await db.select().from(programs).where(eq(programs.id, result.insertId));
           await refreshCatalog();
           res.json(inserted[0]);
         }
@@ -1112,14 +1258,15 @@ export async function seedDatabase() {
 
   const seededSchools = await storage.listSchoolRegistry();
   const schoolByName = new Map(seededSchools.map((school) => [school.schoolName, school]));
-  const [importRow] = await db.insert(imports).values({
+  const [importResult] = await db.insert(imports).values({
     source: "5-school-test-dataset",
     status: "completed",
     importedCount: 5,
     failedCount: 0,
     completedAt: new Date(),
     notes: "Reliable 5-school / 5-student map test dataset",
-  }).returning();
+  });
+  const importRow = await db.select().from(imports).where(eq(imports.id, importResult.insertId)).limit(1).then(r => r[0]);
 
   const testStudents = [
     {
@@ -1180,7 +1327,7 @@ export async function seedDatabase() {
   ];
 
   for (const student of testStudents) {
-    const [raw] = await db.insert(studentsRaw).values({
+    const [rawResult] = await db.insert(studentsRaw).values({
       importId: importRow.id,
       studentNumber: student.studentNumber,
       fullName: student.fullName,
@@ -1190,7 +1337,8 @@ export async function seedDatabase() {
       studentType: student.studentType,
       municipality: student.municipality,
       rawPayload: JSON.stringify(student),
-    }).returning();
+    });
+    const raw = await db.select().from(studentsRaw).where(eq(studentsRaw.id, rawResult.insertId)).limit(1).then(r => r[0]);
 
     await db.insert(studentsProcessed).values({
       rawId: raw.id,

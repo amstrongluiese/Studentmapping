@@ -1,179 +1,35 @@
 import { getPool } from "./db";
 
-/**
- * Idempotent GIS table setup when drizzle-kit push was not completed.
- * Safe to run on every server start.
- */
 export async function ensureGisSchema() {
-  const pool = getPool();
-
-  await pool.query(`
-    ALTER TABLE schools ADD COLUMN IF NOT EXISTS province TEXT NOT NULL DEFAULT 'Laguna';
-    ALTER TABLE schools ADD COLUMN IF NOT EXISTS place_id TEXT;
-    UPDATE schools SET province = 'Laguna' WHERE province IS NULL OR btrim(province) = '';
-    ALTER TABLE schools ALTER COLUMN province SET DEFAULT 'Laguna';
-    ALTER TABLE schools ALTER COLUMN province SET NOT NULL;
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS imports (
-      id SERIAL PRIMARY KEY,
-      source TEXT NOT NULL DEFAULT 'api',
-      status TEXT NOT NULL DEFAULT 'completed',
-      imported_count INTEGER NOT NULL DEFAULT 0,
-      failed_count INTEGER NOT NULL DEFAULT 0,
-      started_at TIMESTAMP NOT NULL DEFAULT NOW(),
-      completed_at TIMESTAMP,
-      notes TEXT
-    );
-  `);
-
-  await pool.query(`
-    ALTER TABLE imports ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'api';
-    ALTER TABLE imports ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'completed';
-    ALTER TABLE imports ADD COLUMN IF NOT EXISTS imported_count INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE imports ADD COLUMN IF NOT EXISTS failed_count INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE imports ADD COLUMN IF NOT EXISTS started_at TIMESTAMP NOT NULL DEFAULT NOW();
-    ALTER TABLE imports ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP;
-    ALTER TABLE imports ADD COLUMN IF NOT EXISTS notes TEXT;
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS students_raw (
-      id SERIAL PRIMARY KEY,
-      import_id INTEGER REFERENCES imports(id),
-      student_number TEXT NOT NULL,
-      full_name TEXT NOT NULL,
-      course TEXT,
-      last_school_name TEXT NOT NULL,
-      last_school_type TEXT,
-      student_type TEXT,
-      municipality TEXT NOT NULL DEFAULT 'Laguna',
-      raw_payload TEXT,
-      synced_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS import_id INTEGER;
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS student_number TEXT NOT NULL DEFAULT '';
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT '';
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS course TEXT;
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS last_school_name TEXT NOT NULL DEFAULT '';
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS last_school_type TEXT;
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS student_type TEXT;
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS municipality TEXT NOT NULL DEFAULT 'Laguna';
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS raw_payload TEXT;
-    ALTER TABLE students_raw ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP NOT NULL DEFAULT NOW();
-  `);
-
-  const legacyProcessed = await pool.query(`
-    SELECT column_name FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'students_processed';
-  `);
-
-  const processedCols = new Set(legacyProcessed.rows.map((r: { column_name: string }) => r.column_name));
-  const isLegacyProcessed =
-    processedCols.size > 0 && processedCols.has("enrollment_year") && !processedCols.has("raw_id");
-
-  if (isLegacyProcessed) {
-    await pool.query(`ALTER TABLE IF EXISTS students_processed RENAME TO students_processed_legacy;`);
-    processedCols.clear();
-  }
-
-  if (!processedCols.has("raw_id") && processedCols.size === 0) {
+  console.log("[GIS] Ensuring MySQL audit log schema...");
+  try {
+    const pool = getPool();
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS students_processed (
-        id SERIAL PRIMARY KEY,
-        raw_id INTEGER REFERENCES students_raw(id),
-        student_number TEXT NOT NULL,
-        full_name TEXT NOT NULL,
-        course TEXT,
-        admission_type TEXT,
-        last_school_name TEXT NOT NULL,
-        last_school_type TEXT,
-        school_id INTEGER REFERENCES schools(id),
-        municipality TEXT NOT NULL DEFAULT 'Laguna',
-        province TEXT NOT NULL DEFAULT 'Laguna',
-        year_level TEXT,
-        enrollment_status TEXT NOT NULL DEFAULT 'Active',
-        enrollment_date TIMESTAMP NOT NULL DEFAULT NOW(),
-        imported_source TEXT NOT NULL DEFAULT 'API',
-        archived_at TIMESTAMP,
-        mapping_status TEXT NOT NULL DEFAULT 'pending',
-        synced_at TIMESTAMP NOT NULL DEFAULT NOW(),
-        processed_at TIMESTAMP NOT NULL DEFAULT NOW()
-      );
+      CREATE TABLE IF NOT EXISTS data_access_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        action TEXT NOT NULL,
+        target_table TEXT NOT NULL,
+        record_id TEXT NULL,
+        ip_address TEXT NULL,
+        accessed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-  } else {
+
     await pool.query(`
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS raw_id INTEGER;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS student_number TEXT;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS full_name TEXT;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS course TEXT;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS admission_type TEXT;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS last_school_name TEXT;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS last_school_type TEXT;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS school_id INTEGER;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS municipality TEXT NOT NULL DEFAULT 'Laguna';
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS province TEXT NOT NULL DEFAULT 'Laguna';
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS year_level TEXT;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS enrollment_status TEXT NOT NULL DEFAULT 'Active';
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS enrollment_date TIMESTAMP NOT NULL DEFAULT NOW();
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS imported_source TEXT NOT NULL DEFAULT 'API';
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP;
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS mapping_status TEXT NOT NULL DEFAULT 'pending';
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS synced_at TIMESTAMP NOT NULL DEFAULT NOW();
-      ALTER TABLE students_processed ADD COLUMN IF NOT EXISTS processed_at TIMESTAMP NOT NULL DEFAULT NOW();
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        actor VARCHAR(255) NOT NULL DEFAULT 'System',
+        role VARCHAR(100) NOT NULL DEFAULT 'User',
+        action VARCHAR(100) NOT NULL,
+        target_resource VARCHAR(255) NOT NULL,
+        details TEXT NULL,
+        ip_address VARCHAR(100) NULL,
+        status VARCHAR(100) NOT NULL DEFAULT 'SUCCESS',
+        timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+  } catch (err: any) {
+    console.error("[GIS] Error ensuring schema:", err?.message || err);
   }
-
-  const aliasCols = await pool.query(`
-    SELECT column_name FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'school_aliases';
-  `);
-  const aliasColumnNames = new Set(
-    aliasCols.rows.map((r: { column_name: string }) => r.column_name),
-  );
-
-  if (aliasColumnNames.size > 0 && !aliasColumnNames.has("alias_normalized")) {
-    await pool.query(`ALTER TABLE IF EXISTS school_aliases RENAME TO school_aliases_legacy;`);
-    aliasColumnNames.clear();
-  }
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS school_aliases (
-      id SERIAL PRIMARY KEY,
-      alias_normalized TEXT NOT NULL UNIQUE,
-      school_id INTEGER NOT NULL REFERENCES schools(id),
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    ALTER TABLE school_aliases ADD COLUMN IF NOT EXISTS alias_normalized TEXT;
-    ALTER TABLE school_aliases ADD COLUMN IF NOT EXISTS school_id INTEGER;
-    ALTER TABLE school_aliases ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT NOW();
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS mapping_logs (
-      id SERIAL PRIMARY KEY,
-      import_id INTEGER REFERENCES imports(id),
-      action TEXT NOT NULL,
-      school_id INTEGER REFERENCES schools(id),
-      student_processed_id INTEGER,
-      message TEXT NOT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-  `);
-
-  await pool.query(`
-    ALTER TABLE mapping_logs ADD COLUMN IF NOT EXISTS import_id INTEGER;
-    ALTER TABLE mapping_logs ADD COLUMN IF NOT EXISTS action TEXT NOT NULL DEFAULT '';
-    ALTER TABLE mapping_logs ADD COLUMN IF NOT EXISTS school_id INTEGER;
-    ALTER TABLE mapping_logs ADD COLUMN IF NOT EXISTS student_processed_id INTEGER;
-    ALTER TABLE mapping_logs ADD COLUMN IF NOT EXISTS message TEXT NOT NULL DEFAULT '';
-    ALTER TABLE mapping_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT NOW();
-  `);
 }

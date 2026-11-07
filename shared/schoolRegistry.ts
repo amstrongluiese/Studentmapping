@@ -82,3 +82,20 @@ export function getSchoolStatus(record: {
   return "Missing Coordinates";
 }
 
+export function inferSchoolType(name: string): string {
+  const upper = (name || "").toUpperCase();
+  if (upper.includes("TESDA") || upper.includes("ARTS AND TRADES") || upper.includes("ARTS & TRADES") || upper.includes("VOCATIONAL") || upper.includes("POLYTECHNIC") || upper.includes("TECH-VOC")) {
+    return "Technical-Vocational / TESDA";
+  }
+  if (upper.includes("NATIONAL HIGH") || upper.includes("HIGH SCHOOL") || upper.includes("NHS") || upper.includes("SHS") || upper.includes("SENIOR HIGH")) {
+    return "Public Senior High School";
+  }
+  if (upper.includes("COLLEGE") || upper.includes("UNIVERSITY") || upper.includes("UNIV") || upper.includes("INSTITUTE") || upper.includes("ACADEMY")) {
+    return "Higher Education / College";
+  }
+  if (upper.includes("ELEMENTARY") || upper.includes("ELEM") || upper.includes("CENTRAL")) {
+    return "Elementary School";
+  }
+  return "Public School";
+}
+

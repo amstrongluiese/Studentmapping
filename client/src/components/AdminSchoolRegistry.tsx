@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Edit, Plus, RefreshCw, Trash2, MapPin, Upload, Download, Merge, Filter, AlertTriangle } from "lucide-react";
+import { Edit, Plus, RefreshCw, Trash2, MapPin, Upload, Download, Merge, Filter, AlertTriangle, Copy } from "lucide-react";
 import type { SchoolRegistry as School } from "@shared/schema";
 import { api } from "@shared/routes";
 import { getSchoolStatus, hasCoordinates } from "@shared/schoolRegistry";
@@ -30,6 +30,7 @@ import {
 interface AdminSchoolRegistryProps {
   compact?: boolean;
   duplicateIds: Set<number>;
+  duplicateMasterMap?: Map<number, School>;
   filteredSchools: School[];
   isLoading: boolean;
   registrySearch: string;
@@ -48,6 +49,7 @@ interface AdminSchoolRegistryProps {
 export function AdminSchoolRegistry({
   compact = false,
   duplicateIds,
+  duplicateMasterMap,
   filteredSchools,
   isLoading,
   registrySearch,
@@ -272,17 +274,17 @@ export function AdminSchoolRegistry({
   return (
     <div className={cn("mx-auto space-y-3", compact ? "max-w-full" : "max-w-7xl space-y-4")}>
       <Tabs defaultValue="masterlist" className="w-full">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 mb-3">
           <div>
-            <h3 className={cn("font-semibold text-slate-900", compact ? "text-sm" : "text-xl font-black")}>School registry</h3>
-            <p className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-sm")}>
-              Manage official schools and process pending imports.
+            <h3 className={cn("font-extrabold text-foreground tracking-tight", compact ? "text-base" : "text-xl")}>School Registry</h3>
+            <p className={cn("text-muted-foreground", compact ? "text-xs" : "text-sm")}>
+              One GIS entity per school — verified Laguna coordinates, municipality routing, and feeder student counts.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <TabsList className="bg-slate-100/80">
-              <TabsTrigger value="masterlist" className="text-xs">Official Masterlist</TabsTrigger>
-              <TabsTrigger value="pending" className="text-xs relative">
+          <div className="flex flex-wrap items-center gap-2">
+            <TabsList className="bg-muted/60 border border-border/40 h-9 p-1 rounded-xl">
+              <TabsTrigger value="masterlist" className="text-xs h-7 rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs">Official Masterlist</TabsTrigger>
+              <TabsTrigger value="pending" className="text-xs h-7 rounded-lg data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-xs relative">
                 Pending Imports
                 {unmatchedNames.length > 0 && (
                   <span className="ml-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-[10px] font-bold text-white">
@@ -293,16 +295,34 @@ export function AdminSchoolRegistry({
             </TabsList>
             <Button 
               variant="outline" 
-              className={cn("gap-2 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800", compact ? "h-9 px-3 text-xs" : "h-10")} 
+              size="sm" 
+              className={cn("gap-1.5 border-amber-500/30 bg-amber-500/10 text-amber-500 dark:text-amber-400 hover:bg-amber-500/20 h-9 text-xs font-semibold", duplicateIds.size === 0 && "opacity-60")} 
               onClick={onBulkMergeOpen}
               disabled={duplicateIds.size === 0}
             >
               <Merge className="h-3.5 w-3.5" />
-              Auto-Merge Duplicates {duplicateIds.size > 0 && `(${duplicateIds.size})`}
+              Auto-Merge {duplicateIds.size > 0 && `(${duplicateIds.size})`}
             </Button>
-            <Button className={cn("gap-2", compact ? "h-9 px-3 text-xs" : "h-10")} onClick={onAdd}>
+            <Button variant="outline" size="sm" onClick={handleExportJson} className="gap-1.5 h-9 text-xs font-semibold border-border/60 bg-muted/30 text-foreground hover:bg-muted/60 hover:text-foreground shadow-sm">
+              <Download className="w-3.5 h-3.5" />
+              Export
+            </Button>
+            <div className="relative">
+              <Input 
+                type="file" 
+                accept=".xlsx,.xls" 
+                onChange={handleFileUpload} 
+                disabled={isUploading}
+                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+              />
+              <Button size="sm" variant="outline" className="gap-1.5 h-9 text-xs font-semibold border-border/60 bg-muted/30 text-foreground hover:bg-muted/60 hover:text-foreground shadow-sm" disabled={isUploading}>
+                <Upload className="w-3.5 h-3.5" />
+                {isUploading ? "Importing..." : "Import Excel"}
+              </Button>
+            </div>
+            <Button size="sm" className="gap-1.5 h-9 text-xs font-semibold shadow-sm" onClick={onAdd}>
               <Plus className="h-3.5 w-3.5" />
-              Add school
+              Add School
             </Button>
           </div>
         </div>
@@ -319,36 +339,7 @@ export function AdminSchoolRegistry({
             deleteItemName="schools"
           />
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h3 className={cn("font-semibold text-slate-900", compact ? "text-sm" : "text-xl font-black")}>School registry</h3>
-          <p className={cn("text-muted-foreground", compact ? "text-[11px]" : "text-sm")}>
-            One GIS entity per school - coordinates, municipality, verification.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleExportJson} className="gap-2 shadow-sm h-9">
-            <Download className="w-4 h-4" />
-            Export JSON
-          </Button>
-          
-          <div className="relative">
-            <Input 
-              type="file" 
-              accept=".xlsx,.xls" 
-              onChange={handleFileUpload} 
-              disabled={isUploading}
-              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-            />
-            <Button size="sm" className="gap-2 shadow-sm h-9" disabled={isUploading}>
-              <Upload className="w-4 h-4" />
-              {isUploading ? "Importing..." : "Import Updated Excel"}
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2 rounded-lg bg-slate-50/80 p-2">
+      <div className="flex flex-col gap-2 rounded-xl border border-border/50 bg-card/60 p-2.5 shadow-sm backdrop-blur-xl">
         <div className="flex flex-wrap items-center gap-2">
           {onAcronymsToggle && (
             <Button 
@@ -360,7 +351,7 @@ export function AdminSchoolRegistry({
                   onSearchChange("");
                 }
               }}
-              className="h-8 text-xs bg-white text-slate-700 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground shadow-sm px-3"
+              className="h-8 text-xs border-border/60 bg-muted/40 text-foreground data-[state=on]:bg-primary data-[state=on]:text-primary-foreground shadow-sm px-3 hover:bg-muted/70"
               data-state={showAcronymsOnly ? "on" : "off"}
             >
               <Filter className="w-3 h-3 mr-2" />
@@ -370,7 +361,7 @@ export function AdminSchoolRegistry({
 
           {/* Status */}
           <Select value={registryStatusFilter} onValueChange={(v) => { setRegistryStatusFilter(v); setRegistryPage(1); }}>
-            <SelectTrigger className="h-8 w-[175px] text-xs">
+            <SelectTrigger className="h-8 w-[175px] text-xs border-border/60 bg-muted/40 text-foreground">
               <SelectValue placeholder="All Statuses" />
             </SelectTrigger>
             <SelectContent>
@@ -385,7 +376,7 @@ export function AdminSchoolRegistry({
 
           {/* Municipality */}
           <Select value={registryMunicipalityFilter} onValueChange={(v) => { setRegistryMunicipalityFilter(v); setRegistryPage(1); }}>
-            <SelectTrigger className="h-8 w-[175px] text-xs">
+            <SelectTrigger className="h-8 w-[175px] text-xs border-border/60 bg-muted/40 text-foreground">
               <SelectValue placeholder="All Municipalities" />
             </SelectTrigger>
             <SelectContent>
@@ -398,7 +389,7 @@ export function AdminSchoolRegistry({
 
           {/* School Type */}
           <Select value={registryTypeFilter} onValueChange={(v) => { setRegistryTypeFilter(v); setRegistryPage(1); }}>
-            <SelectTrigger className="h-8 w-[175px] text-xs">
+            <SelectTrigger className="h-8 w-[175px] text-xs border-border/60 bg-muted/40 text-foreground">
               <SelectValue placeholder="All Types" />
             </SelectTrigger>
             <SelectContent>
@@ -411,7 +402,7 @@ export function AdminSchoolRegistry({
 
           {/* Sort */}
           <Select value={registrySort} onValueChange={(v) => { setRegistrySort(v); setRegistryPage(1); }}>
-            <SelectTrigger className="h-8 w-[185px] text-xs">
+            <SelectTrigger className="h-8 w-[185px] text-xs border-border/60 bg-muted/40 text-foreground">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
@@ -427,7 +418,7 @@ export function AdminSchoolRegistry({
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 gap-1.5 text-xs text-slate-500 hover:text-slate-900"
+              className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
               onClick={() => {
                 setRegistryStatusFilter("All");
                 setRegistryMunicipalityFilter("All");
@@ -444,7 +435,7 @@ export function AdminSchoolRegistry({
           <Button
             size="sm"
             variant="outline"
-            className="h-8 gap-2 self-end border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+            className="h-8 gap-2 self-end border-emerald-500/30 bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 hover:bg-emerald-500/20"
             onClick={handleBulkGeolocate}
           >
             <MapPin className="h-3.5 w-3.5" />
@@ -453,10 +444,10 @@ export function AdminSchoolRegistry({
         )}
       </div>
 
-      <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
+      <Card className="overflow-hidden rounded-lg border-border/60 bg-card shadow-sm">
         <div className="overflow-x-auto">
           <Table className={cn(compact ? "min-w-[960px] text-xs" : "min-w-[800px]")}>
-            <TableHeader>
+            <TableHeader className="bg-muted/40 border-b border-border/40">
               <TableRow className={cn(compact && "hover:bg-transparent")}>
                 <TableHead className="w-10 px-4">
                   <Checkbox
@@ -522,45 +513,37 @@ export function AdminSchoolRegistry({
                       />
                     </TableCell>
                     <TableCell className={cn(compact && "max-w-[180px]")}>
-                      <p className={cn("font-semibold", compact && "truncate")}>{school.schoolName}</p>
+                      <p className={cn("font-semibold text-foreground", compact && "truncate")}>{school.schoolName}</p>
                       {!compact ? (
                         <p className="text-xs text-muted-foreground">{school.schoolType || "Unknown"}</p>
                       ) : (
                         <p className="truncate text-[10px] text-muted-foreground">{school.schoolType}</p>
                       )}
-                      {mismatchMap.has(school.id) && (
-                        <Badge variant="outline" className={cn(
-                          "mt-0.5 max-w-fit text-[9px] flex items-center gap-0.5",
-                          mismatchMap.get(school.id)!.hasMismatch
-                            ? "border-rose-200 bg-rose-50 text-rose-700"
-                            : "border-blue-200 bg-blue-50 text-blue-700"
-                        )} title={mismatchMap.get(school.id)!.message}>
-                          {mismatchMap.get(school.id)!.hasMismatch ? (
-                            <><AlertTriangle className="h-2.5 w-2.5" /> Name mismatch</>
-                          ) : (
-                            "Multi-campus"
-                          )}
-                        </Badge>
+                      {duplicateMasterMap?.has(school.id) && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-amber-500 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-md mt-1 w-fit font-medium">
+                          <Copy className="w-3 h-3 text-amber-500 shrink-0" />
+                          <span>Duplicate of: <strong className="text-foreground">{duplicateMasterMap.get(school.id)?.schoolName}</strong></span>
+                        </div>
                       )}
                     </TableCell>
                     {compact ? (
                       <>
                         <TableCell className="max-w-[140px]">
-                          <span className="block truncate font-mono text-[10px] text-slate-600">
+                          <span className="block truncate font-mono text-[10px] text-muted-foreground">
                             {school.normalizedSchoolName || "-"}
                           </span>
                         </TableCell>
                         <TableCell className="whitespace-nowrap">
                           {hasCoordinates(school) ? (
-                            <span className="font-mono text-[10px]">{school.latitude!.toFixed(5)}, {school.longitude!.toFixed(5)}</span>
+                            <span className="font-mono text-[10px] text-foreground/90">{school.latitude!.toFixed(5)}, {school.longitude!.toFixed(5)}</span>
                           ) : (
-                            <Badge variant="outline" className="border-amber-200 bg-amber-50 text-[10px] text-amber-700">Missing</Badge>
+                            <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-[10px] text-amber-500 dark:text-amber-400">Missing</Badge>
                           )}
                         </TableCell>
-                        <TableCell className="whitespace-nowrap">{school.municipality}</TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-500">{school.province || "Laguna"}</TableCell>
-                        <TableCell className="text-right tabular-nums">-</TableCell>
-                        <TableCell className="whitespace-nowrap text-slate-400">- / -</TableCell>
+                        <TableCell className="whitespace-nowrap text-foreground font-medium">{school.municipality}</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">{school.province || "Laguna"}</TableCell>
+                        <TableCell className="text-right tabular-nums text-muted-foreground">-</TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">- / -</TableCell>
                         <TableCell>
                           <Badge variant="outline" className={cn("text-[10px]", statusTone(school, duplicateIds))}>
                             {school.isActive ? "Verified" : registryStatus}
@@ -571,13 +554,13 @@ export function AdminSchoolRegistry({
                       <>
                         <TableCell>
                           {hasCoordinates(school) ? (
-                            <span className="font-mono text-xs">{school.latitude!.toFixed(5)}, {school.longitude!.toFixed(5)}</span>
+                            <span className="font-mono text-xs text-foreground/90">{school.latitude!.toFixed(5)}, {school.longitude!.toFixed(5)}</span>
                           ) : (
-                            <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">Missing</Badge>
+                            <Badge variant="outline" className="border-amber-500/30 bg-amber-500/10 text-amber-500 dark:text-amber-400">Missing</Badge>
                           )}
                         </TableCell>
-                        <TableCell>{school.municipality}</TableCell>
-                        <TableCell>{school.schoolType}</TableCell>
+                        <TableCell className="text-foreground font-medium">{school.municipality}</TableCell>
+                        <TableCell className="text-muted-foreground">{school.schoolType}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className={statusTone(school, duplicateIds)}>{registryStatus}</Badge>
                         </TableCell>
@@ -585,18 +568,18 @@ export function AdminSchoolRegistry({
                     )}
                     <TableCell>
                       <div className="flex justify-end gap-0.5">
-                        <Button variant="ghost" size="icon" className={actionBtn} onClick={() => onEdit(school)} title="Edit school">
+                        <Button variant="ghost" size="icon" className={cn(actionBtn, "text-muted-foreground hover:text-foreground hover:bg-muted/60")} onClick={() => onEdit(school)} title="Edit school">
                           <Edit className={actionIcon} />
                         </Button>
-                        <Button variant="ghost" size="icon" className={actionBtn} onClick={() => onGeolocate(school)} title="Re-geolocate school">
+                        <Button variant="ghost" size="icon" className={cn(actionBtn, "text-muted-foreground hover:text-foreground hover:bg-muted/60")} onClick={() => onGeolocate(school)} title="Re-geolocate school">
                           <RefreshCw className={actionIcon} />
                         </Button>
                         {duplicateIds.has(school.id) && (
-                          <Button variant="ghost" size="icon" className={cn(actionBtn, "text-amber-700")} onClick={() => onRemoveDuplicate(school)} title="Remove duplicate">
+                          <Button variant="ghost" size="icon" className={cn(actionBtn, "text-amber-500 hover:text-amber-400 hover:bg-amber-500/10")} onClick={() => onRemoveDuplicate(school)} title="Remove duplicate">
                             <Trash2 className={actionIcon} />
                           </Button>
                         )}
-                        <Button variant="ghost" size="icon" className={cn(actionBtn, "text-rose-600")} onClick={() => onDelete(school)} title="Delete school">
+                        <Button variant="ghost" size="icon" className={cn(actionBtn, "text-rose-500 hover:text-rose-400 hover:bg-rose-500/10")} onClick={() => onDelete(school)} title="Delete school">
                           <Trash2 className={actionIcon} />
                         </Button>
                       </div>
@@ -607,12 +590,12 @@ export function AdminSchoolRegistry({
             </TableBody>
           </Table>
         </div>
-        <div className="flex shrink-0 flex-col gap-2 border-t border-slate-200 px-3 py-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex shrink-0 flex-col gap-2 border-t border-border/50 px-3 py-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <span>{processedSchools.length.toLocaleString()} schools · {selectedIds.size.toLocaleString()} selected</span>
           <div className="flex items-center justify-end gap-2">
-            <Button variant="outline" size="sm" className="h-8 text-xs" disabled={currentPage <= 1} onClick={() => setRegistryPage((page) => Math.max(1, page - 1))}>Previous</Button>
+            <Button variant="outline" size="sm" className="h-8 text-xs border-border/60 bg-muted/30 text-foreground hover:bg-muted/60" disabled={currentPage <= 1} onClick={() => setRegistryPage((page) => Math.max(1, page - 1))}>Previous</Button>
             <span className="min-w-[92px] text-center">Page {currentPage} of {totalPages}</span>
-            <Button variant="outline" size="sm" className="h-8 text-xs" disabled={currentPage >= totalPages} onClick={() => setRegistryPage((page) => Math.min(totalPages, page + 1))}>Next</Button>
+            <Button variant="outline" size="sm" className="h-8 text-xs border-border/60 bg-muted/30 text-foreground hover:bg-muted/60" disabled={currentPage >= totalPages} onClick={() => setRegistryPage((page) => Math.min(totalPages, page + 1))}>Next</Button>
           </div>
         </div>
       </Card>
@@ -647,9 +630,9 @@ export function AdminSchoolRegistry({
 
 function statusTone(school: School, duplicateIds: Set<number>) {
   const status = duplicateIds.has(school.id) ? "Duplicate Entry" : getSchoolStatus(school);
-  if (status === "Verified") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (status === "Auto-Located") return "border-sky-200 bg-sky-50 text-sky-700";
-  if (status === "Duplicate Entry") return "border-amber-200 bg-amber-50 text-amber-700";
-  if (status === "Missing Coordinates") return "border-rose-200 bg-rose-50 text-rose-700";
-  return "border-slate-200 bg-slate-50 text-slate-600";
+  if (status === "Verified") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-400";
+  if (status === "Auto-Located") return "border-sky-500/30 bg-sky-500/10 text-sky-400";
+  if (status === "Duplicate Entry") return "border-amber-500/30 bg-amber-500/10 text-amber-400";
+  if (status === "Missing Coordinates") return "border-rose-500/30 bg-rose-500/10 text-rose-400";
+  return "border-border/60 bg-muted/40 text-muted-foreground";
 }

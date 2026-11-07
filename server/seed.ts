@@ -17,13 +17,13 @@ export async function seedPrograms() {
 
     const deptIdMap = new Map<string, number>();
     for (const [code, info] of Array.from(depts.entries())) {
-      const inserted = await db.insert(departments).values({
+      const [result] = await db.insert(departments).values({
         code,
         name: info.name,
         color: info.color,
         targetValue: 0
-      }).returning();
-      deptIdMap.set(code, inserted[0].id);
+      });
+      deptIdMap.set(code, result.insertId);
     }
 
     const progsToInsert = Object.values(PROGRAM_MAP).map(prog => ({

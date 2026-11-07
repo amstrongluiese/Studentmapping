@@ -623,7 +623,7 @@ export function SchoolFormDialog({
                             <SelectValue placeholder="Select type" />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent>
+                        <SelectContent className="z-[9999] max-h-[300px]">
                           {INSTITUTION_TYPES.map((t) => (
                             <SelectItem key={t} value={t}>{t}</SelectItem>
                           ))}

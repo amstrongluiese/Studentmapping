@@ -2,6 +2,7 @@ import { getDb } from "./db";
 import { studentsProcessed, schoolAliases } from "@shared/schema";
 import { SchoolMatchingEngine } from "./schoolMatcher";
 import { storage } from "./storage";
+import { eq } from "drizzle-orm";
 
 interface ImportProgress {
   total: number;
@@ -81,8 +82,17 @@ export async function processBatch(records: any[]) {
       const status = matchResult.status === "matched" ? "Matched" : 
                     matchResult.status === "suggested" ? "Unmatched" : "Unmatched";
 
-      await db.insert(studentsProcessed).values({
-        studentNumber: record.studentNumber || "N/A",
+      const rawNo = record.studentNumber ? String(record.studentNumber).trim() : "";
+      const studentNo = rawNo || "N/A";
+      const rawName = record.fullName ? String(record.fullName).trim() : "Unknown";
+
+      let existing: any[] = [];
+      if (rawNo && rawNo !== "N/A") {
+        existing = await db.select().from(studentsProcessed).where(eq(studentsProcessed.studentNumber, rawNo)).limit(1);
+      }
+
+      const studentData = {
+        studentNumber: studentNo,
         fullName: record.fullName || "Unknown",
         lastSchoolName: record.previousSchool || "Unknown",
         previousSchool: record.previousSchool || null,
@@ -95,7 +105,13 @@ export async function processBatch(records: any[]) {
         mappingStatus: status === "Matched" ? "mapped" : "needs_review",
         schoolRegistryId: matchResult.school?.id || null,
         enrollmentStatus: record.enrollmentStatus || "Active",
-      });
+      };
+
+      if (existing.length > 0) {
+        await db.update(studentsProcessed).set(studentData).where(eq(studentsProcessed.id, existing[0].id));
+      } else {
+        await db.insert(studentsProcessed).values(studentData);
+      }
 
       currentProgress.processed++;
       if (status === "Matched") currentProgress.matched++;

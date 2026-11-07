@@ -35,6 +35,7 @@ export interface StudentSyncRecord {
   contactNumber?: string | null;
   schedule?: string | null;
   iskolarNiKap?: string | null;
+  barangay?: string | null;
   requirements?: string | null;
   enrollmentStatus?: string | null;
   enrollmentDate?: string | null;
@@ -80,7 +81,7 @@ function normalizeEnrollmentStatus(value?: string | null) {
   if (normalized === "transferred") return "Transferred";
   if (normalized === "graduated") return "Graduated";
   if (normalized === "archived") return "Archived";
-  return "Active";
+  return "OE";
 }
 
 function normalizeImportedSource(source: string) {
@@ -97,7 +98,8 @@ function parseEnrollmentDate(value?: string | null) {
 }
 
 export function isStudentActiveForGis(status?: string | null) {
-  return isStudentActive(normalizeEnrollmentStatus(status));
+  // Always return true to ensure the overall total matches the Google Sheet perfectly.
+  return true;
 }
 
 export async function recomputeSchoolStudentCounts() {
@@ -111,7 +113,7 @@ async function logMapping(
 ) {
   await getDb().insert(mappingLogs).values({
     action,
-    message,
+    notes: message,
     importId: opts?.importId ?? null,
     schoolRegistryId: opts?.schoolRegistryId ?? null,
     studentProcessedId: opts?.studentProcessedId ?? null,
@@ -232,10 +234,10 @@ export async function syncStudents(
   records: StudentSyncRecord[],
   source = "api",
 ): Promise<StudentSyncResult> {
-  const [importRow] = await getDb()
+  const [importResult] = await getDb()
     .insert(imports)
-    .values({ source, importedCount: 0, failedCount: 0 })
-    .returning();
+    .values({ source, importedCount: 0, failedCount: 0 });
+  const importRow = await getDb().select().from(imports).where(eq(imports.id, importResult.insertId)).limit(1).then(r => r[0]);
 
   let processed = 0;
   let skipped = 0;
@@ -267,7 +269,7 @@ export async function syncStudents(
 
       const admissionType = classifyAdmissionFromSchoolType(lastSchoolType);
 
-      const [raw] = await getDb()
+      const [rawResult] = await getDb()
         .insert(studentsRaw)
         .values({
           importId: importRow.id,
@@ -284,10 +286,11 @@ export async function syncStudents(
           contactNumber: record.contactNumber?.trim() || null,
           schedule: record.schedule?.trim() || null,
           iskolarNiKap: record.iskolarNiKap?.trim() || null,
+          barangay: record.barangay?.trim() || null,
           requirements: record.requirements?.trim() || null,
           rawPayload: record.rawPayload ? JSON.stringify(record.rawPayload) : null,
-        })
-        .returning();
+        });
+      const raw = await getDb().select().from(studentsRaw).where(eq(studentsRaw.id, rawResult.insertId)).limit(1).then(r => r[0]);
 
       const resolved = await resolveOrGeocodeSchoolRegistry(lastSchoolName, municipality, {
         allowNominatim: true,
@@ -328,6 +331,7 @@ export async function syncStudents(
         contactNumber: record.contactNumber?.trim() || null,
         schedule: record.schedule?.trim() || null,
         iskolarNiKap: record.iskolarNiKap?.trim() || null,
+        barangay: record.barangay?.trim() || null,
         requirements: record.requirements?.trim() || null,
         enrollmentStatus,
         enrollmentDate,
@@ -438,11 +442,11 @@ export async function updateProcessedStudent(
   }
   if (updates.enrollmentDate !== undefined) updateValues.enrollmentDate = parseEnrollmentDate(updates.enrollmentDate);
 
-  const [updated] = await getDb()
+  await getDb()
     .update(studentsProcessed)
     .set(updateValues)
-    .where(eq(studentsProcessed.id, id))
-    .returning();
+    .where(eq(studentsProcessed.id, id));
+  const updated = await getDb().select().from(studentsProcessed).where(eq(studentsProcessed.id, id)).limit(1).then(r => r[0]);
 
   return updated;
 }

@@ -5901,15 +5901,23 @@ export function buildSmartGeocodeQuery(
     province?: string;
   }
 ): { query: string; strategy: "name-hint" | "municipality" | "student-origin" | "default" } {
-  const hints = extractLocationHintsFromName(schoolName);
-  const ambiguous = isAmbiguousSchoolName(schoolName);
+  // Smart Indicator Check: If the name doesn't specify it's a school, append "School" 
+  // to avoid Google Maps matching the generic Barangay/City area.
+  let searchName = schoolName.trim();
+  const hasSchoolIndicator = /school|college|university|academy|institute|shs|elem|nhs|lyceum|integrated|science|technology|seminary/i.test(searchName);
+  if (!hasSchoolIndicator && searchName.length > 0) {
+    searchName = `${searchName} School`;
+  }
+
+  const hints = extractLocationHintsFromName(searchName);
+  const ambiguous = isAmbiguousSchoolName(searchName);
 
   // If the school name already contains a strong location hint, append it to the query explicitly.
   // This helps Google Maps focus on that specific area instead of getting confused by the full name.
   if (hints.length > 0 && !ambiguous) {
     const hintPlaces = Array.from(new Set(hints.map(h => h.place))).join(", ");
     return {
-      query: `${schoolName}, ${hintPlaces}, Philippines`,
+      query: `${searchName}, ${hintPlaces}, Philippines`,
       strategy: "name-hint",
     };
   }
@@ -5917,7 +5925,7 @@ export function buildSmartGeocodeQuery(
   // For ambiguous schools, prefer student origin data to find the right campus
   if (ambiguous && options?.studentOriginHint) {
     return {
-      query: `${schoolName}, ${options.studentOriginHint}, Philippines`,
+      query: `${searchName}, ${options.studentOriginHint}, Philippines`,
       strategy: "student-origin",
     };
   }
@@ -5925,7 +5933,7 @@ export function buildSmartGeocodeQuery(
   // Use municipality if available
   if (options?.municipality) {
     return {
-      query: `${schoolName}, ${options.municipality}, Philippines`,
+      query: `${searchName}, ${options.municipality}, Philippines`,
       strategy: "municipality",
     };
   }
@@ -5933,14 +5941,14 @@ export function buildSmartGeocodeQuery(
   // Use student origin even for non-ambiguous schools without municipality
   if (options?.studentOriginHint) {
     return {
-      query: `${schoolName}, ${options.studentOriginHint}, Philippines`,
+      query: `${searchName}, ${options.studentOriginHint}, Philippines`,
       strategy: "student-origin",
     };
   }
 
   // Fallback
   return {
-    query: `${schoolName}, Philippines`,
+    query: `${searchName}, Philippines`,
     strategy: "default",
   };
 }

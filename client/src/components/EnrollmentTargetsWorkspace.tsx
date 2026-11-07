@@ -66,24 +66,24 @@ export function EnrollmentTargetsWorkspace() {
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 lg:p-8">
       <div>
-        <h2 className="text-2xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
-          <Target className="h-6 w-6 text-teal-600" />
+        <h2 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
+          <Target className="h-6 w-6 text-primary" />
           Enrollment Targets
         </h2>
-        <p className="text-slate-500 mt-1">Manage target numbers for overall enrollees, departments, and programs.</p>
+        <p className="text-muted-foreground mt-1">Manage target numbers for overall enrollees, departments, and programs.</p>
       </div>
 
-      <Card className="border-white/70 bg-white/70 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.5)] backdrop-blur-xl">
+      <Card className="border-border/60 bg-card/80 shadow-sm backdrop-blur-xl">
         <CardHeader>
-          <CardTitle className="text-lg">Add New Target</CardTitle>
-          <CardDescription>Input a new enrollment target to display in the GIS Map Sidebar.</CardDescription>
+          <CardTitle className="text-lg text-foreground">Add New Target</CardTitle>
+          <CardDescription className="text-muted-foreground">Input a new enrollment target to display in the GIS Map Sidebar.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
             <div className="space-y-1.5 flex-1 max-w-xs">
-              <label className="text-xs font-semibold text-slate-500 uppercase">Target Type</label>
+              <label className="text-xs font-semibold text-muted-foreground uppercase">Target Type</label>
               <Select value={newType} onValueChange={setNewType}>
-                <SelectTrigger>
+                <SelectTrigger className="border-border/60 bg-muted/30 text-foreground">
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -95,28 +95,30 @@ export function EnrollmentTargetsWorkspace() {
             </div>
             
             <div className="space-y-1.5 flex-1 max-w-xs">
-              <label className="text-xs font-semibold text-slate-500 uppercase">
+              <label className="text-xs font-semibold text-muted-foreground uppercase">
                 {newType === "Overall" ? "Label (e.g. Total)" : newType + " Name"}
               </label>
               <Input 
                 placeholder={newType === "Overall" ? "Total Enrollees" : newType === "Department" ? "e.g. CCS" : "e.g. BSIT"} 
                 value={newName} 
                 onChange={e => setNewName(e.target.value)}
+                className="border-border/60 bg-muted/30 text-foreground placeholder:text-muted-foreground"
               />
             </div>
 
             <div className="space-y-1.5 flex-1 max-w-xs">
-              <label className="text-xs font-semibold text-slate-500 uppercase">Target Enrollees</label>
+              <label className="text-xs font-semibold text-muted-foreground uppercase">Target Enrollees</label>
               <Input 
                 type="number"
                 placeholder="e.g. 5000" 
                 value={newValue} 
                 onChange={e => setNewValue(e.target.value)}
+                className="border-border/60 bg-muted/30 text-foreground placeholder:text-muted-foreground"
               />
             </div>
 
             <Button 
-              className="bg-teal-600 hover:bg-teal-700 h-10 w-full sm:w-auto mt-2 sm:mt-0"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground h-10 w-full sm:w-auto mt-2 sm:mt-0 font-semibold"
               onClick={handleAdd}
               disabled={!newName || !newValue || addMutation.isPending}
             >
@@ -127,16 +129,16 @@ export function EnrollmentTargetsWorkspace() {
         </CardContent>
       </Card>
 
-      <Card className="border-white/70 bg-white/70 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.5)] backdrop-blur-xl flex-1 overflow-hidden">
-        <CardHeader className="flex flex-row items-center justify-between py-4 border-b border-slate-100">
-          <CardTitle className="text-lg">Active Targets</CardTitle>
-          <Button variant="ghost" size="icon" onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/enrollment-targets"] })}>
-            <RefreshCcw className="h-4 w-4 text-slate-500" />
+      <Card className="border-border/60 bg-card/80 shadow-sm backdrop-blur-xl flex-1 overflow-hidden">
+        <CardHeader className="flex flex-row items-center justify-between py-4 border-b border-border/40 bg-muted/20">
+          <CardTitle className="text-lg text-foreground">Active Targets</CardTitle>
+          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/enrollment-targets"] })}>
+            <RefreshCcw className="h-4 w-4" />
           </Button>
         </CardHeader>
-        <div className="overflow-auto max-h-[500px]">
+        <div className="overflow-auto max-h-[500px] gis-custom-scrollbar">
           <Table>
-            <TableHeader className="bg-slate-50/50 sticky top-0">
+            <TableHeader className="bg-muted/40 sticky top-0 border-b border-border/40">
               <TableRow>
                 <TableHead>Type</TableHead>
                 <TableHead>Name</TableHead>

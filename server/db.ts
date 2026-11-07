@@ -1,57 +1,18 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import pg from "pg";
-import * as schema from "@shared/schema";
+import { getMysqlDb, getMysqlPool, initializeMysqlDatabase, testMysqlDatabaseConnection } from "./dbMysql";
 
-const { Pool } = pg;
-
-let pool: pg.Pool;
-let db: ReturnType<typeof drizzle>;
-let initialized = false;
-
+// Re-export MySQL implementations as the primary DB provider
 export function initializeDatabase() {
-  if (initialized) return { pool, db };
-
-  if (!process.env.DATABASE_URL) {
-    throw new Error(
-      "DATABASE_URL must be set. Please set DATABASE_URL in your .env file or environment.",
-    );
-  }
-
-  // Enterprise connection pooling settings for high scalability
-  pool = new Pool({ 
-    connectionString: process.env.DATABASE_URL,
-    max: 50, // max concurrent connections
-    idleTimeoutMillis: 30000, // close idle connections after 30 seconds
-    connectionTimeoutMillis: 2000, // return an error after 2 seconds if connection could not be established
-  });
-  db = drizzle(pool, { schema });
-  initialized = true;
-
-  return { pool, db };
+  return initializeMysqlDatabase();
 }
 
-// Lazy getters to ensure initialization happens after dotenv.config()
 export function getPool() {
-  if (!initialized) initializeDatabase();
-  return pool;
+  return getMysqlPool();
 }
 
 export function getDb() {
-  if (!initialized) initializeDatabase();
-  return db;
+  return getMysqlDb();
 }
 
-
 export async function testDatabaseConnection() {
-  try {
-    const client = await getPool().connect();
-    await client.query("SELECT 1");
-    client.release();
-    console.log("✅ PostgreSQL connected successfully.");
-  } catch (error) {
-    console.error("❌ PostgreSQL connection failed:", error instanceof Error ? error.message : error);
-    throw new Error(
-      "Unable to connect to PostgreSQL. Check your DATABASE_URL and ensure the database is running.",
-    );
-  }
+  return testMysqlDatabaseConnection();
 }

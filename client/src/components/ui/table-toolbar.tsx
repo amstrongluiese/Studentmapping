@@ -52,20 +52,20 @@ export function TableToolbar({
   return (
     <div className={cn("flex flex-wrap items-center justify-between gap-3 mb-4", className)}>
       <div className="relative flex-1 min-w-[200px] max-w-sm">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           name="tableSearch"
           aria-label={searchPlaceholder || "Search table"}
           placeholder={searchPlaceholder}
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
-          className="pl-9 h-9 bg-white/70 border-slate-200 shadow-sm text-sm"
+          className="pl-9 h-9 bg-muted/30 border-border/60 text-foreground placeholder:text-muted-foreground shadow-sm text-sm focus-visible:ring-primary/20"
         />
         {searchQuery && (
           <Button
             variant="ghost"
             size="icon"
-            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-slate-400 hover:text-slate-600"
+            className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-foreground"
             onClick={() => onSearchChange("")}
           >
             <X className="h-3.5 w-3.5" />
@@ -81,14 +81,14 @@ export function TableToolbar({
 
       {selectedCount > 0 && (
         <div className="flex items-center gap-2 shrink-0 animate-in fade-in slide-in-from-right-4 duration-200">
-          <span className="text-sm font-medium text-slate-600">
+          <span className="text-sm font-medium text-foreground">
             {selectedCount} selected
           </span>
           <Button
             variant="ghost"
             size="sm"
             onClick={onClearSelection}
-            className="h-9 px-3 text-slate-500 hover:text-slate-700"
+            className="h-9 px-3 text-muted-foreground hover:text-foreground"
             disabled={isDeleting}
           >
             Clear

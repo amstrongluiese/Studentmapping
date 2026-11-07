@@ -426,11 +426,26 @@ export function RegistryGeocodeReviewModal({
           });
         })
       );
-      toast({ title: "Updates Saved", description: `Successfully updated ${toSave.length} schools.` });
+      const savedCount = toSave.length;
+      toast({ title: "Updates Saved", description: `Successfully updated ${savedCount} schools.` });
       queryClient.invalidateQueries({ queryKey: ["/api/schoolRegistry"] });
       queryClient.invalidateQueries({ queryKey: ["/api/gis/overview"] });
-      onComplete();
-      onOpenChange(false);
+
+      // Clear the selected IDs on parent
+      if (onComplete) {
+        onComplete();
+      }
+
+      // Filter out successfully saved items from local results state
+      const savedIds = new Set(toSave.map((r) => r.schoolId));
+      setResults((prev) => {
+        const remaining = prev.filter((r) => !savedIds.has(r.schoolId));
+        // If everything is geocoded and saved, close the modal automatically
+        if (remaining.length === 0) {
+          onOpenChange(false);
+        }
+        return remaining;
+      });
     } catch (err: any) {
       toast({ title: "Save Failed", description: err.message || "An error occurred.", variant: "destructive" });
     } finally {
@@ -521,7 +536,7 @@ export function RegistryGeocodeReviewModal({
                       <SelectTrigger className="h-7 text-[10px] w-full px-2">
                         <SelectValue placeholder="Type" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="z-[9999] max-h-[300px]">
                         {["Unknown", "Elementary", "High School", "Senior High School", "College", "University", "Vocational", "Special Education"].map(t => (
                           <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
                         ))}

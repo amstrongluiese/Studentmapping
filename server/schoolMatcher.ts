@@ -194,26 +194,10 @@ export class SchoolMatchingEngine {
       }
     }
 
-    // 9. Fuzzy Match & Database pg_trgm (30%)
-    // Try both raw name and normalized name for similarity
-    const trgmRes = await db.execute(sql`
-      SELECT id, 
-             GREATEST(similarity(school_name, ${rawName}), similarity(normalized_school_name, ${normalized})) as sim 
-      FROM school_registry 
-      WHERE is_active = true 
-        AND (similarity(school_name, ${rawName}) > 0.3 OR similarity(normalized_school_name, ${normalized}) > 0.3)
-      ORDER BY sim DESC LIMIT 1
-    `);
-    
+    // Drizzle raw execute in Postgres returns { rows: any[] }
+    // pg_trgm query removed for MySQL compatibility. Using fuse.js memory search exclusively.
     let dbTopSim = 0;
     let dbTopSchool: SchoolRegistry | null = null;
-    
-    // Drizzle raw execute in Postgres returns { rows: any[] }
-    const trgmRows = (trgmRes as any).rows || trgmRes;
-    if (Array.isArray(trgmRows) && trgmRows.length > 0) {
-      dbTopSim = Number((trgmRows[0] as any).sim);
-      dbTopSchool = this.registry.find(s => s.id === (trgmRows[0] as any).id) || null;
-    }
 
     // Compare with fuse.js memory search
     const fuzzyResults = this.fuse.search(rawName);
@@ -250,10 +234,9 @@ export class SchoolMatchingEngine {
 
     // AI Suggestions (Top 3 fuzzy if below threshold)
     if (fuzzyResults.length > 0) {
-      // Combine suggestions from both pg_trgm and fuse
-      const pgSuggestions = trgmRows.map((r: any) => this.registry.find(s => s.id === r.id)).filter(Boolean) as SchoolRegistry[];
+      // Suggestions from fuse
       const fuseSuggestions = fuzzyResults.slice(0, 3).map(r => r.item);
-      const suggestions = Array.from(new Set([...pgSuggestions, ...fuseSuggestions])).slice(0, 3);
+      const suggestions = Array.from(new Set([...fuseSuggestions])).slice(0, 3);
       
       // Address Resolution
       if (addressStr && suggestions.length > 1) {

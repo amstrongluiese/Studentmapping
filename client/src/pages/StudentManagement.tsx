@@ -106,46 +106,46 @@ export default function StudentManagement() {
               ) : (
                 <div className="overflow-auto max-h-[600px]">
                   <Table className="min-w-[1000px] w-full">
-                    <TableHeader className="sticky top-0 z-10 bg-white shadow-sm">
+                    <TableHeader className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm border-b border-border/40 shadow-sm">
                       <TableRow className="hover:bg-transparent">
-                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10 px-6">Student #</TableHead>
-                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Full Name</TableHead>
-                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Program</TableHead>
-                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Last School</TableHead>
-                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Municipality</TableHead>
-                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10">Scholarship</TableHead>
-                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-slate-500 h-10 text-right px-6">Status</TableHead>
+                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-muted-foreground h-10 px-6">Student #</TableHead>
+                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-muted-foreground h-10">Full Name</TableHead>
+                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-muted-foreground h-10">Program</TableHead>
+                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-muted-foreground h-10">Last School</TableHead>
+                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-muted-foreground h-10">Municipality</TableHead>
+                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-muted-foreground h-10">Scholarship</TableHead>
+                        <TableHead className="whitespace-nowrap text-[12px] font-semibold text-muted-foreground h-10 text-right px-6">Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {filteredStudents.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={7} className="h-32 text-center text-[13px] text-slate-500">
+                          <TableCell colSpan={7} className="h-32 text-center text-[13px] text-muted-foreground">
                             No students found.
                           </TableCell>
                         </TableRow>
                       ) : (
                         filteredStudents.map((student) => (
-                          <TableRow key={student.id} className="text-[13px] hover:bg-slate-50/80">
-                            <TableCell className="font-mono text-[12px] text-slate-500 px-6">{student.studentNumber || "—"}</TableCell>
-                            <TableCell className="font-medium text-slate-900">{student.fullName}</TableCell>
-                            <TableCell className="text-slate-600">{student.program || "—"}</TableCell>
-                            <TableCell className="max-w-[200px] truncate text-slate-800" title={student.previousSchool || ""}>
+                          <TableRow key={student.id} className="text-[13px] hover:bg-muted/40 transition-colors border-b border-border/30">
+                            <TableCell className="font-mono text-[12px] text-muted-foreground px-6">{student.studentNumber || "—"}</TableCell>
+                            <TableCell className="font-medium text-foreground">{student.fullName}</TableCell>
+                            <TableCell className="text-muted-foreground">{student.program || "—"}</TableCell>
+                            <TableCell className="max-w-[200px] truncate text-foreground/90" title={student.previousSchool || ""}>
                               {student.previousSchool || "—"}
                             </TableCell>
-                            <TableCell className="text-slate-600">{student.municipality || "—"}</TableCell>
+                            <TableCell className="text-muted-foreground">{student.municipality || "—"}</TableCell>
                             <TableCell>
                               {student.scholarship ? (
-                                <Badge variant="secondary" className="bg-blue-50 text-blue-700 shadow-none hover:bg-blue-100 font-medium whitespace-nowrap">
+                                <Badge variant="secondary" className="bg-sky-500/10 text-sky-400 border border-sky-500/20 font-medium whitespace-nowrap">
                                   {student.scholarship}
                                 </Badge>
                               ) : "—"}
                             </TableCell>
                             <TableCell className="text-right px-6">
-                              <Badge variant="secondary" className={`shadow-none font-medium ${
-                                student.importStatus === "Applied" ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100" :
-                                student.importStatus === "Matched" ? "bg-blue-50 text-blue-700 hover:bg-blue-100" :
-                                "bg-amber-50 text-amber-700 hover:bg-amber-100"
+                              <Badge variant="secondary" className={`font-medium ${
+                                student.importStatus === "Applied" ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" :
+                                student.importStatus === "Matched" ? "bg-sky-500/10 text-sky-400 border border-sky-500/20" :
+                                "bg-amber-500/10 text-amber-400 border border-amber-500/20"
                               }`}>
                                 {student.importStatus}
                               </Badge>

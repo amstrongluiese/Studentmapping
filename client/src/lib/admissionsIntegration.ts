@@ -25,6 +25,7 @@ export type AdmissionsFieldKey =
   | "contactNumber"
   | "schedule"
   | "iskolarNiKap"
+  | "barangay"
   | "requirements"
   | "lat"
   | "lng";
@@ -206,8 +207,8 @@ export const SYSTEM_FIELDS: AdmissionsSystemField[] = [
   },
   {
     key: "iskolarNiKap",
-    label: "Iskolar ni Kap",
-    aliases: ["iskolar ni kap", "iskolar", "iskolar nakap", "iskolar nikap", "kap scholar", "k to 12 scholar"],
+    label: "Scholar",
+    aliases: ["scholar", "iskolar", "scholarship", "scholars", "iskolar ni kap", "iskolar nakap", "iskolar nikap", "kap scholar", "k to 12 scholar", "barangay scholar"],
   },
   {
     key: "requirements",
@@ -381,6 +382,7 @@ export function buildGisSyncRecords(preview: AdmissionsPreviewRow[], mapping: Fi
       const iskolarNiKap = stringValue(readMappedValue(row.sourceRecord, mapping, "iskolarNiKap"));
       const requirements = stringValue(readMappedValue(row.sourceRecord, mapping, "requirements"));
       const province = stringValue(readMappedValue(row.sourceRecord, mapping, "province"));
+      const rawBarangay = stringValue(readMappedValue(row.sourceRecord, mapping, "barangay"));
       const isTransferee = /\b(transferee|transfer|college transferee)\b/i.test(studentType);
 
       const lastSchoolRegistryType = isTransferee || previousCollege
@@ -399,6 +401,7 @@ export function buildGisSyncRecords(preview: AdmissionsPreviewRow[], mapping: Fi
         studentType: studentType || null,
         municipality: row.municipality || "Laguna",
         province: province || row.municipality || "Laguna",
+        barangay: rawBarangay || row.barangay || null,
         yearLevel: stringValue(readMappedValue(row.sourceRecord, mapping, "yearLevel")) || null,
         contactNumber: contactNumber || null,
         schedule: schedule || null,

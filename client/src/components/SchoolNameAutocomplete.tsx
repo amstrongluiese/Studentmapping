@@ -51,7 +51,7 @@ export function SchoolNameAutocomplete({
     return existingSchools
       .filter((school) =>
         school.schoolName.toLowerCase().includes(q) ||
-        school.municipality.toLowerCase().includes(q),
+        school.municipality?.toLowerCase().includes(q),
       )
       .slice(0, 6)
       .map((school) => ({

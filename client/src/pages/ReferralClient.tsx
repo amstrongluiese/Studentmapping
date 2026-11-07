@@ -341,17 +341,17 @@ function StudentReferralMetric({
   value: number;
   tone?: "primary" | "amber" | "emerald" | "rose";
 }) {
-  const toneClass = {
-    primary: "border-primary/15 bg-primary/5 text-primary",
-    amber: "border-amber-200 bg-amber-50 text-amber-700",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    rose: "border-rose-200 bg-rose-50 text-rose-700",
+  const toneStyles = {
+    primary: "border-primary/20 bg-card/80 text-foreground",
+    amber: "border-amber-500/20 bg-card/80 text-foreground",
+    emerald: "border-emerald-500/20 bg-card/80 text-foreground",
+    rose: "border-rose-500/20 bg-card/80 text-foreground",
   }[tone];
 
   return (
-    <div className={`rounded-lg border p-4 shadow-sm ${toneClass}`}>
-      <p className="text-[10px] font-bold uppercase tracking-wide opacity-75">{label}</p>
-      <p className="mt-1 text-2xl font-black text-slate-950">{value.toLocaleString()}</p>
+    <div className={`rounded-xl border p-4 shadow-sm backdrop-blur-xl ${toneStyles}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mt-1 text-3xl font-black font-mono tracking-tight text-foreground">{value.toLocaleString()}</p>
     </div>
   );
 }
@@ -363,11 +363,11 @@ function StudentReferralStatus({ status }: { status: string }) {
       ? <XCircle className="h-3.5 w-3.5" />
       : <Clock3 className="h-3.5 w-3.5" />;
   const tone = status === "approved"
-    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
     : status === "rejected"
-      ? "border-rose-200 bg-rose-50 text-rose-700"
-      : "border-amber-200 bg-amber-50 text-amber-700";
+      ? "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400"
+      : "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
   const label = status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "Pending";
 
-  return <Badge variant="outline" className={`gap-1 ${tone}`}>{icon}{label}</Badge>;
+  return <Badge variant="outline" className={`gap-1 font-semibold text-xs ${tone}`}>{icon}{label}</Badge>;
 }

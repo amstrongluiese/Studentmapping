@@ -39,28 +39,35 @@ export function BulkMergeReviewModal({
     if (!open) return [];
     
     const pairs: MergePair[] = [];
-    const nameMap = new Map<string, SchoolRegistry[]>();
+    const groups = new Map<string, SchoolRegistry[]>();
     
-    // Group schools by normalized name
     schools.forEach(school => {
-      const key = normalizeSchoolName(school.normalizedSchoolName || school.schoolName);
-      nameMap.set(key, [...(nameMap.get(key) || []), school]);
+      if (hasCoordinates(school) && school.latitude && school.longitude) {
+        const coordKey = `COORD-${school.latitude.toFixed(4)},${school.longitude.toFixed(4)}`;
+        groups.set(coordKey, [...(groups.get(coordKey) || []), school]);
+      }
+      const nameKey = `NAME-${normalizeSchoolName(school.normalizedSchoolName || school.schoolName)}`;
+      groups.set(nameKey, [...(groups.get(nameKey) || []), school]);
     });
 
-    nameMap.forEach(group => {
-      if (group.length > 1) {
-        // Sort to find the best master (has coordinates)
-        const sorted = [...group].sort((a, b) => {
+    const processedPairs = new Set<string>();
+
+    groups.forEach(group => {
+      const uniqueGroup = Array.from(new Map(group.map(s => [s.id, s])).values());
+      if (uniqueGroup.length > 1) {
+        const sorted = [...uniqueGroup].sort((a, b) => {
           if (hasCoordinates(a) && !hasCoordinates(b)) return -1;
           if (!hasCoordinates(a) && hasCoordinates(b)) return 1;
-          return 0;
+          return b.schoolName.length - a.schoolName.length;
         });
 
         const target = sorted[0];
         const duplicates = sorted.slice(1);
         
         duplicates.forEach(duplicate => {
-          if (duplicateIds.has(duplicate.id)) {
+          const pairKey = `${duplicate.id}->${target.id}`;
+          if (duplicate.id !== target.id && !processedPairs.has(pairKey)) {
+            processedPairs.add(pairKey);
             pairs.push({ duplicate, target });
           }
         });

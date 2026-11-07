@@ -2,11 +2,12 @@ import passport from "passport";
 import { Strategy as LocalStrategy } from "passport-local";
 import { Express, Request, Response, NextFunction } from "express";
 import session from "express-session";
-import connectPg from "connect-pg-simple";
+import MySQLStoreFactory from "express-mysql-session";
 import { scrypt, randomBytes, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { users, insertUserSchema, type User as SelectUser } from "@shared/schema";
-import { getDb, getPool } from "./db";
+import { getDb } from "./db";
+import { getMysqlPool } from "./dbMysql";
 import { eq } from "drizzle-orm";
 
 declare global {
@@ -16,7 +17,6 @@ declare global {
 }
 
 const scryptAsync = promisify(scrypt);
-const PostgresqlStore = connectPg(session);
 
 export async function hashPassword(password: string) {
   const salt = randomBytes(16).toString("hex");
@@ -33,10 +33,8 @@ export async function comparePasswords(supplied: string, stored: string) {
 }
 
 export function setupAuth(app: Express) {
-  const store = new PostgresqlStore({
-    pool: getPool(),
-    createTableIfMissing: false,
-  });
+  const MySQLStore = MySQLStoreFactory(session as any);
+  const store = new MySQLStore({ createDatabaseTable: true }, getMysqlPool() as any);
 
   app.use(
     session({

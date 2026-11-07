@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, MapPin, GraduationCap, School, Users, Compass, BookOpen, Award, Building2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 // --- Theme Components ---
 
@@ -137,6 +138,121 @@ function AntigravityTheme({ deptColors }: { deptColors: string[] }) {
   );
 }
 
+function StudentMappingTheme() {
+  return (
+    <>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes float-node-1 {
+          0%, 100% { transform: translateY(0px) rotate(0deg); }
+          50% { transform: translateY(-16px) rotate(4deg); }
+        }
+        @keyframes float-node-2 {
+          0%, 100% { transform: translateY(0px) rotate(0deg); }
+          50% { transform: translateY(-22px) rotate(-5deg); }
+        }
+        @keyframes float-node-3 {
+          0%, 100% { transform: translateY(0px) rotate(0deg); }
+          50% { transform: translateY(-12px) rotate(3deg); }
+        }
+        @keyframes pulse-glow {
+          0%, 100% { opacity: 0.3; transform: scale(1); }
+          50% { opacity: 0.7; transform: scale(1.08); }
+        }
+        .animate-float-1 { animation: float-node-1 7s ease-in-out infinite; }
+        .animate-float-2 { animation: float-node-2 9s ease-in-out infinite 1s; }
+        .animate-float-3 { animation: float-node-3 8s ease-in-out infinite 2s; }
+        .animate-pulse-glow { animation: pulse-glow 5s ease-in-out infinite; }
+      `}} />
+
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-indigo-50/40 to-slate-100 overflow-hidden">
+        {/* Subtle architectural grid pattern */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:36px_36px]"></div>
+
+        {/* Ambient colored background glows */}
+        <div className="absolute top-1/4 left-1/6 w-[450px] h-[450px] bg-indigo-200/50 rounded-full blur-3xl animate-pulse-glow pointer-events-none"></div>
+        <div className="absolute bottom-1/4 right-1/6 w-[450px] h-[450px] bg-purple-200/50 rounded-full blur-3xl animate-pulse-glow pointer-events-none" style={{ animationDelay: '2.5s' }}></div>
+
+        {/* Constellation SVG lines connecting nodes */}
+        <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-40">
+          <line x1="14%" y1="24%" x2="26%" y2="40%" stroke="#6366f1" strokeWidth="1.5" strokeDasharray="5 5" />
+          <line x1="26%" y1="40%" x2="18%" y2="66%" stroke="#8b5cf6" strokeWidth="1.5" strokeDasharray="5 5" />
+          <line x1="18%" y1="66%" x2="32%" y2="82%" stroke="#ec4899" strokeWidth="1.5" strokeDasharray="5 5" />
+          <line x1="74%" y1="18%" x2="86%" y2="34%" stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="5 5" />
+          <line x1="86%" y1="34%" x2="78%" y2="60%" stroke="#10b981" strokeWidth="1.5" strokeDasharray="5 5" />
+          <line x1="78%" y1="60%" x2="88%" y2="80%" stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="5 5" />
+          <line x1="74%" y1="18%" x2="62%" y2="38%" stroke="#6366f1" strokeWidth="1.5" strokeDasharray="5 5" />
+        </svg>
+
+        {/* Left Side Floating Student Mapping Nodes */}
+        {/* Node 1: MapPin (Location) */}
+        <div className="absolute top-[22%] left-[12%] animate-float-1">
+          <div className="flex items-center justify-center w-16 h-16 rounded-full bg-indigo-600 text-white shadow-xl shadow-indigo-500/25 ring-4 ring-white/80 hover:scale-110 transition-transform cursor-pointer">
+            <MapPin className="w-8 h-8" />
+          </div>
+        </div>
+
+        {/* Node 2: GraduationCap (Scholar) */}
+        <div className="absolute top-[38%] left-[25%] animate-float-2">
+          <div className="flex items-center justify-center w-20 h-20 rounded-full bg-violet-600 text-white shadow-xl shadow-violet-500/25 ring-4 ring-white/80 hover:scale-110 transition-transform cursor-pointer">
+            <GraduationCap className="w-10 h-10" />
+          </div>
+        </div>
+
+        {/* Node 3: School (Campus) */}
+        <div className="absolute top-[62%] left-[16%] animate-float-3">
+          <div className="flex items-center justify-center w-14 h-14 rounded-full bg-emerald-500 text-white shadow-xl shadow-emerald-500/25 ring-4 ring-white/80 hover:scale-110 transition-transform cursor-pointer">
+            <School className="w-7 h-7" />
+          </div>
+        </div>
+
+        {/* Node 4: Users (Student Cohort) */}
+        <div className="absolute top-[78%] left-[30%] animate-float-1">
+          <div className="flex items-center justify-center w-16 h-16 rounded-full bg-amber-500 text-white shadow-xl shadow-amber-500/25 ring-4 ring-white/80 hover:scale-110 transition-transform cursor-pointer">
+            <Users className="w-8 h-8" />
+          </div>
+        </div>
+
+        {/* Right Side Floating Student Mapping Nodes */}
+        {/* Node 5: Compass (GIS Navigation) */}
+        <div className="absolute top-[18%] right-[24%] animate-float-2">
+          <div className="flex items-center justify-center w-16 h-16 rounded-full bg-blue-600 text-white shadow-xl shadow-blue-500/25 ring-4 ring-white/80 hover:scale-110 transition-transform cursor-pointer">
+            <Compass className="w-8 h-8" />
+          </div>
+        </div>
+
+        {/* Node 6: Award / Scholarship */}
+        <div className="absolute top-[32%] right-[12%] animate-float-3">
+          <div className="flex items-center justify-center w-20 h-20 rounded-full bg-rose-500 text-white shadow-xl shadow-rose-500/25 ring-4 ring-white/80 hover:scale-110 transition-transform cursor-pointer">
+            <Award className="w-10 h-10" />
+          </div>
+        </div>
+
+        {/* Node 7: BookOpen (Education) */}
+        <div className="absolute top-[58%] right-[20%] animate-float-1">
+          <div className="flex items-center justify-center w-16 h-16 rounded-full bg-cyan-600 text-white shadow-xl shadow-cyan-500/25 ring-4 ring-white/80 hover:scale-110 transition-transform cursor-pointer">
+            <BookOpen className="w-8 h-8" />
+          </div>
+        </div>
+
+        {/* Node 8: Building (University) */}
+        <div className="absolute top-[76%] right-[10%] animate-float-2">
+          <div className="flex items-center justify-center w-14 h-14 rounded-full bg-teal-500 text-white shadow-xl shadow-teal-500/25 ring-4 ring-white/80 hover:scale-110 transition-transform cursor-pointer">
+            <Building2 className="w-7 h-7" />
+          </div>
+        </div>
+
+        {/* Decorative Floating Dots */}
+        <div className="absolute top-[15%] left-[28%] w-3 h-3 rounded-full bg-indigo-400 animate-pulse"></div>
+        <div className="absolute top-[48%] left-[8%] w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+        <div className="absolute top-[72%] left-[26%] w-4 h-4 rounded-full bg-amber-400 animate-pulse"></div>
+        <div className="absolute top-[28%] right-[28%] w-3.5 h-3.5 rounded-full bg-blue-400 animate-pulse"></div>
+        <div className="absolute top-[50%] right-[10%] w-2.5 h-2.5 rounded-full bg-rose-400 animate-pulse"></div>
+        <div className="absolute top-[82%] right-[24%] w-3 h-3 rounded-full bg-violet-400 animate-pulse"></div>
+      </div>
+    </>
+  );
+}
+
 // --- Main Page ---
 
 export default function AuthPage() {
@@ -175,53 +291,82 @@ export default function AuthPage() {
     }
   };
 
+  const isLightMode = currentTheme === "mapping_network";
+
   return (
     <div 
-      className="relative min-h-screen flex items-center justify-center overflow-hidden bg-slate-950"
+      className={cn("relative min-h-screen flex items-center justify-center overflow-hidden", isLightMode ? "bg-slate-50 text-slate-900" : "bg-slate-950 text-white")}
       onMouseMove={handleMouseMove}
     >
-      {currentTheme === "antigravity" ? (
+      {currentTheme === "mapping_network" ? (
+        <StudentMappingTheme />
+      ) : currentTheme === "antigravity" ? (
         <AntigravityTheme deptColors={deptColors} />
       ) : (
         <IridescentTheme mousePos={mousePos} deptColors={deptColors} />
       )}
       
       {/* Glass Card Container */}
-      <Card className="relative z-10 w-[420px] border border-white/10 bg-black/40 shadow-[0_16px_40px_0_rgba(0,0,0,0.5)] backdrop-blur-2xl backdrop-saturate-200 rounded-3xl p-6 overflow-hidden transition-all duration-500">
+      <Card className={cn(
+        "relative z-10 w-[420px] rounded-3xl p-6 overflow-hidden transition-all duration-500",
+        isLightMode 
+          ? "border border-slate-200/80 bg-white/90 shadow-[0_25px_60px_-15px_rgba(99,102,241,0.15)] backdrop-blur-xl"
+          : "border border-white/15 bg-white/[0.03] shadow-[0_20px_50px_rgba(0,0,0,0.6)] backdrop-blur-[8px] backdrop-saturate-200"
+      )}>
         {/* Shine effect for frosted glass */}
-        <div className="absolute inset-0 bg-gradient-to-br from-white/10 via-transparent to-transparent opacity-30 pointer-events-none"></div>
+        <div className={cn("absolute inset-0 pointer-events-none opacity-30", isLightMode ? "bg-gradient-to-br from-indigo-500/10 via-transparent to-transparent" : "bg-gradient-to-br from-white/10 via-transparent to-transparent")}></div>
         <CardHeader className="relative z-20 pb-8">
-          <CardTitle className="text-3xl text-center text-white font-bold tracking-tight drop-shadow-lg">Student Mapping</CardTitle>
+          <CardTitle className={cn("text-3xl text-center font-bold tracking-tight drop-shadow-lg", isLightMode ? "text-slate-900" : "text-white")}>
+            Student Mapping
+          </CardTitle>
         </CardHeader>
         <CardContent className="relative z-20">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="username" className="text-slate-300 text-[10px] font-semibold uppercase tracking-wider ml-1">Username</Label>
+              <Label htmlFor="username" className={cn("text-[10px] font-semibold uppercase tracking-wider ml-1", isLightMode ? "text-slate-600" : "text-slate-300")}>
+                Username
+              </Label>
               <Input
                 id="username"
+                name="username"
+                aria-label="Username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
-                className="bg-black/40 border-white/10 text-white placeholder:text-white/30 focus-visible:ring-red-500/50 focus-visible:border-red-500/50 rounded-xl h-12 px-4 shadow-inner transition-all hover:bg-black/50"
+                className={cn(
+                  "rounded-xl h-12 px-4 shadow-inner transition-all",
+                  isLightMode 
+                    ? "bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:ring-indigo-500 hover:bg-slate-100/80" 
+                    : "bg-black/40 border-white/10 text-white placeholder:text-white/30 focus-visible:ring-red-500/50 focus-visible:border-red-500/50 hover:bg-black/50"
+                )}
                 placeholder="Enter your username"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-slate-300 text-[10px] font-semibold uppercase tracking-wider ml-1">Password</Label>
+              <Label htmlFor="password" className={cn("text-[10px] font-semibold uppercase tracking-wider ml-1", isLightMode ? "text-slate-600" : "text-slate-300")}>
+                Password
+              </Label>
               <div className="relative">
                 <Input
                   id="password"
+                  name="password"
+                  aria-label="Password"
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="bg-black/40 border-white/10 text-white placeholder:text-white/30 focus-visible:ring-red-500/50 focus-visible:border-red-500/50 rounded-xl h-12 px-4 pr-12 shadow-inner transition-all hover:bg-black/50"
+                  className={cn(
+                    "rounded-xl h-12 px-4 pr-12 shadow-inner transition-all",
+                    isLightMode 
+                      ? "bg-slate-50 border-slate-200 text-slate-900 placeholder:text-slate-400 focus-visible:ring-indigo-500 hover:bg-slate-100/80" 
+                      : "bg-black/40 border-white/10 text-white placeholder:text-white/30 focus-visible:ring-red-500/50 focus-visible:border-red-500/50 hover:bg-black/50"
+                  )}
                   placeholder="Enter your password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors focus:outline-none"
+                  className={cn("absolute right-4 top-1/2 -translate-y-1/2 transition-colors focus:outline-none", isLightMode ? "text-slate-400 hover:text-slate-700" : "text-slate-400 hover:text-white")}
                   aria-label={showPassword ? "Hide password" : "Show password"}
                 >
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
@@ -230,13 +375,21 @@ export default function AuthPage() {
             </div>
             
             {loginError && (
-              <div className="p-3 text-sm font-medium text-red-200 bg-red-500/20 border border-red-500/30 rounded-xl flex items-center gap-2 backdrop-blur-md">
+              <div className="p-3 text-sm font-medium text-red-700 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-alert-circle shrink-0"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
                 {loginError}
               </div>
             )}
 
-            <Button type="submit" className="w-full h-12 mt-4 bg-gradient-to-r from-red-500 to-red-700 hover:from-red-600 hover:to-red-800 text-white font-bold tracking-wide border-0 rounded-xl transition-all duration-300 shadow-[0_0_20px_rgba(220,38,38,0.3)] hover:shadow-[0_0_30px_rgba(220,38,38,0.5)] hover:-translate-y-0.5">
+            <Button 
+              type="submit" 
+              className={cn(
+                "w-full h-12 mt-4 font-bold tracking-wide border-0 rounded-xl transition-all duration-300 shadow-lg hover:-translate-y-0.5",
+                isLightMode 
+                  ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-500/25 hover:shadow-indigo-500/40" 
+                  : "bg-gradient-to-r from-red-500 to-red-700 hover:from-red-600 hover:to-red-800 text-white shadow-[0_0_20px_rgba(220,38,38,0.3)] hover:shadow-[0_0_30px_rgba(220,38,38,0.5)]"
+              )}
+            >
               Login
             </Button>
           </form>

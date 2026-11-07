@@ -49,15 +49,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createSchoolRegistry(school: InsertSchoolRegistry): Promise<SchoolRegistry> {
-    const [newSchool] = await getDb().insert(schoolRegistry).values(this.prepareSchool(school)).returning();
+    const [result] = await getDb().insert(schoolRegistry).values(this.prepareSchool(school));
+    const [newSchool] = await getDb().select().from(schoolRegistry).where(eq(schoolRegistry.id, result.insertId)).limit(1);
     return newSchool;
   }
 
   async updateSchoolRegistry(id: number, updates: Partial<InsertSchoolRegistry>): Promise<SchoolRegistry> {
-    const [updatedSchool] = await getDb().update(schoolRegistry)
+    await getDb().update(schoolRegistry)
       .set(this.prepareSchool(updates))
-      .where(eq(schoolRegistry.id, id))
-      .returning();
+      .where(eq(schoolRegistry.id, id));
+    const [updatedSchool] = await getDb().select().from(schoolRegistry).where(eq(schoolRegistry.id, id)).limit(1);
     return updatedSchool;
   }
 
@@ -210,7 +211,8 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createStudent(student: InsertStudent): Promise<Student> {
-    const [newStudent] = await getDb().insert(students).values(student).returning();
+    const [result] = await getDb().insert(students).values(student);
+    const [newStudent] = await getDb().select().from(students).where(eq(students.id, result.insertId)).limit(1);
     return newStudent;
   }
 
@@ -223,15 +225,16 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createReferral(referral: InsertReferral): Promise<Referral> {
-    const [newReferral] = await getDb().insert(referrals).values(referral).returning();
+    const [result] = await getDb().insert(referrals).values(referral);
+    const [newReferral] = await getDb().select().from(referrals).where(eq(referrals.id, result.insertId)).limit(1);
     return newReferral;
   }
 
   async updateReferral(id: number, updates: Partial<InsertReferral>): Promise<Referral> {
-    const [updatedReferral] = await getDb().update(referrals)
+    await getDb().update(referrals)
       .set(updates)
-      .where(eq(referrals.id, id))
-      .returning();
+      .where(eq(referrals.id, id));
+    const [updatedReferral] = await getDb().select().from(referrals).where(eq(referrals.id, id)).limit(1);
     return updatedReferral;
   }
 

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { MapPin } from "lucide-react";
 
 export function AdminThemeSettings() {
   const { toast } = useToast();
@@ -53,7 +54,7 @@ export function AdminThemeSettings() {
   }
 
   return (
-    <Card className="w-full max-w-2xl border-none shadow-md">
+    <Card className="w-full max-w-2xl mx-auto border-none shadow-md">
       <CardHeader className="bg-slate-50 rounded-t-lg border-b">
         <CardTitle className="text-xl text-slate-800">Login Page Theme</CardTitle>
         <CardDescription>
@@ -83,6 +84,21 @@ export function AdminThemeSettings() {
               <Label htmlFor="theme-antigravity" className="font-semibold text-base cursor-pointer">Antigravity Particles</Label>
               <p className="text-sm text-slate-500 mt-1">
                 A dynamic matrix of floating, colorful dots that bounce and drift like zero-gravity particles.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start space-x-3 border p-4 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setTheme("mapping_network")}>
+            <div className="mt-1 flex shrink-0 items-center justify-center">
+              <RadioGroupItem value="mapping_network" id="theme-mapping" checked={theme === "mapping_network"} className="shrink-0" />
+            </div>
+            <div>
+              <Label htmlFor="theme-mapping" className="font-semibold text-base cursor-pointer flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-indigo-600" />
+                Student Mapping Network
+              </Label>
+              <p className="text-sm text-slate-500 mt-1">
+                A clean, modern light theme featuring floating interactive GIS pins, scholar badges, and connected student mapping nodes.
               </p>
             </div>
           </div>

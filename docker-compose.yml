@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # PostGIS Enabled Enterprise Database
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    container_name: studentmapping_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-0919}
+      POSTGRES_DB: localdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d localdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # High-Speed Redis Caching Tier
+  redis:
+    image: redis:7-alpine
+    container_name: studentmapping_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Express Backend + GIS Application Service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: studentmapping_app
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-0919}@postgres:5432/localdb
+      REDIS_URL: redis://redis:6379
+      ADMIN_SECRET: ${ADMIN_SECRET:-master-enterprise-token}
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

@@ -176,7 +176,7 @@ export const DrawingToolbar = memo(function DrawingToolbar({
               align="start" 
               sideOffset={10} 
               collisionPadding={16} 
-              className="z-[10000] w-56 border-white/40 bg-white/60 p-3 shadow-xl backdrop-blur-xl"
+              className="z-[10000] w-56 border-border/60 bg-card/95 text-foreground p-3 shadow-2xl backdrop-blur-2xl"
               container={typeof document !== 'undefined' ? document.getElementById('gis-presentation-stage') : null}
             >
               <div className="grid grid-cols-4 gap-2">
@@ -223,7 +223,7 @@ export const DrawingToolbar = memo(function DrawingToolbar({
               align="start" 
               sideOffset={10} 
               collisionPadding={16} 
-              className="z-[10000] w-56 border-white/40 bg-white/60 p-4 shadow-xl backdrop-blur-xl"
+              className="z-[10000] w-56 border-border/60 bg-card/95 text-foreground p-4 shadow-2xl backdrop-blur-2xl"
               container={typeof document !== 'undefined' ? document.getElementById('gis-presentation-stage') : null}
             >
               <Slider value={[width]} onValueChange={([value]) => onWidthChange(value)} min={1} max={14} step={0.5} />

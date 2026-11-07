@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Compass,
   Copy,
   Database,
   Edit,
@@ -13,6 +14,7 @@ import {
   Layers,
   Map as MapIcon,
   MapPin,
+  LogOut,
   MonitorPlay,
   Palette,
   Plus,
@@ -42,16 +44,20 @@ import {
 } from "@shared/programIntelligence";
 import { AdminPortalWorkspace, type AdminPortalSection } from "@/components/AdminPortalWorkspace";
 import { AdminSchoolRegistry } from "@/components/AdminSchoolRegistry";
+import { ThesisIntelligenceWorkspace } from "@/components/ThesisIntelligenceWorkspace";
 import { ApiSettingsCenter } from "@/components/ApiSettingsCenter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme, type ThemePreference } from "@/components/theme-provider";
+import { useAuth } from "@/hooks/use-auth";
 import MapWrapper, {
+  type SchoolCluster,
+} from "@/components/MapWrapper";
+import {
   DEFAULT_MAP_DISPLAY_SETTINGS,
   type AnalyticsVisibility,
   type DrawDisplaySettings,
   type MapDisplaySettings,
-  type SchoolCluster,
-} from "@/components/MapWrapper";
+} from "@/lib/mapSettings";
 import { SchoolFormDialog } from "@/components/SchoolFormDialog";
 import { DuplicateSchoolReviewModal } from "@/components/DuplicateSchoolReviewModal";
 import { BulkMergeReviewModal } from "@/components/BulkMergeReviewModal";
@@ -59,6 +65,7 @@ import { useDeleteSchool, useSchools, useUpdateSchool } from "@/hooks/use-school
 import { useGisOverview, useImportLogs, useProcessedStudents } from "@/hooks/use-gis-admin";
 import { useCreateReferral, useDeleteReferral, useReferrals, useUpdateReferral } from "@/hooks/use-referrals";
 import { useToast } from "@/hooks/use-toast";
+import { resolveScholarBarangay, BORDER_CATCHMENT_BARANGAYS } from "@shared/scholarBarangayResolver";
 
 import { cn } from "@/lib/utils";
 import { exitFullscreenSafe, getFullscreenElement, requestFullscreenOnElement } from "@/lib/presentationFullscreen";
@@ -130,11 +137,12 @@ const defaultSystemSettings = {
   compactMode: false,
 };
 
-type MainTab = "map" | "admin" | "referrals";
+type MainTab = "map" | "analytics" | "referrals" | "admin";
 
 export default function Dashboard() {
   const { toast } = useToast();
   const { theme, setTheme } = useTheme();
+  const { user, logout } = useAuth();
   const [showAcronymsOnly, setShowAcronymsOnly] = useState(false);
   const schoolsQuery = useSchools();
   const schools = schoolsQuery.data || [];
@@ -148,15 +156,16 @@ export default function Dashboard() {
   const { data: enrollmentTargets = [] } = useQuery<{ targetType: string; targetName: string; targetValue: number }[]>({ 
     queryKey: ["/api/enrollment-targets"] 
   });
+  const { data: dbBarangays = [] } = useQuery<any[]>({ queryKey: ["/api/barangay-registry"] });
   const { data: departments = [] } = useQuery<any[]>({ queryKey: ["/api/departments"] });
   const updateSchool = useUpdateSchool();
   const deleteSchool = useDeleteSchool();
   const createReferral = useCreateReferral();
   const updateReferral = useUpdateReferral();
   const deleteReferral = useDeleteReferral();
-  const [mainTab, setMainTab] = usePersistentState<MainTab>(`${STORAGE_PREFIX}:main-tab`, "map");
+  const [mainTab, setMainTab] = usePersistentState<MainTab>(`${STORAGE_PREFIX}:main-tab-v2`, "map");
   const [adminTab, setAdminTab] = usePersistentState<AdminPortalSection>(`${STORAGE_PREFIX}:admin-portal-v1`, "overview");
-  const [mapSettings, setMapSettings] = usePersistentState<MapDisplaySettings>(`${STORAGE_PREFIX}:map`, defaultMapSettings);
+  const [mapSettings, setMapSettings] = usePersistentState<MapDisplaySettings>(`${STORAGE_PREFIX}:map-v2`, defaultMapSettings);
   const [drawSettings, setDrawSettings] = usePersistentState<DrawDisplaySettings>(`${STORAGE_PREFIX}:draw`, defaultDrawSettings);
   const [analyticsVisibility, setAnalyticsVisibility] = usePersistentState<AnalyticsVisibility>(`${STORAGE_PREFIX}:analytics`, defaultAnalyticsVisibility);
   const [presentationSettings, setPresentationSettings] = usePersistentState(`${STORAGE_PREFIX}:presentation`, defaultPresentationSettings);
@@ -170,13 +179,6 @@ export default function Dashboard() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bulkMergeOpen, setBulkMergeOpen] = useState(false);
   const [mapViewMode, setMapViewMode] = usePersistentState<"schools" | "scholars">(`${STORAGE_PREFIX}:map-view-mode`, "schools");
-
-  useEffect(() => {
-    // Force light theme
-    if (theme !== "light") {
-      setTheme("light");
-    }
-  }, [theme, setTheme]);
   const [editingSchool, setEditingSchool] = useState<SchoolRegistry | null>(null);
   const [reviewingDuplicateSchool, setReviewingDuplicateSchool] = useState<SchoolRegistry | null>(null);
   const [reviewingOriginalSchool, setReviewingOriginalSchool] = useState<SchoolRegistry | null>(null);
@@ -259,41 +261,343 @@ export default function Dashboard() {
     }
   }, [mainTab]);
 
+const LAGUNA_MUNICIPALITY_COORDS: Record<string, { lat: number; lng: number }> = {
+  "biñan": { lat: 14.3386, lng: 121.0805 },
+  "binan": { lat: 14.3386, lng: 121.0805 },
+  "santa rosa": { lat: 14.3167, lng: 121.1167 },
+  "sta rosa": { lat: 14.3167, lng: 121.1167 },
+  "sta. rosa": { lat: 14.3167, lng: 121.1167 },
+  "cabuyao": { lat: 14.2783, lng: 121.1250 },
+  "calamba": { lat: 14.2117, lng: 121.1653 },
+  "san pedro": { lat: 14.3583, lng: 121.0583 },
+  "los baños": { lat: 14.1678, lng: 121.2431 },
+  "los banos": { lat: 14.1678, lng: 121.2431 },
+  "san pablo": { lat: 14.0683, lng: 121.3253 },
+  "santa cruz": { lat: 14.2783, lng: 121.4150 },
+  "sta cruz": { lat: 14.2783, lng: 121.4150 },
+  "sta. cruz": { lat: 14.2783, lng: 121.4150 },
+  "bay": { lat: 14.1833, lng: 121.2833 },
+  "victoria": { lat: 14.2333, lng: 121.3333 },
+  "pila": { lat: 14.2333, lng: 121.3667 },
+  "pagsanjan": { lat: 14.2736, lng: 121.4550 },
+  "cavinti": { lat: 14.2467, lng: 121.5083 },
+  "lumban": { lat: 14.3000, lng: 121.4583 },
+  "paete": { lat: 14.3644, lng: 121.5283 },
+  "pakil": { lat: 14.3814, lng: 121.4797 },
+  "pangil": { lat: 14.4033, lng: 121.4650 },
+  "siniloan": { lat: 14.4172, lng: 121.4489 },
+  "famy": { lat: 14.4389, lng: 121.4528 },
+  "mabitac": { lat: 14.4258, lng: 121.4250 },
+  "santa maria": { lat: 14.4700, lng: 121.4250 },
+  "sta maria": { lat: 14.4700, lng: 121.4250 },
+  "kalayaan": { lat: 14.3536, lng: 121.5647 },
+  "liliw": { lat: 14.1311, lng: 121.4361 },
+  "nagcarlan": { lat: 14.1389, lng: 121.4167 },
+  "majayjay": { lat: 14.1436, lng: 121.4561 },
+  "luisiana": { lat: 14.1833, lng: 121.5167 },
+  "magdalena": { lat: 14.2000, lng: 121.4278 },
+  "rizal": { lat: 14.1122, lng: 121.3961 },
+  "alaminos": { lat: 14.0667, lng: 121.2472 },
+};
+
+const BINAN_BARANGAYS: Record<string, { lat: number; lng: number }> = {
+  "biñan (poblacion)": { lat: 14.3386, lng: 121.0805 },
+  "poblacion": { lat: 14.3386, lng: 121.0805 },
+  "bungahan": { lat: 14.3119, lng: 121.0617 },
+  "canlalay": { lat: 14.3411, lng: 121.0886 },
+  "casile": { lat: 14.2881, lng: 121.0425 },
+  "de la paz": { lat: 14.3364, lng: 121.0922 },
+  "ganado": { lat: 14.3117, lng: 121.0786 },
+  "halang": { lat: 14.3131, lng: 121.0664 },
+  "kalamunding": { lat: 14.3411, lng: 121.0805 },
+  "langkiwa": { lat: 14.3039, lng: 121.0547 },
+  "loma": { lat: 14.3014, lng: 121.0583 },
+  "malaban": { lat: 14.3400, lng: 121.0978 },
+  "malamig": { lat: 14.2981, lng: 121.0600 },
+  "mamplasan": { lat: 14.3058, lng: 121.0714 },
+  "platero": { lat: 14.3217, lng: 121.0850 },
+  "san antonio": { lat: 14.3314, lng: 121.0805 },
+  "san francisco": { lat: 14.3144, lng: 121.0683 },
+  "san jose": { lat: 14.3331, lng: 121.0758 },
+  "san vicente": { lat: 14.3353, lng: 121.0825 },
+  "santo niño": { lat: 14.3319, lng: 121.0767 },
+  "sto niño": { lat: 14.3319, lng: 121.0767 },
+  "santo tomas": { lat: 14.3164, lng: 121.0792 },
+  "sto tomas": { lat: 14.3164, lng: 121.0792 },
+  "soro-soro": { lat: 14.3400, lng: 121.0700 },
+  "sorosoro": { lat: 14.3400, lng: 121.0700 },
+  "timbao": { lat: 14.3089, lng: 121.0608 },
+  "tubigan": { lat: 14.3200, lng: 121.0772 },
+  "zapote": { lat: 14.3283, lng: 121.0808 },
+};
+
+const SANTA_ROSA_BARANGAYS: Record<string, { lat: number; lng: number }> = {
+  "balibago": { lat: 14.2831, lng: 121.1008 },
+  "caingin": { lat: 14.3167, lng: 121.1167 },
+  "dita": { lat: 14.2697, lng: 121.1119 },
+  "don jose": { lat: 14.2547, lng: 121.0778 },
+  "kanluran": { lat: 14.3131, lng: 121.1147 },
+  "labas": { lat: 14.3094, lng: 121.1083 },
+  "macabling": { lat: 14.2964, lng: 121.1111 },
+  "malitlit": { lat: 14.2653, lng: 121.0894 },
+  "pooc": { lat: 14.3006, lng: 121.1217 },
+  "pulong santa cruz": { lat: 14.2883, lng: 121.0872 },
+  "pulong sta cruz": { lat: 14.2883, lng: 121.0872 },
+  "sinalhan": { lat: 14.3194, lng: 121.1214 },
+  "tagapo": { lat: 14.3108, lng: 121.1008 },
+};
+
+const LAGUNA_BARANGAY_COORDS: Record<string, Record<string, { lat: number; lng: number }>> = {
+  "biñan": BINAN_BARANGAYS,
+  "binan": BINAN_BARANGAYS,
+  "santa rosa": SANTA_ROSA_BARANGAYS,
+  "sta rosa": SANTA_ROSA_BARANGAYS,
+  "sta. rosa": SANTA_ROSA_BARANGAYS,
+};
+
+function getBarangayCoords(municipality: string, barangayName: string, dbBarangays: any[]) {
+  const munKey = municipality.trim().toLowerCase();
+  const brgyKey = barangayName.trim().toLowerCase();
+  
+  // 1. Check Database Registry First
+  const dbMatch = dbBarangays.find(b => 
+    b.municipality.toLowerCase() === munKey &&
+    b.barangayName.toLowerCase() === brgyKey
+  ) || dbBarangays.find(b => 
+    munKey.includes(b.municipality.toLowerCase()) && 
+    brgyKey.includes(b.barangayName.toLowerCase())
+  );
+
+  if (dbMatch && dbMatch.latitude && dbMatch.longitude) {
+    return { 
+      latitude: dbMatch.latitude, 
+      longitude: dbMatch.longitude,
+      cleanBarangay: dbMatch.barangayName,
+      cleanMunicipality: dbMatch.municipality
+    };
+  }
+
+  let mappedMunKey = munKey;
+  
+  // 2. Exact match for municipality
+  let base = LAGUNA_MUNICIPALITY_COORDS[munKey];
+  
+  // 2. Substring match for noisy data like "Langkiwa Binan Laguna"
+  if (!base) {
+    const match = Object.keys(LAGUNA_MUNICIPALITY_COORDS).find(k => munKey.includes(k));
+    if (match) {
+      base = LAGUNA_MUNICIPALITY_COORDS[match];
+      mappedMunKey = match;
+    }
+  }
+
+  // 3. Check for specific barangay exact coordinates
+  const brgyDict = LAGUNA_BARANGAY_COORDS[mappedMunKey];
+  if (brgyDict) {
+    const brgyKey = barangayName.trim().toLowerCase();
+    let exactBrgy = brgyDict[brgyKey];
+    
+    // Substring match for barangay if exact fails (e.g. "Brgy. Canlalay" -> "canlalay")
+    if (!exactBrgy) {
+      const bMatch = Object.keys(brgyDict).find(k => brgyKey.includes(k));
+      if (bMatch) exactBrgy = brgyDict[bMatch];
+    }
+    
+    if (exactBrgy) {
+      return {
+        latitude: exactBrgy.lat,
+        longitude: exactBrgy.lng,
+        cleanBarangay: Object.keys(brgyDict).find(k => brgyDict[k] === exactBrgy) || barangayName,
+        cleanMunicipality: mappedMunKey
+      };
+    }
+  }
+  
+  // 4. Fallback to an inland point in Laguna (near Bay) instead of the lake if no municipality found
+  if (!base) {
+    base = { lat: 14.18, lng: 121.28 };
+  }
+  
+  // 5. If no exact barangay coords, use deterministic jitter around municipality base
+  let hash = 0;
+  for (let i = 0; i < barangayName.length; i++) {
+    hash = (hash << 5) - hash + barangayName.charCodeAt(i);
+    hash |= 0;
+  }
+  
+  const offsetLat = (((Math.abs(hash) % 1000) / 1000) - 0.5) * 0.015;
+  const offsetLng = (((Math.abs(hash * 13) % 1000) / 1000) - 0.5) * 0.015;
+  
+  return {
+    latitude: Math.round((base.lat + offsetLat) * 100000) / 100000,
+    longitude: Math.round((base.lng + offsetLng) * 100000) / 100000,
+    cleanBarangay: barangayName,
+    cleanMunicipality: municipality
+  };
+}
+
   const programOptions = useMemo(() => getProgramOptions(processedStudents), [processedStudents, departments]);
   const programSchools = useMemo(() => {
     if (mapViewMode === "scholars") {
       const scholars = processedStudents.filter(s => {
         if (!s.iskolarNiKap) return false;
         const v = s.iskolarNiKap.toLowerCase().trim();
-        return v === 'yes' || v === 'true' || v === '1' || v === 'iskolar';
+        return v !== "" && v !== "no" && v !== "false";
       });
 
-      const scholarCounts = new Map<number, number>();
-      const barangays = schools.filter(s => s.schoolType === "Barangay");
+      const brgyMap = new Map<string, any>();
+      let virtualIdCounter = 900000;
 
-      for (const student of scholars) {
-        if (!student.barangay) continue;
-        const b = barangays.find(b => b.schoolName === student.barangay && b.municipality === student.municipality);
-        if (b) {
-          scholarCounts.set(b.id, (scholarCounts.get(b.id) || 0) + 1);
+      // Combine official Laguna DB barangays + border catchment (Carmona)
+      const allBarangays = [...dbBarangays];
+      for (const b of BORDER_CATCHMENT_BARANGAYS) {
+        if (!allBarangays.some(existing => existing.barangayName?.toLowerCase() === b.barangayName.toLowerCase())) {
+          allBarangays.push(b);
         }
       }
 
-      return barangays.map(b => ({
-        ...b,
-        studentCount: scholarCounts.get(b.id) || 0,
-        filteredStudentCount: scholarCounts.get(b.id) || 0,
+      // Initialize with all barangays so they are listed and available for pinning
+      for (const b of allBarangays) {
+        if (!b.municipality || !b.barangayName) continue;
+        const key = `${b.municipality.toLowerCase()}__${b.barangayName.toLowerCase()}`;
+        virtualIdCounter++;
+        brgyMap.set(key, {
+          id: virtualIdCounter,
+          schoolId: `brgy-${virtualIdCounter}`,
+          schoolName: `${b.barangayName}`,
+          normalizedSchoolName: `${b.barangayName} ${b.municipality}`.toLowerCase(),
+          schoolType: "Barangay",
+          sector: "Public",
+          municipality: b.municipality,
+          province: b.province || "Laguna",
+          barangay: b.barangayName,
+          address: `${b.barangayName}, ${b.municipality}, ${b.province || "Laguna"}`,
+          latitude: Number(b.latitude) || null,
+          longitude: Number(b.longitude) || null,
+          source: "Scholar Mapping",
+          isActive: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          deletedAt: null,
+          deletedBy: null,
+          studentCount: 0,
+          totalStudentCount: 0,
+          filteredStudentCount: 0,
+          programDistribution: [],
+          dominantProgram: undefined,
+        });
+      }
+
+      // Add special Unmapped bucket for scholars whose address cannot be matched
+      const unmappedKey = "unmapped__special";
+      virtualIdCounter++;
+      brgyMap.set(unmappedKey, {
+        id: virtualIdCounter,
+        schoolId: `brgy-${virtualIdCounter}`,
+        schoolName: "Unmapped / Special Cases",
+        normalizedSchoolName: "unmapped special cases",
+        schoolType: "Special",
+        sector: "Public",
+        municipality: "Laguna",
+        province: "Laguna",
+        barangay: "Unmapped",
+        address: "Uncategorized Scholars",
+        latitude: null,
+        longitude: null,
+        source: "Scholar Mapping",
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+        deletedBy: null,
+        studentCount: 0,
+        totalStudentCount: 0,
+        filteredStudentCount: 0,
         programDistribution: [],
-        dominantProgram: null,
-      })).filter(b => b.studentCount > 0);
+        dominantProgram: undefined,
+      });
+
+      for (const student of scholars) {
+        const resolved = resolveScholarBarangay(student, allBarangays);
+        const key = resolved ? resolved.key : unmappedKey;
+
+        const entry = brgyMap.get(key);
+        if (entry) {
+          entry.studentCount += 1;
+          entry.totalStudentCount += 1;
+          entry.filteredStudentCount += 1;
+          
+          // Program matching logic
+          let matchedProg = "Others";
+          if (student.course) {
+            const checkProg = student.course.toLowerCase();
+            if (checkProg.includes("bscs") || checkProg.includes("computer science") || checkProg.includes("it") || checkProg.includes("information technology")) {
+              matchedProg = "BSCS / BSIT";
+            } else if (checkProg.includes("educ") || checkProg.includes("teacher") || checkProg.includes("sped")) {
+              matchedProg = "Education";
+            } else if (checkProg.includes("criminology") || checkProg.includes("crim")) {
+              matchedProg = "Criminology";
+            } else if (checkProg.includes("psych")) {
+              matchedProg = "Psychology";
+            } else if (checkProg.includes("ba ") || checkProg.includes("business") || checkProg.includes("account") || checkProg.includes("marketing") || checkProg.includes("hrm")) {
+              matchedProg = "Business / Acc / HRM";
+            } else if (checkProg.includes("nurse") || checkProg.includes("nursing") || checkProg.includes("health") || checkProg.includes("med")) {
+              matchedProg = "Health / Nursing";
+            } else if (checkProg.includes("eng") || checkProg.includes("civil") || checkProg.includes("mech") || checkProg.includes("comp eng")) {
+              matchedProg = "Engineering";
+            } else if (checkProg.includes("tour") || checkProg.includes("travel")) {
+              matchedProg = "Tourism";
+            } else if (checkProg.includes("arch")) {
+              matchedProg = "Architecture";
+            }
+          }
+
+          const progDist = entry.programDistribution.find((p: any) => p.name === matchedProg);
+          if (progDist) progDist.count += 1;
+          else entry.programDistribution.push({ name: matchedProg, count: 1 });
+          
+          entry.dominantProgram = entry.programDistribution.sort((a: any, b: any) => b.count - a.count)[0]?.name || "Others";
+        }
+      }
+
+      // Return ALL Barangays, sorted by scholar count descending!
+      return Array.from(brgyMap.values())
+        .sort((a, b) => b.studentCount - a.studentCount);
     }
     return buildProgramSchools(schools, processedStudents, programFilters);
-  }, [schools, processedStudents, programFilters, mapViewMode]);
+  }, [schools, processedStudents, programFilters, mapViewMode, dbBarangays]);
 
   const filteredProcessedStudents = useMemo(() => {
-    if (!selectedMapSchoolId) return processedStudents;
-    return processedStudents.filter((student) => student.schoolRegistryId === selectedMapSchoolId);
-  }, [processedStudents, selectedMapSchoolId]);
+    let baseStudents = processedStudents;
+    if (mapViewMode === "scholars") {
+      baseStudents = processedStudents.filter(s => {
+        if (!s.iskolarNiKap) return false;
+        const v = s.iskolarNiKap.toLowerCase().trim();
+        return v !== "" && v !== "no" && v !== "false" && v !== "0" && v !== "null" && v !== "undefined" && v !== "none" && v !== "n/a";
+      });
+    }
+
+    if (!selectedMapSchoolId) return baseStudents;
+
+    if (mapViewMode === "scholars") {
+      const brgy = programSchools.find(b => b.id === selectedMapSchoolId);
+      if (brgy) {
+        return baseStudents.filter(s => {
+          const resolved = resolveScholarBarangay(s, dbBarangays);
+          if (resolved) {
+            return (
+              resolved.barangayName.toLowerCase() === brgy.barangay.toLowerCase() &&
+              resolved.municipality.toLowerCase() === brgy.municipality.toLowerCase()
+            );
+          }
+          // Fallback if unmapped bucket is selected
+          return brgy.barangay === "Unmapped";
+        });
+      }
+    }
+
+    return baseStudents.filter((student) => student.schoolRegistryId === selectedMapSchoolId);
+  }, [processedStudents, selectedMapSchoolId, mapViewMode, programSchools, dbBarangays]);
 
   const totalStudents = useMemo(() => {
     return filteredProcessedStudents.filter((student) => {
@@ -322,7 +626,7 @@ export default function Dashboard() {
 
 
   const mappedSchools = useMemo(() => {
-    let schools = programSchools.filter(hasCoordinates);
+    let schools = programSchools.filter(s => s.latitude !== null && s.longitude !== null);
     if (selectedMapSchoolId) {
       schools = schools.filter(s => s.id === selectedMapSchoolId);
     }
@@ -368,8 +672,13 @@ export default function Dashboard() {
       : programSchools;
     return new Set(schoolsToCount.map((school) => (school.municipality || "").trim()).filter(Boolean)).size;
   }, [programSchools, selectedMapSchoolId]);
-  const sortedProgramSchools = useMemo(() => sortProgramSchools(programSchools, programSort), [programSchools, programSort]);
-  const duplicateIds = useMemo(() => findDuplicateSchoolIds(schools), [schools]);
+  const sortedProgramSchools = useMemo(() => {
+    if (mapViewMode === "scholars") {
+      return [...programSchools].sort((a, b) => b.studentCount - a.studentCount);
+    }
+    return sortProgramSchools(programSchools, programSort);
+  }, [programSchools, programSort, mapViewMode]);
+  const { duplicateIds, duplicateMasterMap } = useMemo(() => findDuplicateSchoolInfo(schools), [schools]);
   const filteredSchools = useMemo(() => {
     let result = schools;
     if (showAcronymsOnly) {
@@ -436,84 +745,83 @@ export default function Dashboard() {
 
   const geolocateSchool = async (school: SchoolRegistry) => {
     try {
-      if (!window.google || !window.google.maps || !window.google.maps.places) {
-        throw new Error("Google Maps API is not loaded yet.");
-      }
-      
-      const geocoder = new window.google.maps.Geocoder();
-      
-      const primaryQuery = `${school.schoolName}, Philippines`;
-      let fallbackQuery = primaryQuery;
-      
-      if (school.municipality) {
-        fallbackQuery = `${school.schoolName}, ${school.municipality}, Philippines`;
-      } else if (studentOriginsMap.has(school.id)) {
-        fallbackQuery = `${school.schoolName}, ${studentOriginsMap.get(school.id)}, Philippines`;
-      }
+      let lat: number | null = null;
+      let lng: number | null = null;
+      let detectedMunicipality = school.municipality || "";
+      let detectedProvince = school.province || "Laguna";
 
-      let response;
-      let res;
-      let usedQuery = primaryQuery;
+      // 1. Try Client-side Google Geocoder if loaded in window
+      if (window.google?.maps?.Geocoder) {
+        try {
+          const geocoder = new window.google.maps.Geocoder();
+          const primaryQuery = `${school.schoolName}, Philippines`;
+          let fallbackQuery = primaryQuery;
 
-      const isGeneric = (result: google.maps.GeocoderResult) => {
-        return result.types.includes("administrative_area_level_1") || 
-               result.types.includes("administrative_area_level_2") || 
-               result.types.includes("country") ||
-               result.types.includes("locality");
-      };
+          if (school.municipality) {
+            fallbackQuery = `${school.schoolName}, ${school.municipality}, Philippines`;
+          } else if (studentOriginsMap.has(school.id)) {
+            fallbackQuery = `${school.schoolName}, ${studentOriginsMap.get(school.id)}, Philippines`;
+          }
 
-      let primaryRes: any = null;
+          let res: any = null;
+          const isGeneric = (result: google.maps.GeocoderResult) => {
+            return result.types.includes("administrative_area_level_1") || 
+                   result.types.includes("administrative_area_level_2") || 
+                   result.types.includes("country") ||
+                   result.types.includes("locality");
+          };
 
-      try {
-        // Step 1: Prioritize School Name only
-        response = await geocoder.geocode({ address: primaryQuery, region: "ph" });
-        if (response.results && response.results.length > 0) {
-           res = response.results[0];
-           primaryRes = res;
-           // If it's a generic area (e.g. searching an acronym gives a generic city), we should try the fallback
-           if (isGeneric(res) && fallbackQuery !== primaryQuery) {
-              res = null; // force fallback
-           }
+          const primaryResponse = await geocoder.geocode({ address: primaryQuery, region: "ph" }).catch(() => null);
+          if (primaryResponse?.results && primaryResponse.results.length > 0) {
+            const first = primaryResponse.results[0];
+            if (!isGeneric(first) || fallbackQuery === primaryQuery) {
+              res = first;
+            }
+          }
+
+          if (!res && fallbackQuery !== primaryQuery) {
+            const fallbackResponse = await geocoder.geocode({ address: fallbackQuery, region: "ph" }).catch(() => null);
+            if (fallbackResponse?.results && fallbackResponse.results.length > 0) {
+              res = fallbackResponse.results[0];
+            }
+          }
+
+          if (res) {
+            lat = res.geometry.location.lat();
+            lng = res.geometry.location.lng();
+            for (const comp of res.address_components) {
+              if (comp.types.includes("locality")) detectedMunicipality = comp.long_name;
+              if (comp.types.includes("administrative_area_level_2")) detectedProvince = comp.long_name;
+              if (!detectedProvince && comp.types.includes("administrative_area_level_1")) detectedProvince = comp.long_name;
+            }
+          }
+        } catch {
+          // Continue to server fallback
         }
-      } catch (err) {
-        // failed primary search, proceed to fallback
       }
 
-      // Step 2: Fallback to localized search (municipality or student origin) if primary failed or was generic
-      if (!res && fallbackQuery !== primaryQuery) {
-         try {
-           const fallbackResponse = await geocoder.geocode({ address: fallbackQuery, region: "ph" });
-           if (fallbackResponse.results && fallbackResponse.results.length > 0) {
-              const fallbackRes = fallbackResponse.results[0];
-              if (!isGeneric(fallbackRes) || !primaryRes) {
-                 res = fallbackRes;
-                 usedQuery = fallbackQuery;
-              } else {
-                 res = primaryRes;
-              }
-           }
-         } catch (err) {
-           res = primaryRes;
-         }
-      }
-      
-      if (!res && primaryRes) {
-         res = primaryRes;
+      // 2. Server-side Geocoding Fallback via /api/geocode/school
+      if (!lat || !lng) {
+        const resp = await fetch("/api/geocode/school", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: school.schoolName,
+            municipality: school.municipality || studentOriginsMap.get(school.id) || "Laguna",
+          }),
+        });
+
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.success && typeof data.latitude === "number" && typeof data.longitude === "number") {
+            lat = data.latitude;
+            lng = data.longitude;
+          }
+        }
       }
 
-      if (!res) {
-        throw new Error("No results found on Google Maps.");
-      }
-      const lat = res.geometry.location.lat();
-      const lng = res.geometry.location.lng();
-
-      // Extract municipality and province from address components
-      let detectedMunicipality = "";
-      let detectedProvince = "";
-      for (const comp of res.address_components) {
-        if (comp.types.includes("locality")) detectedMunicipality = comp.long_name;
-        if (comp.types.includes("administrative_area_level_2")) detectedProvince = comp.long_name;
-        if (!detectedProvince && comp.types.includes("administrative_area_level_1")) detectedProvince = comp.long_name;
+      if (!lat || !lng) {
+        throw new Error("Unable to locate coordinates for this school on Google Maps.");
       }
 
       await updateSchool.mutateAsync({
@@ -521,7 +829,7 @@ export default function Dashboard() {
         latitude: lat,
         longitude: lng,
         isActive: true,
-        source: "Google Geocoding Manual Assist",
+        source: "Google Geocoding Assisted",
         ...(detectedMunicipality ? { municipality: detectedMunicipality } : {}),
         ...(detectedProvince ? { province: detectedProvince } : {}),
       });
@@ -537,27 +845,19 @@ export default function Dashboard() {
   };
 
   const removeDuplicate = async (school: SchoolRegistry) => {
-    if (!duplicateIds.has(school.id)) return;
-    
-    const key = normalizeSchoolName(school.normalizedSchoolName || school.schoolName);
-    const matches = schools.filter(s => normalizeSchoolName(s.normalizedSchoolName || s.schoolName) === key);
-    
-    // Find other matches
-    const otherMatches = matches.filter(s => s.id !== school.id);
-    if (otherMatches.length === 0) return; // Failsafe
-    
-    let original = otherMatches[0];
-    let duplicate = school;
-
-    // Smart swap: if the one clicked is clearly better (has coordinates while the other doesn't),
-    // designate it as the original and the other as the duplicate.
-    if (hasCoordinates(school) && !hasCoordinates(original)) {
-      original = school;
-      duplicate = otherMatches[0];
+    const master = duplicateMasterMap.get(school.id);
+    if (master) {
+      setReviewingOriginalSchool(master);
+      setReviewingDuplicateSchool(school);
+    } else {
+      const key = normalizeSchoolName(school.normalizedSchoolName || school.schoolName);
+      const matches = schools.filter(s => normalizeSchoolName(s.normalizedSchoolName || s.schoolName) === key);
+      const otherMatches = matches.filter(s => s.id !== school.id);
+      if (otherMatches.length > 0) {
+        setReviewingOriginalSchool(otherMatches[0]);
+        setReviewingDuplicateSchool(school);
+      }
     }
-    
-    setReviewingOriginalSchool(original);
-    setReviewingDuplicateSchool(duplicate);
   };
 
   const updateMapSetting = <K extends keyof MapDisplaySettings>(key: K, value: MapDisplaySettings[K]) => {
@@ -587,47 +887,91 @@ export default function Dashboard() {
         <div className="pointer-events-none">
           <div
             className={cn(
-              "pointer-events-auto flex h-[60px] w-full shrink-0 items-center justify-between gap-3 border-b border-white/40",
-              "bg-white/40 px-3 shadow-sm backdrop-blur-md",
+              "pointer-events-auto flex h-[60px] w-full shrink-0 border-b border-border/40",
+              "bg-background/80 shadow-sm backdrop-blur-xl",
             )}
           >
-            <div className="flex min-w-0 flex-1 items-center gap-2.5">
-              <div
-                className="grid h-8 w-8 shrink-0 place-items-center text-slate-800"
-                aria-hidden
-              >
-                <MapPin className="h-4 w-4" strokeWidth={1.5} />
+            <div className={cn(
+              "mx-auto flex h-full w-full items-center justify-between gap-3 px-4 sm:px-6",
+              mainTab !== "map" ? "max-w-7xl" : "max-w-full"
+            )}>
+              {/* Left: Branding */}
+              <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                <div
+                  className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary border border-primary/20 shadow-sm"
+                  aria-hidden
+                >
+                  <MapPin className="h-4 w-4" strokeWidth={2} />
+                </div>
+                <div className="hidden sm:flex flex-col">
+                  <span className="text-[12px] font-bold text-foreground leading-tight">Student GIS</span>
+                  <span className="text-[10px] text-muted-foreground leading-tight">Mapping &amp; Analytics</span>
+                </div>
               </div>
-            </div>
-            <Tabs value={mainTab} onValueChange={(value) => setMainTab(value as MainTab)} className="flex shrink-0 items-center">
-              <TabsList
-                aria-label="Primary navigation"
-                className="inline-flex h-9 items-center gap-1 rounded-full border border-white/50 bg-white/50 p-1 text-muted-foreground shadow-sm backdrop-blur-md"
-              >
-                <TabsTrigger
-                  value="map"
-                  className="group h-7 gap-1.5 rounded-full border border-transparent px-2.5 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-surface hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_10px_28px_-18px_rgba(123,17,19,0.95)]"
+
+              {/* Center: Main Section Navigation */}
+              <Tabs value={mainTab} onValueChange={(value) => setMainTab(value as MainTab)} className="flex shrink-0 items-center">
+                <TabsList
+                  aria-label="Primary navigation"
+                  className="inline-flex h-9 items-center gap-1 rounded-full border border-border/60 bg-muted/60 p-1 text-muted-foreground shadow-sm backdrop-blur-md"
                 >
-                  <MapIcon className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
-                  Map
-                </TabsTrigger>
-                <TabsTrigger
-                  value="admin"
-                  className="group h-7 gap-1.5 rounded-full border border-transparent px-2.5 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-surface hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_10px_28px_-18px_rgba(123,17,19,0.95)]"
-                >
-                  <Database className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
-                  Admin
-                </TabsTrigger>
-                <TabsTrigger
-                  value="referrals"
-                  className="group h-7 gap-1.5 rounded-full border border-transparent px-2.5 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-surface hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-[0_10px_28px_-18px_rgba(123,17,19,0.95)]"
-                >
-                  <UserPlus className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
-                  Referrals
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <div className="relative z-[1700] flex min-w-0 flex-1 justify-end">
+                  <TabsTrigger
+                    value="map"
+                    className="group h-7 gap-1.5 rounded-full border border-transparent px-3 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-background hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                  >
+                    <MapIcon className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
+                    Map
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="analytics"
+                    className="group h-7 gap-1.5 rounded-full border border-transparent px-3 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-background hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                  >
+                    <Compass className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
+                    Analytics
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="referrals"
+                    className="group h-7 gap-1.5 rounded-full border border-transparent px-3 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-background hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                  >
+                    <UserPlus className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
+                    Referrals
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="admin"
+                    className="group h-7 gap-1.5 rounded-full border border-transparent px-3 py-0 text-[11px] font-semibold leading-none text-muted-foreground transition-all hover:bg-background hover:text-foreground data-[state=active]:border-primary/25 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                  >
+                    <Database className="h-3 w-3 shrink-0 transition-colors" strokeWidth={1.5} />
+                    School Registry &amp; Admin
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {/* Right: Account Controls */}
+              <div className="relative z-[1700] flex min-w-0 flex-1 items-center justify-end gap-2.5">
+                <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Live</span>
+                </div>
+                <div className="flex items-center gap-1 rounded-full border border-border/60 bg-muted/60 p-1 shadow-sm backdrop-blur-md">
+                  {user && (
+                    <div className="flex items-center gap-2 pl-1.5 pr-1">
+                      <div className="hidden md:flex flex-col text-right">
+                        <span className="text-[11.5px] font-bold text-foreground leading-none">{user.username}</span>
+                        <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider leading-none mt-0.5">{user.role || "Admin"}</span>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 rounded-full text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10"
+                        onClick={() => logout()}
+                        title="Sign Out"
+                      >
+                        <LogOut className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -655,7 +999,7 @@ export default function Dashboard() {
               <Button
                 variant="secondary"
                 size="icon"
-                className="absolute left-3 top-3 z-[1140] h-9 w-9 rounded-full border border-white/30 bg-white/40 text-slate-800 shadow-md backdrop-blur-md hover:bg-white/50 lg:hidden"
+                className="absolute left-3 top-3 z-[1140] h-9 w-9 rounded-full border border-border/60 bg-card/85 text-foreground shadow-md backdrop-blur-xl hover:bg-muted lg:hidden"
                 onClick={() => setMobileSidebarOpen(true)}
                 title="Open menu"
                 aria-label="Open menu"
@@ -666,10 +1010,10 @@ export default function Dashboard() {
 
             {/* PRESENTATION SETTINGS OVERLAY */}
             {isPresenting && (
-              <div className="absolute left-1/2 top-4 z-[9999] flex -translate-x-1/2 items-center gap-4 rounded-full border border-white/40 bg-white/70 px-6 py-2 shadow-lg backdrop-blur-xl transition-all duration-300">
-                <div className="flex items-center gap-2 border-r border-slate-300/50 pr-4">
-                  <MonitorPlay className="h-4 w-4 text-slate-700" />
-                  <span className="text-sm font-bold text-slate-800">Presentation Active</span>
+              <div className="absolute left-1/2 top-4 z-[9999] flex -translate-x-1/2 items-center gap-4 rounded-full border border-border/60 bg-card/90 px-6 py-2 shadow-2xl backdrop-blur-2xl transition-all duration-300 text-foreground">
+                <div className="flex items-center gap-2 border-r border-border/60 pr-4">
+                  <MonitorPlay className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-bold text-foreground">Presentation Active</span>
                 </div>
                 
                 <div className="flex items-center gap-4 px-2">
@@ -678,9 +1022,9 @@ export default function Dashboard() {
                       id="clean-fs" 
                       checked={presentationSettings.cleanFullscreen} 
                       onCheckedChange={(checked) => setPresentationSettings(c => ({ ...c, cleanFullscreen: checked }))} 
-                      className="scale-75 data-[state=checked]:bg-slate-900" 
+                      className="scale-75 data-[state=checked]:bg-primary" 
                     />
-                    <Label htmlFor="clean-fs" className="cursor-pointer text-xs font-semibold text-slate-700">Clean fullscreen</Label>
+                    <Label htmlFor="clean-fs" className="cursor-pointer text-xs font-semibold text-muted-foreground">Clean fullscreen</Label>
                   </div>
                   
                   <div className="flex items-center gap-2">
@@ -691,9 +1035,9 @@ export default function Dashboard() {
                         setPresentationSettings(c => ({ ...c, markerOnly: checked }));
                         updateMapSetting("overlays", !checked);
                       }}
-                      className="scale-75 data-[state=checked]:bg-slate-900"
+                      className="scale-75 data-[state=checked]:bg-primary"
                     />
-                    <Label htmlFor="marker-only" className="cursor-pointer text-xs font-semibold text-slate-700">Marker-only</Label>
+                    <Label htmlFor="marker-only" className="cursor-pointer text-xs font-semibold text-muted-foreground">Marker-only</Label>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -701,9 +1045,9 @@ export default function Dashboard() {
                       id="tour-mode" 
                       checked={isTouring} 
                       onCheckedChange={setIsTouring}
-                      className="scale-75 data-[state=checked]:bg-slate-900"
+                      className="scale-75 data-[state=checked]:bg-primary"
                     />
-                    <Label htmlFor="tour-mode" className="cursor-pointer text-xs font-semibold text-slate-700">Tour</Label>
+                    <Label htmlFor="tour-mode" className="cursor-pointer text-xs font-semibold text-muted-foreground">Tour</Label>
                   </div>
                 </div>
 
@@ -722,17 +1066,17 @@ export default function Dashboard() {
 
             {mobileSidebarOpen && (
               <aside
-                className="absolute left-0 top-0 z-[1160] flex h-full w-[min(320px,calc(100vw-1rem))] flex-col overflow-y-auto border-r border-white/30 bg-white/40 p-3 shadow-xl backdrop-blur-md lg:hidden"
+                className="absolute left-0 top-0 z-[1160] flex h-full w-[min(320px,calc(100vw-1rem))] flex-col overflow-y-auto border-r border-border/40 bg-card/80 p-3 shadow-xl backdrop-blur-xl lg:hidden gis-custom-scrollbar"
                 data-gis-draw-occlude="left"
               >
-                <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+                <div className="mb-3 flex items-center justify-between gap-2 border-b border-border/60 pb-2.5">
                   <div className="flex items-center gap-3">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600">GIS Stats</h3>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">GIS Stats</h3>
                   </div>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 shrink-0 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
+                    className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                     onClick={() => setMobileSidebarOpen(false)}
                     title="Close sidebar"
                   >
@@ -740,18 +1084,18 @@ export default function Dashboard() {
                   </Button>
                 </div>
 
-                <div className="mb-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white p-1">
+                <div className="mb-4 flex items-center justify-between rounded-lg border border-border/60 bg-muted/40 p-1">
                   <button
-                    className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all", mapViewMode === "schools" ? "bg-slate-100 text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                    className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all", mapViewMode === "schools" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
                     onClick={() => setMapViewMode("schools")}
                   >
                     Schools
                   </button>
                   <button
-                    className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all", mapViewMode === "scholars" ? "bg-primary text-white shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                    className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all", mapViewMode === "scholars" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
                     onClick={() => setMapViewMode("scholars")}
                   >
-                    Scholars (Barangays)
+                    Scholars
                   </button>
                 </div>
 
@@ -762,49 +1106,60 @@ export default function Dashboard() {
                       programFilters={programFilters}
                       onClose={() => setSelectedCluster(null)}
                       onEditSchool={openEditSchool}
+                      isScholarsMode={mapViewMode === "scholars"}
                     />
                   )}
-                  <Metric label={programFilterIsActive(programFilters) ? "Filtered Enrollees (GIS)" : "Mapped Enrollees (GIS)"} value={totalStudents} />
-                  <Metric label={programFilterIsActive(programFilters) ? "Filtered Target" : "Overall Target"} value={grandTotalStudents} />
-                  <Metric label="Municipalities" value={municipalityCount} />
-                  <AnalyticsInsightPanel analytics={programAnalytics} />
-                  <div className="rounded-xl border border-white/50 bg-white/40 px-4 py-3 shadow-sm backdrop-blur-md">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-700/85">Last Updated</p>
-                    <p className="mt-1 truncate font-mono text-xs text-slate-900">{lastUpdatedMs ? new Date(lastUpdatedMs).toLocaleString() : "-"}</p>
+                  {mapViewMode === "scholars" ? (
+                    <Metric label="Total Scholars" value={totalStudents} />
+                  ) : (
+                    <>
+                      <Metric label={programFilterIsActive(programFilters) ? "Filtered Enrollees (GIS)" : "Mapped Enrollees (GIS)"} value={totalStudents} />
+                      <Metric label="Municipalities" value={municipalityCount} />
+                    </>
+                  )}
+                  <AnalyticsInsightPanel analytics={programAnalytics} isScholarsMode={mapViewMode === "scholars"} />
+                  <div className="rounded-xl border border-border/50 bg-card/50 px-4 py-3 shadow-sm backdrop-blur-md">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Last Updated</p>
+                    <p className="mt-1 truncate font-mono text-xs text-foreground">{lastUpdatedMs ? new Date(lastUpdatedMs).toLocaleString() : "-"}</p>
                   </div>
-                  <ProgramFiltersPanel
-                    filters={programFilters}
-                    options={programOptions}
-                    sort={programSort}
-                    onFiltersChange={setProgramFilters}
-                    onSortChange={setProgramSort}
-                    schoolsList={programSchools.map(s => ({ value: String(s.id), label: s.schoolName }))}
-                    selectedSchoolId={selectedMapSchoolId}
-                    onSchoolChange={setSelectedMapSchoolId}
-                  />
-                  <ProgramSchoolList 
-                    schools={sortedProgramSchools} 
-                    selectedSchoolId={selectedMapSchoolId}
-                    onSelectSchool={(id) => setSelectedMapSchoolId(prev => prev === id ? null : id)}
-                    showDominantProgram={programFilterIsActive(programFilters)}
-                  />
+                  {mapViewMode !== "scholars" && (
+                    <ProgramFiltersPanel
+                      filters={programFilters}
+                      options={programOptions}
+                      sort={programSort}
+                      onFiltersChange={setProgramFilters}
+                      onSortChange={setProgramSort}
+                      schoolsList={programSchools.map(s => ({ value: String(s.id), label: s.schoolName }))}
+                      selectedSchoolId={selectedMapSchoolId}
+                      onSchoolChange={setSelectedMapSchoolId}
+                    />
+                  )}
+                  {mapViewMode === "scholars" && (
+                    <ProgramSchoolList 
+                      title="Barangays"
+                      schools={sortedProgramSchools} 
+                      selectedSchoolId={selectedMapSchoolId}
+                      onSelectSchool={(id) => setSelectedMapSchoolId(prev => prev === id ? null : id)}
+                      showDominantProgram={programFilterIsActive(programFilters)}
+                    />
+                  )}
                 </div>
               </aside>
             )}
 
             {!sidebarCollapsed && (
               <aside
-                className="absolute left-0 top-0 z-[45] hidden h-full w-[320px] flex-col overflow-y-auto border-r border-white/30 bg-white/40 p-3 shadow-sm backdrop-blur-md lg:flex"
+                className="absolute left-0 top-0 z-[45] hidden h-full w-[320px] flex-col overflow-y-auto border-r border-border/40 bg-card/80 p-3 shadow-sm backdrop-blur-xl lg:flex gis-custom-scrollbar"
                 data-gis-draw-occlude="left"
               >
-              <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+              <div className="mb-3 flex items-center justify-between gap-2 border-b border-border/60 pb-2.5">
                 <div className="flex items-center gap-3">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600">GIS Stats</h3>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">GIS Stats</h3>
                 </div>
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 shrink-0 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                   onClick={() => setSidebarCollapsed(true)}
                   title="Collapse sidebar"
                 >
@@ -812,19 +1167,19 @@ export default function Dashboard() {
                 </Button>
               </div>
 
-              <div className="mb-4 flex items-center justify-between rounded-lg border border-slate-200 bg-white p-1">
+              <div className="mb-4 flex items-center justify-between rounded-lg border border-border/60 bg-muted/40 p-1">
                 <button
-                  className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all", mapViewMode === "schools" ? "bg-slate-100 text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                  className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all", mapViewMode === "schools" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
                   onClick={() => setMapViewMode("schools")}
                 >
                   Schools
                 </button>
                 <button
-                  className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all flex items-center justify-center gap-1.5", mapViewMode === "scholars" ? "bg-primary text-white shadow-sm" : "text-slate-500 hover:text-slate-700")}
+                  className={cn("flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-all flex items-center justify-center gap-1.5", mapViewMode === "scholars" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
                   onClick={() => setMapViewMode("scholars")}
                 >
                   <GraduationCap className="h-3.5 w-3.5" />
-                  Scholars (Barangays)
+                  Scholars
                 </button>
               </div>
 
@@ -837,32 +1192,42 @@ export default function Dashboard() {
                     onEditSchool={openEditSchool}
                   />
                 )}
-                <Metric label="Total Enrollees" value={totalStudents} />
-                <Metric label="Mapped Enrollees (GIS)" value={mappedStudentsCount} />
-                <Metric label="Unmapped / Distant" value={totalStudents - mappedStudentsCount} />
-                <Metric label={programFilterIsActive(programFilters) ? "Filtered Target" : "Overall Target"} value={grandTotalStudents} />
-                <Metric label="Municipalities" value={municipalityCount} />
-                <AnalyticsInsightPanel analytics={programAnalytics} />
-                <div className="rounded-xl border-b-2 border-b-slate-300/80 bg-white px-4 py-3 shadow-[0_10px_28px_-16px_rgba(15,23,42,0.22)] backdrop-blur-[18px]">
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-slate-700/85">Last Updated</p>
-                  <p className="mt-1 truncate font-mono text-xs text-slate-900">{lastUpdatedMs ? new Date(lastUpdatedMs).toLocaleString() : "—"}</p>
+                {mapViewMode === "scholars" ? (
+                  <Metric label="Total Scholars" value={totalStudents} />
+                ) : (
+                  <>
+                    <Metric label="Total Enrollees" value={totalStudents} />
+                    <Metric label="Mapped Enrollees (GIS)" value={mappedStudentsCount} />
+                    <Metric label="Unmapped / Distant" value={totalStudents - mappedStudentsCount} />
+                    <Metric label="Municipalities" value={municipalityCount} />
+                  </>
+                )}
+                <AnalyticsInsightPanel analytics={programAnalytics} isScholarsMode={mapViewMode === "scholars"} />
+                <div className="rounded-xl border border-border/50 bg-card/50 px-4 py-3 shadow-sm backdrop-blur-md">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Last Updated</p>
+                  <p className="mt-1 truncate font-mono text-xs text-foreground">{lastUpdatedMs ? new Date(lastUpdatedMs).toLocaleString() : "—"}</p>
                 </div>
-                <ProgramFiltersPanel
-                  filters={programFilters}
-                  options={programOptions}
-                  sort={programSort}
-                  onFiltersChange={setProgramFilters}
-                  onSortChange={setProgramSort}
-                  schoolsList={programSchools.map(s => ({ value: String(s.id), label: s.schoolName }))}
-                  selectedSchoolId={selectedMapSchoolId}
-                  onSchoolChange={setSelectedMapSchoolId}
-                />
-                <ProgramSchoolList 
-                  schools={sortedProgramSchools} 
-                  selectedSchoolId={selectedMapSchoolId}
-                  onSelectSchool={(id) => setSelectedMapSchoolId(prev => prev === id ? null : id)}
-                  showDominantProgram={programFilterIsActive(programFilters)}
-                />
+                {mapViewMode !== "scholars" && (
+                  <ProgramFiltersPanel
+                    filters={programFilters}
+                    options={programOptions}
+                    sort={programSort}
+                    onFiltersChange={setProgramFilters}
+                    onSortChange={setProgramSort}
+                    schoolsList={programSchools.map(s => ({ value: String(s.id), label: s.schoolName }))}
+                    selectedSchoolId={selectedMapSchoolId}
+                    onSchoolChange={setSelectedMapSchoolId}
+                  />
+                )}
+                {mapViewMode === "scholars" && (
+                  <ProgramSchoolList 
+                    title="Barangays"
+                    schools={sortedProgramSchools} 
+                    selectedSchoolId={selectedMapSchoolId}
+                    onSelectSchool={(id) => setSelectedMapSchoolId(prev => prev === id ? null : id)}
+                    showDominantProgram={programFilterIsActive(programFilters)}
+                  />
+                )}
               </div>
             </aside>
             )}
@@ -872,7 +1237,7 @@ export default function Dashboard() {
                 <Button
                   variant="secondary"
                   size="icon"
-                  className="absolute left-3 top-3 z-[1140] hidden h-9 w-9 rounded-full border border-white/30 bg-white/40 text-slate-800 shadow-md backdrop-blur-md hover:bg-white/50 lg:inline-flex"
+                  className="absolute left-3 top-3 z-[1140] hidden h-9 w-9 rounded-full border border-border/60 bg-card/85 text-foreground shadow-md backdrop-blur-xl hover:bg-muted lg:inline-flex"
                   onClick={() => setSidebarCollapsed(false)}
                   title="Expand sidebar"
                   aria-label="Expand sidebar"
@@ -882,7 +1247,7 @@ export default function Dashboard() {
               )}
               
               {isPresenting && sidebarCollapsed && selectedCluster && (
-                <div className="absolute left-4 top-4 z-[9999] w-[320px] rounded-xl border border-white/30 bg-white/40 p-0 shadow-lg backdrop-blur-md">
+                <div className="absolute left-4 top-4 z-[9999] w-[320px] rounded-xl border border-border/60 bg-card/90 p-0 shadow-2xl backdrop-blur-2xl">
                   <SelectedClusterPanel
                     cluster={selectedCluster}
                     programFilters={programFilters}
@@ -976,7 +1341,7 @@ export default function Dashboard() {
                   <SettingSwitch label="Compact mode" checked={systemSettings.compactMode} onChange={(checked) => setSystemSettings((current) => ({ ...current, compactMode: checked }))} />
                   <SettingSwitch label="Show drawings" checked={drawSettings.showDrawings} onChange={(checked) => updateDrawSetting("showDrawings", checked)} />
                   <SettingSwitch label="Drawing annotations" checked={drawSettings.annotationVisibility} onChange={(checked) => updateDrawSetting("annotationVisibility", checked)} />
-                  <Button variant="outline" className="h-9 w-full gap-2 bg-white text-sm" onClick={() => setClearDrawSignal((signal) => signal + 1)}>
+                  <Button variant="outline" className="h-9 w-full gap-2 border-border/60 bg-card hover:bg-muted text-sm text-foreground" onClick={() => setClearDrawSignal((signal) => signal + 1)}>
                     <Trash2 className="h-4 w-4" />
                     Clear drawings
                   </Button>
@@ -988,6 +1353,7 @@ export default function Dashboard() {
               <AdminSchoolRegistry
                 compact
                 duplicateIds={duplicateIds}
+                duplicateMasterMap={duplicateMasterMap}
                 filteredSchools={filteredSchools}
                 isLoading={isLoading}
                 registrySearch={registrySearch}
@@ -1014,19 +1380,44 @@ export default function Dashboard() {
         </TabsContent>
 
         <TabsContent
+          value="analytics"
+          className={cn(
+            "m-0 h-full min-h-0 overflow-auto bg-background px-4 sm:px-6 pb-6 data-[state=inactive]:hidden gis-custom-scrollbar",
+            "transition-[padding] duration-300 ease-out motion-reduce:transition-none",
+            isPresenting ? "pt-3" : "pt-[calc(60px+1rem)] sm:pt-[calc(60px+1.5rem)]",
+          )}
+        >
+          <ThesisIntelligenceWorkspace
+            schools={schools}
+            students={students}
+            programSchools={programSchools}
+            programAnalytics={programAnalytics}
+            onLaunchDefenseMode={() => {
+              applyPresentation(true);
+              setIsTouring(true);
+              setMainTab("map");
+            }}
+            onSelectSchoolOnMap={(schoolId) => {
+              setSelectedMapSchoolId(schoolId);
+              setMainTab("map");
+            }}
+          />
+        </TabsContent>
+
+        <TabsContent
           value="referrals"
           className={cn(
-            "m-0 h-full min-h-0 overflow-auto bg-slate-50 p-4 data-[state=inactive]:hidden",
+            "m-0 h-full min-h-0 overflow-auto bg-background px-4 sm:px-6 pb-6 data-[state=inactive]:hidden gis-custom-scrollbar",
             "transition-[padding] duration-300 ease-out motion-reduce:transition-none",
-            isPresenting ? "pt-3" : "pt-[calc(0.5rem+60px+0.75rem)]",
+            isPresenting ? "pt-3" : "pt-[calc(60px+1rem)] sm:pt-[calc(60px+1.5rem)]",
           )}
         >
           <ReferralProgramWorkspace
-            createReferral={(input) => createReferral.mutateAsync(input)}
-            deleteReferral={(id) => deleteReferral.mutateAsync(id)}
             referrals={referrals}
             students={students}
-            updateReferral={(id, updates) => updateReferral.mutateAsync({ id, updates })}
+            createReferral={async (input) => { await createReferral.mutateAsync(input); }}
+            updateReferral={async (id, updates) => { await updateReferral.mutateAsync({ id, updates }); }}
+            deleteReferral={async (id) => { await deleteReferral.mutateAsync(id); }}
           />
         </TabsContent>
       </Tabs>
@@ -1078,77 +1469,79 @@ function SelectedClusterPanel({
   programFilters,
   onClose,
   onEditSchool,
+  isScholarsMode,
 }: {
   cluster: SchoolCluster;
   programFilters: ProgramFilters;
   onClose: () => void;
   onEditSchool: (school: SchoolRegistry) => void;
+  isScholarsMode?: boolean;
 }) {
   return (
-    <div className="rounded-xl border-transparent bg-transparent overflow-hidden flex flex-col mb-1">
-      <div className="flex items-start justify-between border-b border-white/20 bg-white/20 px-4 py-3">
+    <div className="rounded-xl border border-border/50 bg-card/60 overflow-hidden flex flex-col mb-1 shadow-sm backdrop-blur-md">
+      <div className="flex items-start justify-between border-b border-border/50 bg-muted/30 px-4 py-3">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-            {cluster.schools.length > 1 ? "School Cluster" : "Feeder School"}
+            {cluster.schools.length > 1 ? (isScholarsMode ? "Barangay Cluster" : "School Cluster") : (isScholarsMode ? "Barangay" : "Feeder School")}
           </p>
-          <h4 className="mt-0.5 font-display text-sm font-bold leading-tight text-slate-900">
-            {cluster.schools.length > 1 ? `${cluster.schools.length} feeder schools` : cluster.schools[0].name}
+          <h4 className="mt-0.5 font-display text-sm font-bold leading-tight text-foreground">
+            {cluster.schools.length > 1 ? `${cluster.schools.length} ${isScholarsMode ? "Barangays" : "feeder schools"}` : cluster.schools[0].name}
           </h4>
         </div>
-        <Button variant="ghost" size="icon" className="-mr-2 -mt-1 h-8 w-8 text-slate-400 hover:bg-slate-200/50 hover:text-slate-700" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="-mr-2 -mt-1 h-8 w-8 text-muted-foreground hover:bg-muted/80 hover:text-foreground" onClick={onClose}>
           <XCircle className="h-4 w-4" />
         </Button>
       </div>
 
-      <div className="space-y-2 p-3 max-h-[60vh] overflow-y-auto">
+      <div className="space-y-2 p-3 max-h-[60vh] overflow-y-auto gis-custom-scrollbar">
         {cluster.schools.map((school) => (
-          <div key={school.id} className="rounded-lg border border-white/30 bg-white/40 p-3 backdrop-blur-sm">
+          <div key={school.id} className="rounded-lg border border-border/50 bg-card/80 p-3 shadow-sm backdrop-blur-sm">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-bold text-slate-900">{school.schoolName}</p>
-                <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-600">
+                <p className="truncate text-sm font-bold text-foreground">{school.schoolName}</p>
+                <p className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
                   <MapIcon className="mt-[2px] h-3 w-3 shrink-0" />
                   <span className="leading-snug">{school.municipality || school.province || "—"}</span>
                 </p>
-                <p className="mt-1 flex items-start gap-1.5 text-xs text-slate-600">
+                <p className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
                   <Layers className="mt-[2px] h-3 w-3 shrink-0" />
-                  <span className="leading-snug">{school.dominantProgram?.collegeName || school.schoolType || "Feeder Institution"}</span>
+                  <span className="leading-snug">{isScholarsMode ? "Scholar Location" : (school.dominantProgram?.collegeName || school.schoolType || "Feeder Institution")}</span>
                 </p>
               </div>
-              <div className="flex shrink-0 min-w-[3.5rem] flex-col items-center justify-center rounded-lg bg-primary/10 px-2.5 py-1.5 text-center text-primary">
-                <p className="text-sm font-black leading-none">{school.filteredStudentCount}</p>
+              <div className="flex shrink-0 min-w-[3.5rem] flex-col items-center justify-center rounded-lg bg-primary/10 border border-primary/20 px-2.5 py-1.5 text-center text-primary">
+                <p className="text-sm font-black font-mono leading-none">{school.filteredStudentCount}</p>
                 <p className="mt-1 text-[9px] font-bold uppercase leading-none">Filtered</p>
               </div>
             </div>
 
-            <div className="mt-3 space-y-1.5 text-[11px] text-slate-600">
-              <div className="flex items-center justify-between border-b border-black/5 pb-1">
-                <span className="font-medium text-slate-500">Filtered Students</span>
-                <strong className="text-slate-900">{school.filteredStudentCount.toLocaleString()}</strong>
+            <div className="mt-3 space-y-1.5 text-[11px] text-muted-foreground">
+              <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                <span className="font-medium text-muted-foreground">Filtered Students</span>
+                <strong className="text-foreground font-mono">{school.filteredStudentCount.toLocaleString()}</strong>
               </div>
-              <div className="flex items-center justify-between border-b border-black/5 pb-1">
-                <span className="font-medium text-slate-500">Total Students</span>
-                <strong className="text-slate-900">{school.totalStudentCount.toLocaleString()}</strong>
+              <div className="flex items-center justify-between border-b border-border/40 pb-1">
+                <span className="font-medium text-muted-foreground">Total Students</span>
+                <strong className="text-foreground font-mono">{school.totalStudentCount.toLocaleString()}</strong>
               </div>
-              <div className="flex items-center justify-between pb-1">
-                <span className="font-medium text-slate-500">Dominant College</span>
-                <strong className="truncate max-w-[120px] text-slate-900 ml-2" title={school.dominantProgram?.college || "Unknown"}>
+              {!isScholarsMode && <div className="flex items-center justify-between pb-1">
+                <span className="font-medium text-muted-foreground">Dominant College</span>
+                <strong className="truncate max-w-[120px] text-foreground ml-2" title={school.dominantProgram?.college || "Unknown"}>
                   {school.dominantProgram?.college || "Unknown"}
                 </strong>
-              </div>
+              </div>}
             </div>
             
             {school.programDistribution.length > 0 && (
-              <div className="mt-3 rounded-md border border-white/40 bg-white/50 p-2 shadow-sm">
-                <p className="mb-1 text-[10px] font-bold uppercase text-slate-500">Program Distribution</p>
+              <div className="mt-3 rounded-md border border-border/50 bg-muted/20 p-2 shadow-sm">
+                <p className="mb-1 text-[10px] font-bold uppercase text-muted-foreground">Program Distribution</p>
                 <div className="space-y-1">
                   {school.programDistribution.slice(0, 5).map((entry: any) => (
                     <div key={entry.code} className="flex items-center justify-between gap-2 text-[11px]">
                       <span className="flex min-w-0 items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
-                        <span className="truncate">{entry.code}</span>
+                        <span className="h-2 w-2 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: entry.color }} />
+                        <span className="truncate text-foreground font-medium">{entry.code}</span>
                       </span>
-                      <strong>{entry.count}</strong>
+                      <strong className="text-foreground font-mono">{entry.count}</strong>
                     </div>
                   ))}
                 </div>
@@ -1157,7 +1550,7 @@ function SelectedClusterPanel({
             <Button
               variant="outline"
               size="sm"
-              className="mt-3 h-8 w-full gap-2 bg-white"
+              className="mt-3 h-8 w-full gap-2 border-border/60 bg-muted/40 text-foreground hover:bg-muted/80 font-semibold"
               onClick={() => onEditSchool(school)}
             >
               <Edit className="h-3.5 w-3.5" />
@@ -1173,6 +1566,7 @@ function SelectedClusterPanel({
 function SchoolRegistry({
   compact = false,
   duplicateIds,
+  duplicateMasterMap,
   filteredSchools,
   isLoading,
   registrySearch,
@@ -1187,6 +1581,7 @@ function SchoolRegistry({
 }: {
   compact?: boolean;
   duplicateIds: Set<number>;
+  duplicateMasterMap?: Map<number, SchoolRegistry>;
   filteredSchools: SchoolRegistry[];
   isLoading: boolean;
   registrySearch: string;
@@ -1335,6 +1730,12 @@ function SchoolRegistry({
                   ) : (
                     <p className="truncate text-[10px] text-muted-foreground">{school.schoolType}</p>
                   )}
+                  {duplicateMasterMap?.has(school.id) && (
+                    <div className="flex items-center gap-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-md mt-1 w-fit font-medium">
+                      <Copy className="w-3 h-3 text-amber-600 shrink-0" />
+                      <span>Duplicate of: <strong className="text-slate-900">{duplicateMasterMap.get(school.id)?.schoolName}</strong></span>
+                    </div>
+                  )}
                 </TableCell>
                 {compact ? (
                   <>
@@ -1435,17 +1836,17 @@ function ProgramFiltersPanel({
   };
 
   return (
-    <div className="rounded-xl border border-white/50 bg-white/40 p-3 shadow-sm backdrop-blur-md">
+    <div className="rounded-xl border border-border/50 bg-card/60 p-3 shadow-sm backdrop-blur-md">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Program Intelligence</p>
-          <p className="text-xs font-semibold text-slate-900">{active ? "Filtered map view" : "All programs"}</p>
+          <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Program Intelligence</p>
+          <p className="text-xs font-semibold text-foreground">{active ? "Filtered map view" : "All programs"}</p>
         </div>
         {active && (
           <Button
             type="button"
             variant="ghost"
-            className="h-7 px-2 text-[11px]"
+            className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
             onClick={() => {
               onFiltersChange({ college: ALL_PROGRAM_FILTER, program: ALL_PROGRAM_FILTER, track: ALL_PROGRAM_FILTER });
               onSchoolChange(null);
@@ -1521,9 +1922,9 @@ function SidebarSelect({
 }) {
   return (
     <div className="space-y-1">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
       <Select value={value} onValueChange={onValueChange}>
-        <SelectTrigger className="h-8 rounded-md border-white/50 bg-white/50 text-xs shadow-sm backdrop-blur-sm hover:bg-white/70">
+        <SelectTrigger className="h-8 rounded-md border-border/60 bg-muted/40 text-xs text-foreground shadow-sm hover:bg-muted/70">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -1538,22 +1939,24 @@ function SidebarSelect({
 }
 
 function ProgramSchoolList({ 
+  title = "Schools",
   schools, 
   selectedSchoolId, 
   onSelectSchool,
   showDominantProgram,
 }: { 
+  title?: string;
   schools: any[]; 
   selectedSchoolId?: number | null;
   onSelectSchool?: (id: number) => void;
   showDominantProgram?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-white/50 bg-white/40 p-3 shadow-sm backdrop-blur-md">
-      <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">Schools</p>
-      <div className="max-h-[310px] space-y-1.5 overflow-y-auto pr-1">
+    <div className="rounded-xl border border-border/50 bg-card/60 p-3 shadow-sm backdrop-blur-md flex flex-col min-h-0 shrink">
+      <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{title}</p>
+      <div className="max-h-[310px] space-y-1.5 overflow-y-auto pr-1 gis-custom-scrollbar">
         {schools.length === 0 ? (
-          <p className="rounded-md border border-white/40 bg-white/50 px-2 py-3 text-center text-xs text-slate-500 shadow-sm backdrop-blur-sm">No schools match the active filters.</p>
+          <p className="rounded-md border border-border/40 bg-muted/20 px-2 py-3 text-center text-xs text-muted-foreground shadow-sm">No schools match the active filters.</p>
         ) : (
           schools.slice(0, 80).map((school) => {
             const isSelected = selectedSchoolId === school.id;
@@ -1561,26 +1964,26 @@ function ProgramSchoolList({
               <div 
                 key={school.id} 
                 onClick={() => onSelectSchool?.(school.id)}
-                className={`flex items-center gap-2 rounded-md border px-2 py-2 shadow-sm backdrop-blur-sm transition-all cursor-pointer ${
+                className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 shadow-sm transition-all cursor-pointer ${
                   isSelected 
-                    ? "border-primary/50 bg-primary/10 shadow-primary/20 scale-[1.02]" 
-                    : "border-white/40 bg-white/50 hover:bg-white/70"
+                    ? "border-primary/60 bg-primary/15 text-primary shadow-primary/10 scale-[1.01]" 
+                    : "border-border/40 bg-card/80 hover:bg-muted/50 text-foreground"
                 }`}
               >
                 <span
-                  className="h-3 w-3 shrink-0 rounded-full shadow-sm"
+                  className="h-2.5 w-2.5 shrink-0 rounded-full shadow-xs"
                   style={{ backgroundColor: school.dominantProgram?.color || "#cbd5e1" }}
                 />
                 <div className="min-w-0 flex-1">
-                  <p className={`truncate text-xs font-bold ${isSelected ? "text-primary" : "text-slate-900"}`}>{school.schoolName}</p>
-                  <p className="truncate text-[10px] text-slate-500">
+                  <p className={`truncate text-xs font-semibold ${isSelected ? "text-primary font-bold" : "text-foreground"}`}>{school.schoolName}</p>
+                  <p className="truncate text-[10px] text-muted-foreground">
                     {school.municipality || school.province || "—"}
                     {showDominantProgram && school.dominantProgram?.code ? ` · ${school.dominantProgram.code}` : ""}
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className={`text-xs font-black ${isSelected ? "text-primary" : "text-slate-900"}`}>{school.filteredStudentCount.toLocaleString()}</p>
-                  <p className="text-[10px] text-slate-500">of {school.totalStudentCount.toLocaleString()}</p>
+                  <p className={`text-xs font-black font-mono ${isSelected ? "text-primary" : "text-foreground"}`}>{school.filteredStudentCount.toLocaleString()}</p>
+                  <p className="text-[10px] text-muted-foreground">of {school.totalStudentCount.toLocaleString()}</p>
                 </div>
               </div>
             );
@@ -1682,16 +2085,16 @@ function ReferralProgramWorkspace({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">Admissions Support</Badge>
-            <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">Public portal: /referral</Badge>
+            <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary font-medium">Admissions Support</Badge>
+            <Badge variant="outline" className="border-border/60 bg-muted/40 text-muted-foreground font-mono">Public portal: /referral</Badge>
           </div>
-          <h2 className="mt-2 text-xl font-black">Referral Program System</h2>
+          <h2 className="mt-2 text-xl font-black text-foreground">Referral Program System</h2>
           <p className="text-sm text-muted-foreground">
             Register student referrers, collect candidate leads, review submissions, and approve only qualified referrals.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" className="h-10 gap-2 bg-white" onClick={copyPublicLink}>
+          <Button variant="outline" className="h-10 gap-2 border-border/60 bg-card text-foreground hover:bg-muted" onClick={copyPublicLink}>
             <Copy className="h-4 w-4" />
             Copy Portal Link
           </Button>
@@ -1710,19 +2113,19 @@ function ReferralProgramWorkspace({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[390px_minmax(0,1fr)]">
-        <Card className="rounded-lg border-slate-200 shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
+        <Card className="rounded-xl border-border/60 bg-card/80 shadow-sm backdrop-blur-xl">
+          <CardHeader className="pb-3 border-b border-border/40 bg-muted/20">
+            <CardTitle className="flex items-center gap-2 text-base text-foreground">
               <UserPlus className="h-4 w-4 text-primary" />
               Add Referral Lead
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="text-muted-foreground">
               Use this when admissions receives a referral by walk-in, message, or staff entry.
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-3 pt-4">
             <Select value={selectedReferrerId || "none"} onValueChange={(value) => setSelectedReferrerId(value === "none" ? "" : value)}>
-              <SelectTrigger className="h-10 bg-slate-50">
+              <SelectTrigger className="h-10 border-border/60 bg-muted/30 text-foreground">
                 <SelectValue placeholder="Optional referrer" />
               </SelectTrigger>
               <SelectContent>
@@ -1737,7 +2140,7 @@ function ReferralProgramWorkspace({
             <Input
               name="candidateFullName"
               aria-label="Candidate full name"
-              className="h-10 bg-slate-50"
+              className="h-10 border-border/60 bg-muted/30 text-foreground placeholder:text-muted-foreground"
               placeholder="Candidate full name"
               value={candidateName}
               onChange={(event) => setCandidateName(event.target.value)}
@@ -1745,7 +2148,7 @@ function ReferralProgramWorkspace({
             <Input
               name="candidateRelationship"
               aria-label="Relationship to referrer"
-              className="h-10 bg-slate-50"
+              className="h-10 border-border/60 bg-muted/30 text-foreground placeholder:text-muted-foreground"
               placeholder="Relationship to referrer"
               value={relationship}
               onChange={(event) => setRelationship(event.target.value)}
@@ -1753,7 +2156,7 @@ function ReferralProgramWorkspace({
             <Input
               name="candidateContactNumber"
               aria-label="Contact number"
-              className="h-10 bg-slate-50"
+              className="h-10 border-border/60 bg-muted/30 text-foreground placeholder:text-muted-foreground"
               placeholder="Contact number"
               value={contactNumber}
               onChange={(event) => setContactNumber(event.target.value)}
@@ -1761,24 +2164,24 @@ function ReferralProgramWorkspace({
             <Textarea
               name="admissionsNotes"
               aria-label="Notes for admissions follow-up"
-              className="min-h-24 bg-slate-50"
+              className="min-h-24 border-border/60 bg-muted/30 text-foreground placeholder:text-muted-foreground"
               placeholder="Notes for admissions follow-up"
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
             />
-            <Button className="h-10 w-full gap-2" onClick={() => void submitInternalReferral()}>
+            <Button className="h-10 w-full gap-2 font-semibold" onClick={() => void submitInternalReferral()}>
               <UserPlus className="h-4 w-4" />
               Save as Pending
             </Button>
           </CardContent>
         </Card>
 
-        <Card className="overflow-hidden rounded-lg border-slate-200 shadow-sm">
-          <CardHeader className="border-b border-slate-200 bg-white pb-3">
+        <Card className="overflow-hidden rounded-xl border-border/60 bg-card/80 shadow-sm backdrop-blur-xl">
+          <CardHeader className="border-b border-border/40 bg-muted/20 pb-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <CardTitle className="text-base">Referral Review Queue</CardTitle>
-                <CardDescription>Pending leads should be contacted, verified, then approved or rejected.</CardDescription>
+                <CardTitle className="text-base text-foreground">Referral Review Queue</CardTitle>
+                <CardDescription className="text-muted-foreground">Pending leads should be contacted, verified, then approved or rejected.</CardDescription>
               </div>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <div className="relative">
@@ -1786,14 +2189,14 @@ function ReferralProgramWorkspace({
                   <Input
                     name="referralSearch"
                     aria-label="Search referrals"
-                    className="h-10 w-full bg-slate-50 pl-9 sm:w-72"
+                    className="h-10 w-full border-border/60 bg-muted/30 pl-9 text-foreground placeholder:text-muted-foreground sm:w-72"
                     placeholder="Search referrals..."
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
                   />
                 </div>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-10 bg-slate-50 sm:w-40"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-10 border-border/60 bg-muted/30 text-foreground sm:w-40"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Status</SelectItem>
                     <SelectItem value="pending">Pending</SelectItem>
@@ -1921,21 +2324,33 @@ function ReferralMetric({
   value: number;
   tone?: "primary" | "amber" | "emerald" | "rose";
 }) {
-  const toneClass = {
-    primary: "border-primary/15 bg-primary/5 text-primary",
-    amber: "border-amber-200 bg-amber-50 text-amber-700",
-    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    rose: "border-rose-200 bg-rose-50 text-rose-700",
+  const toneStyles = {
+    primary: {
+      card: "border-primary/20 bg-card/80 hover:border-primary/40",
+      iconBg: "bg-primary/10 text-primary border border-primary/20",
+    },
+    amber: {
+      card: "border-amber-500/20 bg-card/80 hover:border-amber-500/40",
+      iconBg: "bg-amber-500/10 text-amber-500 dark:text-amber-400 border border-amber-500/20",
+    },
+    emerald: {
+      card: "border-emerald-500/20 bg-card/80 hover:border-emerald-500/40",
+      iconBg: "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border border-emerald-500/20",
+    },
+    rose: {
+      card: "border-rose-500/20 bg-card/80 hover:border-rose-500/40",
+      iconBg: "bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-500/20",
+    },
   }[tone];
 
   return (
-    <Card className={cn("rounded-lg shadow-sm", toneClass)}>
+    <Card className={cn("rounded-xl border shadow-sm backdrop-blur-xl transition-all", toneStyles.card)}>
       <CardContent className="flex items-center justify-between gap-3 p-4">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-wide opacity-75">{label}</p>
-          <p className="mt-1 text-2xl font-black text-slate-950">{value.toLocaleString()}</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
+          <p className="mt-1 text-3xl font-black font-mono tracking-tight text-foreground">{value.toLocaleString()}</p>
         </div>
-        <div className="grid h-9 w-9 place-items-center rounded-lg bg-white/70">{icon}</div>
+        <div className={cn("grid h-10 w-10 place-items-center rounded-xl shadow-xs", toneStyles.iconBg)}>{icon}</div>
       </CardContent>
     </Card>
   );
@@ -1943,38 +2358,54 @@ function ReferralMetric({
 
 function ReferralStatusBadge({ status }: { status: string }) {
   const tone = status === "approved"
-    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
     : status === "rejected"
-      ? "border-rose-200 bg-rose-50 text-rose-700"
-      : "border-amber-200 bg-amber-50 text-amber-700";
+      ? "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400"
+      : "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400";
 
   const label = status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "Pending";
 
-  return <Badge variant="outline" className={tone}>{label}</Badge>;
+  return <Badge variant="outline" className={cn("font-semibold text-xs", tone)}>{label}</Badge>;
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-white/50 bg-white/40 px-3.5 py-3 shadow-sm backdrop-blur-md">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-700/85">{label}</p>
-      <p className="mt-1 text-2xl font-black text-slate-950">{value.toLocaleString()}</p>
+    <div className="rounded-xl border border-border/50 bg-card/50 px-3.5 py-3 shadow-sm backdrop-blur-md">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-black text-foreground">{value.toLocaleString()}</p>
     </div>
   );
 }
 
-function AnalyticsInsightPanel({ analytics }: { analytics: ProgramAnalytics }) {
+function AnalyticsInsightPanel({ analytics, isScholarsMode }: { analytics: ProgramAnalytics, isScholarsMode?: boolean }) {
   return (
-    <div className="rounded-xl border border-white/50 bg-white/40 px-3 py-2.5 shadow-sm backdrop-blur-md">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Analytics</p>
+    <div className="rounded-xl border border-border/50 bg-card/50 px-3 py-2.5 shadow-sm backdrop-blur-md">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">{isScholarsMode ? "Scholar Analytics" : "Program Analytics"}</p>
       <div className="mt-2 space-y-1.5 text-xs">
         <div className="flex items-start justify-between gap-2">
-          <span className="shrink-0 text-slate-500">Top Feeder</span>
-          <strong className="min-w-0 truncate text-right text-slate-900">{analytics.topFeederSchoolRegistry?.schoolName || "None"}</strong>
+          <span className="shrink-0 text-muted-foreground">{isScholarsMode ? "Top Barangay" : "Top Feeder"}</span>
+          <strong className="min-w-0 truncate text-right text-foreground">{analytics.topFeederSchoolRegistry?.schoolName || "None"}</strong>
         </div>
         <div className="flex items-start justify-between gap-2">
-          <span className="shrink-0 text-slate-500">Top Municipality</span>
-          <strong className="min-w-0 truncate text-right text-slate-900">{analytics.topMunicipality?.name || "None"}</strong>
+          <span className="shrink-0 text-muted-foreground">Top Municipality</span>
+          <strong className="min-w-0 truncate text-right text-foreground">{analytics.topMunicipality?.name || "None"}</strong>
         </div>
+        {isScholarsMode && (
+          <>
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 text-muted-foreground">Top Program</span>
+              <strong className="min-w-0 truncate text-right text-foreground">{analytics.programDistribution?.[0]?.code || "None"}</strong>
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 text-muted-foreground">Top Department</span>
+              <strong className="min-w-0 truncate text-right text-foreground">{analytics.departmentDistribution?.[0]?.department || "None"}</strong>
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <span className="shrink-0 text-muted-foreground">Top Track</span>
+              <strong className="min-w-0 truncate text-right text-foreground">{analytics.trackDistribution?.[0]?.track || "None"}</strong>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1992,13 +2423,13 @@ function SettingsCard({
   children: ReactNode;
 }) {
   return (
-    <Card className="rounded-lg border-slate-200 shadow-sm">
+    <Card className="rounded-xl border border-border/60 bg-card/70 shadow-sm backdrop-blur-md">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary">{icon}</span>
+        <CardTitle className="flex items-center gap-2 text-base text-foreground">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-primary/10 text-primary border border-primary/20">{icon}</span>
           {title}
         </CardTitle>
-        <CardDescription>{description}</CardDescription>
+        <CardDescription className="text-muted-foreground">{description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">{children}</CardContent>
     </Card>
@@ -2007,8 +2438,8 @@ function SettingsCard({
 
 function SettingSwitch({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-      <span className="text-sm font-semibold">{label}</span>
+    <div className="flex items-center justify-between gap-3 rounded-lg border border-border/50 bg-muted/40 hover:bg-muted/60 transition-colors px-3 py-2">
+      <span className="text-sm font-semibold text-foreground">{label}</span>
       <Switch checked={checked} onCheckedChange={onChange} />
     </div>
   );
@@ -2023,25 +2454,68 @@ function statusTone(school: SchoolRegistry) {
   return "border-slate-200 bg-slate-50 text-slate-600";
 }
 
-function findDuplicateSchoolIds(schools: SchoolRegistry[]) {
-  const byName = new Map<string, SchoolRegistry[]>();
+export interface DuplicateInfo {
+  duplicateIds: Set<number>;
+  duplicateMasterMap: Map<number, SchoolRegistry>;
+}
+
+function findDuplicateSchoolInfo(schools: SchoolRegistry[]): DuplicateInfo {
+  const duplicateIds = new Set<number>();
+  const duplicateMasterMap = new Map<number, SchoolRegistry>();
+  const groups = new Map<string, SchoolRegistry[]>();
+
   schools.forEach((school) => {
-    const key = normalizeSchoolName(school.normalizedSchoolName || school.schoolName);
-    byName.set(key, [...(byName.get(key) || []), school]);
+    // 1. Group by exact non-zero geocoded coordinates (~1 meter precision)
+    if (
+      hasCoordinates(school) &&
+      typeof school.latitude === "number" &&
+      typeof school.longitude === "number" &&
+      school.latitude !== 0 &&
+      school.longitude !== 0
+    ) {
+      const coordKey = `COORD-${school.latitude.toFixed(5)},${school.longitude.toFixed(5)}`;
+      groups.set(coordKey, [...(groups.get(coordKey) || []), school]);
+    }
+
+    // 2. Group by exact normalized name (preserving structural words, minimum 8 characters)
+    const rawName = (school.normalizedSchoolName || school.schoolName || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .trim();
+
+    if (rawName.length >= 8) {
+      const muniKey = (school.municipality || "laguna").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const nameKey = `STRICTNAME-${muniKey}-${rawName}`;
+      groups.set(nameKey, [...(groups.get(nameKey) || []), school]);
+    }
   });
 
-  const duplicates = new Set<number>();
-  byName.forEach((group) => {
-    group
-      .sort((a, b) => {
-        if (hasCoordinates(a) && !hasCoordinates(b)) return -1;
-        if (!hasCoordinates(a) && hasCoordinates(b)) return 1;
-        return 0;
-      })
-      .slice(1)
-      .forEach((school) => duplicates.add(school.id));
+  groups.forEach((group) => {
+    const uniqueGroup = Array.from(new Map(group.map(s => [s.id, s])).values());
+    if (uniqueGroup.length > 1) {
+      const sorted = [...uniqueGroup].sort((a, b) => {
+        const aVerified = getSchoolStatus(a) === "Verified" ? 1 : 0;
+        const bVerified = getSchoolStatus(b) === "Verified" ? 1 : 0;
+        if (aVerified !== bVerified) return bVerified - aVerified;
+
+        const aCoords = hasCoordinates(a) ? 1 : 0;
+        const bCoords = hasCoordinates(b) ? 1 : 0;
+        if (aCoords !== bCoords) return bCoords - aCoords;
+
+        return b.schoolName.length - a.schoolName.length;
+      });
+
+      const master = sorted[0];
+      const duplicates = sorted.slice(1);
+
+      duplicates.forEach((dup) => {
+        duplicateIds.add(dup.id);
+        duplicateMasterMap.set(dup.id, master);
+      });
+    }
   });
-  return duplicates;
+
+  return { duplicateIds, duplicateMasterMap };
 }
 
 function sortProgramSchools(schools: any[], sort: string) {

@@ -107,15 +107,15 @@ export function SchoolMatchingQueue({
           </Button>
         </div>
         {queueSchoolsFiltered.length === 0 ? (
-          <Card className="border-white/70 bg-white/70 shadow-[0_18px_50px_-38px_rgba(15,23,42,0.45)] backdrop-blur-xl">
+          <Card className="border-border/60 bg-card/80 shadow-sm backdrop-blur-xl">
             <CardContent className="flex flex-col items-center gap-2 py-10 text-center">
               <CheckCircle2 className="h-8 w-8 text-emerald-500/80" />
-              <p className="text-sm font-medium text-slate-700">Queue is clear</p>
-              <p className="text-xs text-slate-500">No schools need review or coordinates.</p>
+              <p className="text-sm font-medium text-foreground">Queue is clear</p>
+              <p className="text-xs text-muted-foreground">No schools need review or coordinates.</p>
             </CardContent>
           </Card>
         ) : (
-          <Card className="overflow-hidden border-white/70 bg-white/70 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.5)] backdrop-blur-xl">
+          <Card className="overflow-hidden border-border/60 bg-card/80 shadow-sm backdrop-blur-xl">
             <Table>
               <TableHeader>
                 <TableRow>

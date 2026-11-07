@@ -486,7 +486,43 @@ export const DrawingCanvas = ({
       vv.addEventListener("scroll", onVV);
     }
 
+    const onMapMoveOrZoom = () => {
+      dirtyRef.current = true;
+      scheduleRedraw();
+    };
+
+    const onZoomAnim = (event: L.ZoomAnimEvent) => {
+      zoomAnimationRef.current = { center: event.center, zoom: event.zoom };
+      dirtyRef.current = true;
+      scheduleRedraw();
+    };
+
+    const onZoomSettled = () => {
+      zoomAnimationRef.current = null;
+      dirtyRef.current = true;
+      scheduleRedraw();
+    };
+
+    if (map) {
+      map.on("move", onMapMoveOrZoom);
+      map.on("moveend", onMapMoveOrZoom);
+      map.on("zoom", onMapMoveOrZoom);
+      map.on("zoomanim", onZoomAnim);
+      map.on("zoomend", onZoomSettled);
+      map.on("viewreset", onZoomSettled);
+      map.on("resize", onMapMoveOrZoom);
+    }
+
     return () => {
+      if (map) {
+        map.off("move", onMapMoveOrZoom);
+        map.off("moveend", onMapMoveOrZoom);
+        map.off("zoom", onMapMoveOrZoom);
+        map.off("zoomanim", onZoomAnim);
+        map.off("zoomend", onZoomSettled);
+        map.off("viewreset", onZoomSettled);
+        map.off("resize", onMapMoveOrZoom);
+      }
       ro.disconnect();
       window.removeEventListener("orientationchange", updateSize);
       window.removeEventListener("resize", updateSize);

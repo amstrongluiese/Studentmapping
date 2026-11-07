@@ -343,14 +343,12 @@ export function DrawingLabelLayer({
   };
 
   const getStickyNoteScale = (referenceZoom: number | undefined) => {
-    const currentZoom = getEffectiveZoom();
-    if (!isFiniteCoordinate(referenceZoom) || !isFiniteCoordinate(currentZoom)) return 1;
-    const scale = Math.pow(2, currentZoom - referenceZoom);
-    return isFiniteCoordinate(scale) && scale > 0 ? scale : 1;
+    // Keep sticky notes steady, readable, and unbothered at any zoom level without shrinking or glitching
+    return 1;
   };
 
-  const noteTransform = (position: OverlayPoint, scale: number) =>
-    `translate3d(${position.x}px, ${position.y}px, 0) scale(${scale})`;
+  const noteTransform = (position: OverlayPoint, _scale: number) =>
+    `translate3d(${position.x}px, ${position.y}px, 0)`;
 
   const resolveSafeNotePosition = (x: number, y: number, width: number, height: number) => {
     const mapEl = map.getContainer();

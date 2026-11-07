@@ -10,7 +10,7 @@ export interface GeocodeLookupResult {
   latitude: number;
   longitude: number;
   displayName: string;
-  source: "registry" | "alias" | "master-directory" | "cache";
+  source: "registry" | "alias" | "master-directory" | "cache" | "google";
   schoolId?: number;
   reused: boolean;
 }
@@ -101,10 +101,7 @@ export async function geocodeSchoolPreview(
     };
   }
 
-
-
-  // No match found in the master directory or local DB
-  // As a read-only preview we can still check the in-memory master directory for a likely match
+  // 2. Check the in-memory master directory for a likely match
   try {
     const all = await storage.listSchoolRegistry();
     const matcher = new SchoolMatchingEngine(all, []);
@@ -120,8 +117,43 @@ export async function geocodeSchoolPreview(
       };
     }
   } catch {
-    // on error, just continue to return null
+    // on error, continue to Google Maps fallback
+  }
+
+  // 3. Fallback to Server-Side Google Geocoding API if key is available
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.VITE_GOOGLE_MAPS_API_KEY;
+  if (apiKey) {
+    try {
+      const searchQueries = [
+        municipality ? `${trimmed}, ${municipality}, Laguna, Philippines` : `${trimmed}, Laguna, Philippines`,
+        `${trimmed}, Philippines`
+      ];
+
+      for (const query of searchQueries) {
+        const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&region=ph&key=${apiKey}`;
+        const response = await fetch(url);
+        if (!response.ok) continue;
+        const data = await response.json();
+        
+        if (data.status === "OK" && data.results && data.results.length > 0) {
+          const firstResult = data.results[0];
+          const loc = firstResult.geometry?.location;
+          if (loc && typeof loc.lat === "number" && typeof loc.lng === "number") {
+            return {
+              latitude: loc.lat,
+              longitude: loc.lng,
+              displayName: firstResult.formatted_address || trimmed,
+              source: "google",
+              reused: false,
+            };
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[geocodeLookup] Google Geocoding API fallback error:", err instanceof Error ? err.message : err);
+    }
   }
 
   return null;
 }
+

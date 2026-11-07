@@ -8,7 +8,6 @@ export const GEO_BOUNDS = {
 } as const;
 
 export const ACTIVE_ENROLLMENT_STATUSES = [
-  "Active",
   "Enrolled",
   "Officially Enrolled",
   "OE",
@@ -17,7 +16,7 @@ export const ACTIVE_ENROLLMENT_STATUSES = [
 
 /**
  * Checks if a given student status string represents an active/enrolled student.
- * Case-insensitive match. Defaults to treating null/undefined as "Active" 
+ * Case-insensitive match. Defaults to treating null/undefined as "OE" 
  * to preserve backwards compatibility where a blank status implied they were enrolled.
  */
 export function isStudentActive(status?: string | null): boolean {
