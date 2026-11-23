@@ -45,6 +45,9 @@ export async function comparePasswords(supplied: string, stored: string) {
 
 export function setupAuth(app: Express) {
   const env = getEnv();
+  const isHttpsDeployment =
+    process.env.FORCE_HTTPS === "true" ||
+    env.CORS_ORIGINS.some((origin) => origin.startsWith("https://"));
   const MySQLStore = MySQLStoreFactory(session as any);
   const store = new MySQLStore({ createDatabaseTable: true }, getMysqlPool() as any);
 
@@ -60,7 +63,7 @@ export function setupAuth(app: Express) {
         maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
         httpOnly: true,
         sameSite: "lax",
-        secure: env.IS_PRODUCTION,
+        secure: env.IS_PRODUCTION && isHttpsDeployment,
       },
     }),
   );
@@ -140,7 +143,7 @@ export function setupAuth(app: Express) {
         res.clearCookie(SESSION_COOKIE_NAME, {
           httpOnly: true,
           sameSite: "lax",
-          secure: env.IS_PRODUCTION,
+          secure: env.IS_PRODUCTION && isHttpsDeployment,
         });
         return res.json({ message: "Logged out successfully" });
       });
