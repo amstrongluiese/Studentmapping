@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -42,10 +42,19 @@ import {
   type ProgramAnalytics,
   type ProgramFilters,
 } from "@shared/programIntelligence";
-import { AdminPortalWorkspace, type AdminPortalSection } from "@/components/AdminPortalWorkspace";
-import { AdminSchoolRegistry } from "@/components/AdminSchoolRegistry";
-import { ThesisIntelligenceWorkspace } from "@/components/ThesisIntelligenceWorkspace";
-import { ApiSettingsCenter } from "@/components/ApiSettingsCenter";
+import type { AdminPortalSection } from "@/components/AdminPortalWorkspace";
+const AdminPortalWorkspace = lazy(() =>
+  import("@/components/AdminPortalWorkspace").then((m) => ({ default: m.AdminPortalWorkspace })),
+);
+const AdminSchoolRegistry = lazy(() =>
+  import("@/components/AdminSchoolRegistry").then((m) => ({ default: m.AdminSchoolRegistry })),
+);
+const ThesisIntelligenceWorkspace = lazy(() =>
+  import("@/components/ThesisIntelligenceWorkspace").then((m) => ({ default: m.ThesisIntelligenceWorkspace })),
+);
+const ApiSettingsCenter = lazy(() =>
+  import("@/components/ApiSettingsCenter").then((m) => ({ default: m.ApiSettingsCenter })),
+);
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTheme, type ThemePreference } from "@/components/theme-provider";
 import { useAuth } from "@/hooks/use-auth";
@@ -1292,91 +1301,101 @@ function getBarangayCoords(municipality: string, barangayName: string, dbBaranga
             isPresenting ? "pt-0" : "pt-[60px]",
           )}
         >
-          <AdminPortalWorkspace
-            duplicateIds={duplicateIds}
-            onAddSchool={() => openAddSchool()}
-            onDeleteSchool={(school) => deleteSchool.mutate(school.id)}
-            onEditSchool={openEditSchool}
-            onGeolocateSchool={geolocateSchool}
-            onRemoveDuplicate={removeDuplicate}
-            onSectionChange={setAdminTab}
-            renderGisWorkspaceSettings={() => (
-              <div className="mx-auto grid max-w-5xl gap-3 sm:grid-cols-2">
-                <SettingsCard icon={<Layers className="h-4 w-4" />} title="Overlays & labels" description="Map readability while operating GIS.">
-                  <SettingSwitch label="GIS overlays" checked={mapSettings.overlays} onChange={(checked) => updateMapSetting("overlays", checked)} />
-                  <SettingSwitch label="School info labels" checked={mapSettings.schoolLabels} onChange={(checked) => updateMapSetting("schoolLabels", checked)} />
-                  <SettingSwitch label="School name labels" checked={mapSettings.schoolNameLabels ?? defaultMapSettings.schoolNameLabels} onChange={(checked) => updateMapSetting("schoolNameLabels", checked)} />
-                  <SettingSwitch label="Barangay area labels" checked={mapSettings.barangayLabels} onChange={(checked) => updateMapSetting("barangayLabels", checked)} />
-                  <SettingSwitch label="City / municipality labels" checked={mapSettings.cityLabels} onChange={(checked) => updateMapSetting("cityLabels", checked)} />
-                  <SettingSwitch label="Basemap place names" checked={mapSettings.basemapPlaceNames} onChange={(checked) => updateMapSetting("basemapPlaceNames", checked)} />
-                  <SettingSwitch label="Roads on basemap" checked={mapSettings.roads} onChange={(checked) => updateMapSetting("roads", checked)} />
-                  <SettingSwitch label="Minimal basemap" checked={mapSettings.minimalistMode} onChange={(checked) => updateMapSetting("minimalistMode", checked)} />
-                  <SettingSwitch label="Dark basemap theme" checked={mapSettings.mapTheme === "dark"} onChange={(checked) => updateMapSetting("mapTheme", checked ? "dark" : "light")} />
-                  <SettingSwitch label="Marker clustering" checked={mapSettings.clusters} onChange={(checked) => updateMapSetting("clusters", checked)} />
-                  <SettingSwitch label="Program legend" checked={mapSettings.programLegend ?? defaultMapSettings.programLegend} onChange={(checked) => updateMapSetting("programLegend", checked)} />
-                </SettingsCard>
-
-
-                <SettingsCard icon={<Database className="h-4 w-4" />} title="Import behavior" description="Applied when processing admissions rows.">
-                  <SettingSwitch label="Auto-geolocate missing schools" checked={importSettings.autoGeocode} onChange={(checked) => setImportSettings((current) => ({ ...current, autoGeocode: checked }))} />
-                  <SettingSwitch label="Save local registry dataset" checked={importSettings.saveDataset} onChange={(checked) => setImportSettings((current) => ({ ...current, saveDataset: checked }))} />
-                  <SettingSwitch label="Skip duplicate admissions rows" checked={importSettings.skipDuplicates} onChange={(checked) => setImportSettings((current) => ({ ...current, skipDuplicates: checked }))} />
-                </SettingsCard>
-
-                <SettingsCard icon={<Palette className="h-4 w-4" />} title="Theme & drawings" description="Workspace density and annotation layer.">
-                  <Select
-                    name="gisWorkspaceTheme"
-                    value={theme}
-                    onValueChange={(value) => setTheme(value as ThemePreference)}
-                  >
-                    <SelectTrigger id="gis-workspace-theme" className="h-9 bg-surface-soft text-sm" aria-label="Theme">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="system">System</SelectItem>
-                      <SelectItem value="light">Light</SelectItem>
-                      <SelectItem value="dark">Dark</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <SettingSwitch label="Compact mode" checked={systemSettings.compactMode} onChange={(checked) => setSystemSettings((current) => ({ ...current, compactMode: checked }))} />
-                  <SettingSwitch label="Show drawings" checked={drawSettings.showDrawings} onChange={(checked) => updateDrawSetting("showDrawings", checked)} />
-                  <SettingSwitch label="Drawing annotations" checked={drawSettings.annotationVisibility} onChange={(checked) => updateDrawSetting("annotationVisibility", checked)} />
-                  <Button variant="outline" className="h-9 w-full gap-2 border-border/60 bg-card hover:bg-muted text-sm text-foreground" onClick={() => setClearDrawSignal((signal) => signal + 1)}>
-                    <Trash2 className="h-4 w-4" />
-                    Clear drawings
-                  </Button>
-                </SettingsCard>
-              </div>
-            )}
-            renderIntegrationControls={() => <ApiSettingsCenter />}
-            renderSchoolRegistry={() => (
-              <AdminSchoolRegistry
-                compact
+          {mainTab === "admin" ? (
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading Admin Portal...</div>}>
+              <AdminPortalWorkspace
                 duplicateIds={duplicateIds}
-                duplicateMasterMap={duplicateMasterMap}
-                filteredSchools={filteredSchools}
-                isLoading={isLoading}
-                registrySearch={registrySearch}
-                showAcronymsOnly={showAcronymsOnly}
-                onAcronymsToggle={setShowAcronymsOnly}
-                onAdd={() => openAddSchool()}
-                onDelete={(school) => deleteSchool.mutate(school.id)}
-                onEdit={openEditSchool}
-                onGeolocate={geolocateSchool}
+                onAddSchool={() => openAddSchool()}
+                onDeleteSchool={(school) => deleteSchool.mutate(school.id)}
+                onEditSchool={openEditSchool}
+                onGeolocateSchool={geolocateSchool}
                 onRemoveDuplicate={removeDuplicate}
-                onSearchChange={setRegistrySearch}
-                onBulkMergeOpen={() => setBulkMergeOpen(true)}
-                studentOriginsMap={studentOriginsMap}
+                onSectionChange={setAdminTab}
+                renderGisWorkspaceSettings={() => (
+                  <div className="mx-auto grid max-w-5xl gap-3 sm:grid-cols-2">
+                    <SettingsCard icon={<Layers className="h-4 w-4" />} title="Overlays & labels" description="Map readability while operating GIS.">
+                      <SettingSwitch label="GIS overlays" checked={mapSettings.overlays} onChange={(checked) => updateMapSetting("overlays", checked)} />
+                      <SettingSwitch label="School info labels" checked={mapSettings.schoolLabels} onChange={(checked) => updateMapSetting("schoolLabels", checked)} />
+                      <SettingSwitch label="School name labels" checked={mapSettings.schoolNameLabels ?? defaultMapSettings.schoolNameLabels} onChange={(checked) => updateMapSetting("schoolNameLabels", checked)} />
+                      <SettingSwitch label="Barangay area labels" checked={mapSettings.barangayLabels} onChange={(checked) => updateMapSetting("barangayLabels", checked)} />
+                      <SettingSwitch label="City / municipality labels" checked={mapSettings.cityLabels} onChange={(checked) => updateMapSetting("cityLabels", checked)} />
+                      <SettingSwitch label="Basemap place names" checked={mapSettings.basemapPlaceNames} onChange={(checked) => updateMapSetting("basemapPlaceNames", checked)} />
+                      <SettingSwitch label="Roads on basemap" checked={mapSettings.roads} onChange={(checked) => updateMapSetting("roads", checked)} />
+                      <SettingSwitch label="Minimal basemap" checked={mapSettings.minimalistMode} onChange={(checked) => updateMapSetting("minimalistMode", checked)} />
+                      <SettingSwitch label="Dark basemap theme" checked={mapSettings.mapTheme === "dark"} onChange={(checked) => updateMapSetting("mapTheme", checked ? "dark" : "light")} />
+                      <SettingSwitch label="Marker clustering" checked={mapSettings.clusters} onChange={(checked) => updateMapSetting("clusters", checked)} />
+                      <SettingSwitch label="Program legend" checked={mapSettings.programLegend ?? defaultMapSettings.programLegend} onChange={(checked) => updateMapSetting("programLegend", checked)} />
+                    </SettingsCard>
+
+
+                    <SettingsCard icon={<Database className="h-4 w-4" />} title="Import behavior" description="Applied when processing admissions rows.">
+                      <SettingSwitch label="Auto-geolocate missing schools" checked={importSettings.autoGeocode} onChange={(checked) => setImportSettings((current) => ({ ...current, autoGeocode: checked }))} />
+                      <SettingSwitch label="Save local registry dataset" checked={importSettings.saveDataset} onChange={(checked) => setImportSettings((current) => ({ ...current, saveDataset: checked }))} />
+                      <SettingSwitch label="Skip duplicate admissions rows" checked={importSettings.skipDuplicates} onChange={(checked) => setImportSettings((current) => ({ ...current, skipDuplicates: checked }))} />
+                    </SettingsCard>
+
+                    <SettingsCard icon={<Palette className="h-4 w-4" />} title="Theme & drawings" description="Workspace density and annotation layer.">
+                      <Select
+                        name="gisWorkspaceTheme"
+                        value={theme}
+                        onValueChange={(value) => setTheme(value as ThemePreference)}
+                      >
+                        <SelectTrigger id="gis-workspace-theme" className="h-9 bg-surface-soft text-sm" aria-label="Theme">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="system">System</SelectItem>
+                          <SelectItem value="light">Light</SelectItem>
+                          <SelectItem value="dark">Dark</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <SettingSwitch label="Compact mode" checked={systemSettings.compactMode} onChange={(checked) => setSystemSettings((current) => ({ ...current, compactMode: checked }))} />
+                      <SettingSwitch label="Show drawings" checked={drawSettings.showDrawings} onChange={(checked) => updateDrawSetting("showDrawings", checked)} />
+                      <SettingSwitch label="Drawing annotations" checked={drawSettings.annotationVisibility} onChange={(checked) => updateDrawSetting("annotationVisibility", checked)} />
+                      <Button variant="outline" className="h-9 w-full gap-2 border-border/60 bg-card hover:bg-muted text-sm text-foreground" onClick={() => setClearDrawSignal((signal) => signal + 1)}>
+                        <Trash2 className="h-4 w-4" />
+                        Clear drawings
+                      </Button>
+                    </SettingsCard>
+                  </div>
+                )}
+                renderIntegrationControls={() => (
+                  <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading API Settings...</div>}>
+                    <ApiSettingsCenter />
+                  </Suspense>
+                )}
+                renderSchoolRegistry={() => (
+                  <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading School Registry...</div>}>
+                    <AdminSchoolRegistry
+                      compact
+                      duplicateIds={duplicateIds}
+                      duplicateMasterMap={duplicateMasterMap}
+                      filteredSchools={filteredSchools}
+                      isLoading={isLoading}
+                      registrySearch={registrySearch}
+                      showAcronymsOnly={showAcronymsOnly}
+                      onAcronymsToggle={setShowAcronymsOnly}
+                      onAdd={() => openAddSchool()}
+                      onDelete={(school) => deleteSchool.mutate(school.id)}
+                      onEdit={openEditSchool}
+                      onGeolocate={geolocateSchool}
+                      onRemoveDuplicate={removeDuplicate}
+                      onSearchChange={setRegistrySearch}
+                      onBulkMergeOpen={() => setBulkMergeOpen(true)}
+                      studentOriginsMap={studentOriginsMap}
+                    />
+                  </Suspense>
+                )}
+                gisOverview={gisOverview}
+                importLogs={importLogs}
+                processedStudents={processedStudents}
+                schools={schools}
+                schoolsLoading={isLoading}
+                schoolsUpdatedAt={lastUpdatedMs}
+                section={adminTab}
               />
-            )}
-            gisOverview={gisOverview}
-            importLogs={importLogs}
-            processedStudents={processedStudents}
-            schools={schools}
-            schoolsLoading={isLoading}
-            schoolsUpdatedAt={lastUpdatedMs}
-            section={adminTab}
-          />
+            </Suspense>
+          ) : null}
         </TabsContent>
 
         <TabsContent
@@ -1387,21 +1406,25 @@ function getBarangayCoords(municipality: string, barangayName: string, dbBaranga
             isPresenting ? "pt-3" : "pt-[calc(60px+1rem)] sm:pt-[calc(60px+1.5rem)]",
           )}
         >
-          <ThesisIntelligenceWorkspace
-            schools={schools}
-            students={students}
-            programSchools={programSchools}
-            programAnalytics={programAnalytics}
-            onLaunchDefenseMode={() => {
-              applyPresentation(true);
-              setIsTouring(true);
-              setMainTab("map");
-            }}
-            onSelectSchoolOnMap={(schoolId) => {
-              setSelectedMapSchoolId(schoolId);
-              setMainTab("map");
-            }}
-          />
+          {mainTab === "analytics" ? (
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading Analytics...</div>}>
+              <ThesisIntelligenceWorkspace
+                schools={schools}
+                students={students}
+                programSchools={programSchools}
+                programAnalytics={programAnalytics}
+                onLaunchDefenseMode={() => {
+                  applyPresentation(true);
+                  setIsTouring(true);
+                  setMainTab("map");
+                }}
+                onSelectSchoolOnMap={(schoolId) => {
+                  setSelectedMapSchoolId(schoolId);
+                  setMainTab("map");
+                }}
+              />
+            </Suspense>
+          ) : null}
         </TabsContent>
 
         <TabsContent

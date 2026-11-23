@@ -56,7 +56,6 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 5000,
     watch: {
-      usePolling: true,
       ignored: ["**/node_modules/**", "**/.vite_cache/**", "**/server/uploads/**"],
     },
     fs: {
