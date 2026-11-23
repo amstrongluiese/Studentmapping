@@ -1,22 +1,38 @@
 import dotenv from "dotenv";
+dotenv.config();
+
 import express, { type Request, Response, NextFunction } from "express";
+import { createServer } from "http";
+import { validateEnv } from "./env";
+import { applySecurityMiddleware } from "./security";
+import { logger, requestIdMiddleware, captureException } from "./logger";
+import { registerHealthRoutes } from "./health";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
-import { createServer } from "http";
 import { testDatabaseConnection, initializeDatabase, getDb } from "./db";
+import { closeMysqlPool } from "./dbMysql";
+import { enterpriseCache } from "./cache";
+import { ensureGisSchema } from "./ensureGisSchema";
 import { dataAccessLogs } from "@shared/schema";
 import { setupAuth } from "./auth";
 
-dotenv.config();
-
+const env = validateEnv();
 const app = express();
 const httpServer = createServer(app);
+
+// Reverse proxy / load balancer readiness (preserves real req.ip and HTTPS cookies behind Nginx/Caddy/Cloudflare)
+if (env.TRUST_PROXY > 0) {
+  app.set("trust proxy", env.TRUST_PROXY);
+}
 
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
   }
 }
+
+app.use(requestIdMiddleware);
+applySecurityMiddleware(app);
 
 app.use(
   express.json({
@@ -30,49 +46,40 @@ app.use(
 app.use(express.urlencoded({ extended: false, limit: "50mb" }));
 
 export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
+  logger.info(message, { source });
 }
 
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
-    const duration = Date.now() - start;
+    const durationMs = Date.now() - start;
 
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
+      // Structured JSON request log without PII response bodies
+      logger.info("http_request", {
+        requestId: req.requestId,
+        method: req.method,
+        path,
+        status: res.statusCode,
+        durationMs,
+        bytes: res.getHeader("content-length") || undefined,
+      });
 
       // Async log to DB for audit trailing (Data Privacy Act compliance)
-      if (req.isAuthenticated && req.isAuthenticated() && req.user && req.method !== 'OPTIONS') {
+      if (req.isAuthenticated && req.isAuthenticated() && req.user && req.method !== "OPTIONS") {
         const user = req.user as any;
-        getDb().insert(dataAccessLogs).values({
-          userId: user.id,
-          action: req.method,
-          targetTable: path,
-          ipAddress: req.ip || req.connection.remoteAddress || 'unknown',
-        }).execute().catch(err => console.error("Audit log failed:", err));
+        getDb()
+          .insert(dataAccessLogs)
+          .values({
+            userId: user.id,
+            action: req.method,
+            targetTable: path,
+            ipAddress: req.ip || req.socket.remoteAddress || "unknown",
+          })
+          .execute()
+          .catch((err) => logger.error("audit_log_write_failed", { requestId: req.requestId, error: err }));
       }
     }
   });
@@ -80,42 +87,128 @@ app.use((req, res, next) => {
   next();
 });
 
+/**
+ * Explicit method + path allowlist for unauthenticated /api requests.
+ */
+function isPublicApiRequest(req: Request): boolean {
+  const { method, path } = req;
+
+  if (method === "GET") {
+    if (
+      path === "/user" ||
+      path === "/programs" ||
+      path === "/departments" ||
+      path === "/settings" ||
+      path === "/test" ||
+      path === "/health" ||
+      path === "/ready" ||
+      path === "/referrals"
+    ) {
+      return true;
+    }
+    if (path.startsWith("/students/number/") || path.startsWith("/students/code/")) {
+      return true;
+    }
+    return false;
+  }
+
+  if (method === "POST") {
+    return (
+      path === "/login" ||
+      path === "/logout" ||
+      path === "/students/register" ||
+      path === "/referrals" ||
+      path === "/public-referrals"
+    );
+  }
+
+  return false;
+}
+
+// Register unauthenticated liveness & readiness probes before API auth gate
+registerHealthRoutes(app);
+
+let isShuttingDown = false;
+async function gracefulShutdown(signal: string) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  logger.warn("shutdown_initiated", { signal });
+
+  const forceTimer = setTimeout(() => {
+    logger.error("shutdown_forced_timeout", { signal });
+    process.exit(1);
+  }, 10000);
+  forceTimer.unref();
+
+  httpServer.close(async () => {
+    await enterpriseCache.close().catch(() => {});
+    await closeMysqlPool().catch(() => {});
+    logger.info("shutdown_complete", { signal });
+    process.exit(0);
+  });
+}
+
+process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
+process.on("unhandledRejection", (reason) => captureException(reason, { source: "unhandledRejection" }));
+process.on("uncaughtException", (err) => {
+  captureException(err, { source: "uncaughtException" });
+  void gracefulShutdown("uncaughtException");
+});
+
 (async () => {
   initializeDatabase();
 
   await testDatabaseConnection();
+  await ensureGisSchema();
   setupAuth(app);
 
-  // Protect all API routes except auth and public ones
+  // Default API cache policy: prevent shared CDNs/proxies from caching authenticated/PII responses.
+  app.use("/api", (_req, res, next) => {
+    res.setHeader("Cache-Control", "private, no-store");
+    next();
+  });
+
+  // Protect all API routes except explicitly allowlisted public method+path pairs
   app.use("/api", (req, res, next) => {
-    const publicPaths = ["/login", "/logout", "/user", "/programs", "/departments", "/referrals", "/students/register", "/settings"];
-    if (publicPaths.some(p => req.path.startsWith(p))) {
+    if (isPublicApiRequest(req)) {
       return next();
     }
-    if (req.isAuthenticated && req.isAuthenticated()) {
+    if (req.isAuthenticated && req.isAuthenticated() && req.user) {
       return next();
     }
-    // In local development, maintain active admin session so live data never drops to 0 on hot reload
-    if (process.env.NODE_ENV !== "production") {
+    // Opt-in only for local development debugging (never active by default or in production)
+    if (env.ALLOW_DEV_AUTO_ADMIN) {
       req.user = { id: 1, username: "admin", role: "admin" } as any;
       return next();
     }
-    res.status(401).json({ message: "Unauthorized" });
+    return res.status(401).json({ message: "Unauthorized", requestId: req.requestId });
   });
 
   await registerRoutes(httpServer, app);
 
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  // Hardened global error handler — never leaks stack traces or raw 500 internals in production
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    const isClientError = status >= 400 && status < 500;
+    const message = isClientError
+      ? err.message || "Bad Request"
+      : env.IS_PRODUCTION
+        ? "Internal Server Error"
+        : err.message || "Internal Server Error";
 
-    console.error("Internal Server Error:", err);
+    captureException(err, {
+      requestId: req.requestId,
+      method: req.method,
+      path: req.path,
+      status,
+    });
 
     if (res.headersSent) {
       return next(err);
     }
 
-    return res.status(status).json({ message });
+    return res.status(status).json({ message, requestId: req.requestId });
   });
 
   // Setup Vite in development only
@@ -127,7 +220,7 @@ app.use((req, res, next) => {
   }
 
   // Serve both API and frontend
-  const preferredPort = parseInt(process.env.PORT || "5000", 10);
+  const preferredPort = env.PORT;
 
   function tryListen(startPort: number, maxAttempts = 6) {
     let attempts = 0;
@@ -138,10 +231,10 @@ app.use((req, res, next) => {
 
       const onError = (err: any) => {
         if (err && err.code === "EADDRINUSE") {
-          log(`port ${currentPort} in use, attempting ${attempts < maxAttempts ? 'next' : 'no more'} port(s)...`);
+          logger.warn("port_in_use", { port: currentPort, attempt: attempts, maxAttempts });
           httpServer.removeListener("error", onError);
           if (attempts >= maxAttempts) {
-            console.error(`No available ports after ${attempts} attempts; giving up.`);
+            logger.error("no_available_ports", { attempts });
             process.exit(1);
             return;
           }
@@ -157,9 +250,11 @@ app.use((req, res, next) => {
 
       httpServer.listen({ port: currentPort, host: "0.0.0.0" }, () => {
         httpServer.removeListener("error", onError);
-        log(`serving on port ${currentPort}`);
-        log(`local: http://localhost:${currentPort}`);
-        log(`network: http://192.168.100.134:${currentPort}`);
+        logger.info("server_listening", {
+          port: currentPort,
+          env: env.NODE_ENV,
+          url: `http://localhost:${currentPort}`,
+        });
       });
     };
 
@@ -168,10 +263,6 @@ app.use((req, res, next) => {
 
   tryListen(preferredPort);
 })().catch((err) => {
-  console.error(
-    "Startup failed:",
-    err instanceof Error ? err.message : err,
-  );
-
+  captureException(err, { source: "startup" });
   process.exit(1);
 });

@@ -85,6 +85,21 @@ export const referrals = mysqlTable("referrals", {
   deletedBy: int("deleted_by"),
 });
 
+/** Separate table for non-student / public referrals to keep student portal records clean */
+export const publicReferrals = mysqlTable("public_referrals", {
+  id: int("id").primaryKey().autoincrement(),
+  referrerName: varchar("referrer_name", { length: 255 }).notNull(),
+  referrerContact: varchar("referrer_contact", { length: 100 }),
+  referredName: text("referred_name").notNull(),
+  relationship: varchar("relationship", { length: 255 }).notNull(),
+  contactNumber: varchar("contact_number", { length: 100 }),
+  notes: text("notes"),
+  status: varchar("status", { length: 100 }).notNull().default("pending"),
+  createdAt: datetime("created_at").notNull().$default(() => new Date()),
+  deletedAt: datetime("deleted_at"),
+  deletedBy: int("deleted_by"),
+});
+
 /** Raw admissions import batches */
 export const imports = mysqlTable("imports", {
   id: int("id").primaryKey().autoincrement(),
@@ -184,6 +199,10 @@ export const studentsProcessed = mysqlTable(
     schoolIdx: index("students_processed_school_idx").on(table.schoolRegistryId),
     studentNoIdx: index("students_processed_student_no_idx").on(table.studentNumber),
     munCourseIdx: index("students_processed_mun_course_idx").on(table.municipality, table.course),
+    enrollmentStatusIdx: index("students_processed_enrollment_status_idx").on(table.enrollmentStatus),
+    mappingStatusIdx: index("students_processed_mapping_status_idx").on(table.mappingStatus),
+    scholarIdx: index("students_processed_scholar_idx").on(table.iskolarNiKap),
+    barangayIdx: index("students_processed_barangay_idx").on(table.barangay),
   })
 );
 
@@ -326,4 +345,16 @@ export const dataAccessLogs = mysqlTable('data_access_logs', {
   ipAddress: text('ip_address'),
   accessedAt: datetime('accessed_at', { mode: 'date' }).notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const insertPublicReferralSchema = createInsertSchema(publicReferrals, {
+  referrerName: z.string().trim().min(2, "Your name is required").max(255),
+  referrerContact: z.string().trim().max(100).nullable().optional(),
+  referredName: z.string().trim().min(2, "Referred student name is required").max(255),
+  relationship: z.string().trim().min(1, "Relationship is required").max(255),
+  contactNumber: z.string().trim().max(100).nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+}).omit({ id: true, createdAt: true, deletedAt: true, deletedBy: true, status: true });
+
+export type InsertPublicReferral = z.infer<typeof insertPublicReferralSchema>;
+export type PublicReferral = typeof publicReferrals.$inferSelect;
 

@@ -19,12 +19,19 @@ import {
   schoolRegistry,
   students,
   referrals,
+  publicReferrals,
+  insertPublicReferralSchema,
   users,
   barangayRegistry,
 } from "@shared/schema";
 import { eq, and, count, desc, inArray, not, isNull, or } from "drizzle-orm";
 import { isAdmin, hashPassword, comparePasswords } from "./auth";
+import { authLimiter, uploadLimiter, writeLimiter, publicApiLimiter } from "./security";
+import { logAuditEvent } from "./auditLogger";
 import { enterpriseCache } from "./cache";
+import { enterpriseQueue } from "./queue";
+import { unlink } from "node:fs/promises";
+import path from "node:path";
 import { normalizeSchoolName } from "@shared/schoolRegistry";
 import { SchoolMatchingEngine } from "./schoolMatcher";
 import { z } from "zod";
@@ -53,6 +60,8 @@ import { seedPrograms } from "./seed";
 import { setDynamicCatalog } from "@shared/programIntelligence";
 
 async function refreshCatalog() {
+  enterpriseCache.invalidate("departments:");
+  enterpriseCache.invalidate("programs:");
   const db = getDb();
   const dbPrograms = await db.select().from(programs);
   const deptRecords = await db.select().from(departments);
@@ -77,7 +86,93 @@ async function refreshCatalog() {
   setDynamicCatalog(formatted as any);
 }
 
-const upload = multer({ dest: "server/uploads/" });
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([".xlsx", ".xls", ".csv"]);
+const ALLOWED_UPLOAD_MIMES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+  "text/csv",
+  "application/csv",
+  "text/plain",
+  "application/octet-stream",
+]);
+
+const upload = multer({
+  dest: "server/uploads/",
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10 MB max
+    files: 1,
+  },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase();
+    if (!ALLOWED_UPLOAD_EXTENSIONS.has(ext)) {
+      return cb(new Error("Invalid file type. Only .xlsx, .xls, and .csv files are allowed."));
+    }
+    if (file.mimetype && !ALLOWED_UPLOAD_MIMES.has(file.mimetype)) {
+      return cb(new Error("Unsupported file MIME type."));
+    }
+    cb(null, true);
+  },
+});
+
+const SENSITIVE_SETTING_KEY_PATTERN = /(token|secret|password|apikey|api_key|private_key)/i;
+
+function parsePositiveIntId(raw: string | string[] | undefined): number | null {
+  const val = Array.isArray(raw) ? raw[0] : raw;
+  if (!val) return null;
+  const n = Number(val);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+const createUserBodySchema = z.object({
+  username: z.string().trim().min(3, "Username must be at least 3 characters").max(64).regex(/^[a-zA-Z0-9._-]+$/, "Username may only contain letters, numbers, dots, underscores, and hyphens"),
+  password: z.string().min(8, "Password must be at least 8 characters").max(256),
+  role: z.enum(["admin", "user"]).default("user"),
+  isActive: z.boolean().optional().default(true),
+});
+
+const updateUserBodySchema = z.object({
+  password: z.string().min(8, "Password must be at least 8 characters").max(256).optional(),
+  role: z.enum(["admin", "user"]).optional(),
+  isActive: z.boolean().optional(),
+});
+
+const barangayCreateSchema = z.object({
+  province: z.string().trim().min(1).max(255).default("Laguna"),
+  municipality: z.string().trim().min(1, "Municipality is required").max(255),
+  barangayName: z.string().trim().min(1, "Barangay name is required").max(255),
+  normalizedName: z.string().trim().max(255).optional().default(""),
+  latitude: z.coerce.number().min(-90).max(90).nullable().optional(),
+  longitude: z.coerce.number().min(-180).max(180).nullable().optional(),
+  isActive: z.boolean().optional().default(true),
+});
+
+const barangayPatchSchema = barangayCreateSchema.partial();
+
+const departmentUpsertSchema = z.object({
+  id: z.coerce.number().int().positive().optional(),
+  code: z.string().trim().min(1, "Department code is required").max(100),
+  name: z.string().trim().min(1, "Department name is required").max(255),
+  color: z.string().trim().min(1, "Department color is required").max(50),
+  targetValue: z.coerce.number().int().min(0).optional().default(0),
+});
+
+const programUpsertSchema = z.object({
+  id: z.coerce.number().int().positive().optional(),
+  departmentId: z.coerce.number().int().positive("Department ID is required"),
+  code: z.string().trim().min(1, "Program code is required").max(100),
+  name: z.string().trim().min(1, "Program name is required").max(255),
+  track: z.string().trim().max(255).nullable().optional(),
+  level: z.string().trim().max(100).optional().default("Bachelor"),
+  color: z.string().trim().min(1, "Program color is required").max(50),
+  targetValue: z.coerce.number().int().min(0).optional().default(0),
+});
+
+const settingsUpdateSchema = z.record(z.string().min(1).max(128), z.string().max(10000));
+
+const publicReferralPatchSchema = z.object({
+  status: z.enum(["pending", "approved", "rejected"]).optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+});
 
 export async function registerRoutes(
   httpServer: Server,
@@ -87,65 +182,121 @@ export async function registerRoutes(
   await seedPrograms();
   await refreshCatalog();
 
+  // Register real background job workers (Pillar 4)
+  enterpriseQueue.registerHandler<{ records: any[] }>("IMPORT_STUDENTS", async (payload, updateProgress) => {
+    updateProgress(10);
+    await processBatch(payload.records);
+    enterpriseCache.invalidate("gis:");
+    updateProgress(100);
+    return { recordCount: payload.records.length };
+  });
+
+  enterpriseQueue.registerHandler("RECOMPUTE_COUNTS", async (_payload, updateProgress) => {
+    updateProgress(25);
+    await recomputeSchoolStudentCounts();
+    enterpriseCache.invalidate("gis:");
+    updateProgress(100);
+    return { recomputed: true };
+  });
+
+  // Admin Background Job Queue Status Endpoints
+  app.get("/api/jobs", isAdmin, (_req, res) => {
+    res.json({
+      stats: enterpriseQueue.getStats(),
+      jobs: enterpriseQueue.listJobs(50),
+    });
+  });
+
+  app.get("/api/jobs/:id", isAdmin, (req, res) => {
+    const jobId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const job = enterpriseQueue.getJob(jobId);
+    if (!job) return res.status(404).json({ message: "Job not found" });
+    res.json(job);
+  });
+
   // Admin routes
   app.get("/api/users", isAdmin, async (req, res) => {
     const allUsers = await getDb().select({ id: users.id, username: users.username, role: users.role, isActive: users.isActive, createdAt: users.createdAt }).from(users).orderBy(desc(users.createdAt));
     res.json(allUsers);
   });
 
-  app.post("/api/users", isAdmin, async (req, res) => {
+  app.post("/api/users", isAdmin, writeLimiter, async (req, res) => {
     try {
-      const { username, password, role, isActive } = req.body;
+      const parsed = createUserBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid user data" });
+      }
+      const { username, password, role, isActive } = parsed.data;
       const db = getDb();
       const existing = await db.select().from(users).where(eq(users.username, username)).limit(1);
       if (existing.length > 0) return res.status(400).json({ message: "Username already exists" });
       const hashedPassword = await hashPassword(password);
-      const [insertResult] = await db.insert(users).values({ username, password: hashedPassword, role: role || "admin", isActive: isActive ?? true });
+      const [insertResult] = await db.insert(users).values({ username, password: hashedPassword, role, isActive });
       const user = await db.select({ id: users.id, username: users.username, role: users.role, isActive: users.isActive }).from(users).where(eq(users.id, insertResult.insertId)).limit(1).then(r => r[0]);
-      res.json(user);
+      await logAuditEvent({ action: "CREATE", targetResource: `user:${username}`, details: `Created ${role} account` }, req);
+      res.status(201).json(user);
     } catch (err) {
       res.status(500).json({ message: "Failed to create user" });
     }
   });
 
-  app.put("/api/users/:id", isAdmin, async (req, res) => {
+  app.put("/api/users/:id", isAdmin, writeLimiter, async (req, res) => {
     try {
-      const { id } = req.params;
-      const { password, role, isActive } = req.body;
+      const userId = parsePositiveIntId(req.params.id);
+      if (!userId) return res.status(400).json({ message: "Invalid user ID" });
+      const parsed = updateUserBodySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid user update data" });
+      }
+      const { password, role, isActive } = parsed.data;
       const updates: any = {};
       if (password) updates.password = await hashPassword(password);
       if (role) updates.role = role;
       if (isActive !== undefined) updates.isActive = isActive;
-      
-      await getDb().update(users).set(updates).where(eq(users.id, Number(id)));
-      const user = await getDb().select({ id: users.id, username: users.username, role: users.role, isActive: users.isActive }).from(users).where(eq(users.id, Number(id))).limit(1).then(r => r[0]);
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No valid fields provided for update" });
+      }
+
+      await getDb().update(users).set(updates).where(eq(users.id, userId));
+      const user = await getDb().select({ id: users.id, username: users.username, role: users.role, isActive: users.isActive }).from(users).where(eq(users.id, userId)).limit(1).then(r => r[0]);
+      if (!user) return res.status(404).json({ message: "User not found" });
+      await logAuditEvent({ action: "UPDATE", targetResource: `user:${userId}`, details: `Updated account fields: ${Object.keys(updates).join(", ")}` }, req);
       res.json(user);
     } catch (err) {
       res.status(500).json({ message: "Failed to update user" });
     }
   });
 
-  app.delete("/api/users/:id", isAdmin, async (req, res) => {
+  app.delete("/api/users/:id", isAdmin, writeLimiter, async (req, res) => {
     try {
-      const { id } = req.params;
-      if (Number(id) === (req.user as any)?.id) return res.status(400).json({ message: "Cannot delete your own account" });
-      await getDb().delete(users).where(eq(users.id, Number(id)));
+      const userId = parsePositiveIntId(req.params.id);
+      if (!userId) return res.status(400).json({ message: "Invalid user ID" });
+      if (userId === (req.user as any)?.id) return res.status(400).json({ message: "Cannot delete your own account" });
+      await getDb().delete(users).where(eq(users.id, userId));
+      await logAuditEvent({ action: "DELETE", targetResource: `user:${userId}`, details: "Deleted user account" }, req);
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ message: "Failed to delete user" });
     }
   });
 
-  // School routes
+  // School routes (unified list + search endpoint; eliminates duplicate registration)
   app.get(api.schoolRegistry.list.path, async (req, res) => {
-    const schoolsList = await storage.listSchoolRegistry();
+    const q = String(req.query.q || "").trim();
+    if (q) {
+      const results = await searchSchools(q);
+      return res.json(results);
+    }
+    const schoolsList = await enterpriseCache.getOrSet("schools:all", 120, () => storage.listSchoolRegistry());
     res.json(schoolsList);
   });
 
-  app.post(api.schoolRegistry.import.path, async (req, res) => {
+  app.post(api.schoolRegistry.import.path, isAdmin, uploadLimiter, async (req, res) => {
     try {
       const input = api.schoolRegistry.import.input.parse(req.body);
       const result = await storage.importSchools(input.schoolRegistry as any);
+      enterpriseCache.invalidate("schools:");
+      enterpriseCache.invalidate("gis:");
       res.json(result);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -154,11 +305,11 @@ export async function registerRoutes(
   });
 
   // Admin Master Directory Routes
-  app.get("/api/admin/directory", async (req, res) => {
+  app.get("/api/admin/directory", isAdmin, async (req, res) => {
     res.json(await storage.listSchoolRegistry());
   });
 
-  app.post("/api/admin/clear-data", async (req, res) => {
+  app.post("/api/admin/clear-data", isAdmin, writeLimiter, async (req, res) => {
     try {
       const db = getDb();
       const safeDelete = async (table: any) => {
@@ -173,6 +324,7 @@ export async function registerRoutes(
       await safeDelete(referrals);
       await safeDelete(students);
       enterpriseCache.invalidate();
+      await logAuditEvent({ action: "CLEAR_ALL_DATA", targetResource: "all_student_tables", details: "Factory reset of student and import tables" }, req);
       res.json({ success: true, message: "All student and import data has been factory reset." });
     } catch (err) {
       console.error("[clear-data] error:", err);
@@ -180,13 +332,14 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/archive-data", async (req, res) => {
+  app.post("/api/admin/archive-data", isAdmin, writeLimiter, async (req, res) => {
     try {
       const db = getDb();
       const now = new Date();
       await db.update(studentsProcessed).set({ enrollmentStatus: "Archived", archivedAt: now });
       await db.update(studentImports).set({ enrollmentStatus: "Archived" });
       enterpriseCache.invalidate();
+      await logAuditEvent({ action: "UPDATE", targetResource: "students_processed", details: "Archived all active student records" }, req);
       res.json({ success: true, message: "All active student data has been archived successfully." });
     } catch (err) {
       console.error("[archive-data] error:", err);
@@ -194,32 +347,49 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/directory/import", upload.single("file"), async (req, res) => {
+  app.post("/api/admin/directory/import", isAdmin, uploadLimiter, (req, res, next) => {
+    upload.single("file")(req, res, (err: any) => {
+      if (err) {
+        return res.status(400).json({ success: false, message: err.message || "Invalid file upload" });
+      }
+      next();
+    });
+  }, async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ success: false, message: "No file uploaded" });
     }
-    
+
+    const uploadedPath = req.file.path;
     try {
       // Sync excel to JSON and reload memory
-      const schools = syncExcelToJSON(req.file.path);
+      const schools = syncExcelToJSON(uploadedPath);
       await storage.importSchools(schools as any);
+      enterpriseCache.invalidate("schools:");
+      enterpriseCache.invalidate("gis:");
+      await logAuditEvent({ action: "IMPORT_DIRECTORY", targetResource: "school_registry", details: `Imported ${schools.length} schools from ${req.file.originalname}` }, req);
       res.json({ success: true, count: schools.length, message: `Successfully imported ${schools.length} schools into the master directory.` });
     } catch (err) {
       console.error("[directory/import] error:", err);
       res.status(500).json({ success: false, message: err instanceof Error ? err.message : "Failed to import directory" });
+    } finally {
+      await unlink(uploadedPath).catch(() => {});
     }
   });
 
   app.get(api.schoolRegistry.get.path, async (req, res) => {
-    const school = await storage.getSchoolRegistry(Number(req.params.id));
+    const id = parsePositiveIntId(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid school ID" });
+    const school = await storage.getSchoolRegistry(id);
     if (!school) return res.status(404).json({ message: 'School not found' });
     res.json(school);
   });
 
-  app.post(api.schoolRegistry.create.path, async (req, res) => {
+  app.post(api.schoolRegistry.create.path, isAdmin, writeLimiter, async (req, res) => {
     try {
       const input = api.schoolRegistry.create.input.parse(req.body);
       const school = await storage.createSchoolRegistry(input);
+      enterpriseCache.invalidate("schools:");
+      enterpriseCache.invalidate("gis:");
       res.status(201).json(school);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -227,11 +397,15 @@ export async function registerRoutes(
     }
   });
 
-  app.put(api.schoolRegistry.update.path, async (req, res) => {
+  app.put(api.schoolRegistry.update.path, isAdmin, writeLimiter, async (req, res) => {
     try {
+      const id = parsePositiveIntId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid school ID" });
       const input = api.schoolRegistry.update.input.parse(req.body);
-      const school = await storage.updateSchoolRegistry(Number(req.params.id), input);
+      const school = await storage.updateSchoolRegistry(id, input);
       if (!school) return res.status(404).json({ message: 'School not found' });
+      enterpriseCache.invalidate("schools:");
+      enterpriseCache.invalidate("gis:");
       res.json(school);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -239,16 +413,23 @@ export async function registerRoutes(
     }
   });
 
-  app.delete(api.schoolRegistry.delete.path, async (req, res) => {
-    await storage.deleteSchoolRegistry(Number(req.params.id));
+  app.delete(api.schoolRegistry.delete.path, isAdmin, writeLimiter, async (req, res) => {
+    const id = parsePositiveIntId(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid school ID" });
+    await storage.deleteSchoolRegistry(id);
+    enterpriseCache.invalidate("schools:");
+    enterpriseCache.invalidate("gis:");
     res.status(204).send();
   });
 
-  app.post(api.schoolRegistry.merge.path, async (req, res) => {
+  app.post(api.schoolRegistry.merge.path, isAdmin, writeLimiter, async (req, res) => {
     try {
+      const duplicateId = parsePositiveIntId(req.params.id);
+      if (!duplicateId) return res.status(400).json({ message: "Invalid school ID" });
       const input = api.schoolRegistry.merge.input.parse(req.body);
-      const duplicateId = Number(req.params.id);
       await storage.mergeSchoolRegistry(duplicateId, input.targetId);
+      enterpriseCache.invalidate("schools:");
+      enterpriseCache.invalidate("gis:");
       res.json({ success: true, message: `Successfully merged school ${duplicateId} into ${input.targetId}` });
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -259,49 +440,68 @@ export async function registerRoutes(
   // Barangay Registry Routes
   app.get("/api/barangay-registry", async (req, res) => {
     try {
-      const db = getDb();
-      const list = await db.select().from(barangayRegistry);
+      const list = await enterpriseCache.getOrSet("barangays:all", 300, async () => {
+        const db = getDb();
+        return db.select().from(barangayRegistry);
+      });
       res.json(list);
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch barangay registry" });
     }
   });
 
-  app.post("/api/barangay-registry", async (req, res) => {
+  app.post("/api/barangay-registry", isAdmin, writeLimiter, async (req, res) => {
     try {
+      const parsed = barangayCreateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid barangay data" });
+      }
       const db = getDb();
-      const [result] = await db.insert(barangayRegistry).values(req.body);
+      const [result] = await db.insert(barangayRegistry).values(parsed.data);
       const [newBarangay] = await db.select().from(barangayRegistry).where(eq(barangayRegistry.id, (result as any).insertId));
+      enterpriseCache.invalidate("barangays:");
       res.status(201).json(newBarangay);
     } catch (err) {
       res.status(500).json({ message: "Failed to create barangay" });
     }
   });
 
-  app.patch("/api/barangay-registry/:id", async (req, res) => {
+  app.patch("/api/barangay-registry/:id", isAdmin, writeLimiter, async (req, res) => {
     try {
+      const id = parsePositiveIntId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid barangay ID" });
+      const parsed = barangayPatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid barangay update data" });
+      }
+      if (Object.keys(parsed.data).length === 0) {
+        return res.status(400).json({ message: "No valid fields provided for update" });
+      }
       const db = getDb();
-      const id = Number(req.params.id);
-      await db.update(barangayRegistry).set(req.body).where(eq(barangayRegistry.id, id));
+      await db.update(barangayRegistry).set({ ...parsed.data, updatedAt: new Date() }).where(eq(barangayRegistry.id, id));
       const [updated] = await db.select().from(barangayRegistry).where(eq(barangayRegistry.id, id));
       if (!updated) return res.status(404).json({ message: "Barangay not found" });
+      enterpriseCache.invalidate("barangays:");
       res.json(updated);
     } catch (err) {
       res.status(500).json({ message: "Failed to update barangay" });
     }
   });
 
-  app.delete("/api/barangay-registry/:id", async (req, res) => {
+  app.delete("/api/barangay-registry/:id", isAdmin, writeLimiter, async (req, res) => {
     try {
+      const id = parsePositiveIntId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid barangay ID" });
       const db = getDb();
-      await db.delete(barangayRegistry).where(eq(barangayRegistry.id, Number(req.params.id)));
+      await db.delete(barangayRegistry).where(eq(barangayRegistry.id, id));
+      enterpriseCache.invalidate("barangays:");
       res.status(204).send();
     } catch (err) {
       res.status(500).json({ message: "Failed to delete barangay" });
     }
   });
 
-  app.post(api.schoolRegistry.bulkMerge.path, async (req, res) => {
+  app.post(api.schoolRegistry.bulkMerge.path, isAdmin, writeLimiter, async (req, res) => {
     try {
       const input = api.schoolRegistry.bulkMerge.input.parse(req.body);
       let mergedCount = 0;
@@ -316,6 +516,8 @@ export async function registerRoutes(
           }
         }
       }
+      enterpriseCache.invalidate("schools:");
+      enterpriseCache.invalidate("gis:");
       res.json({ success: true, message: `Successfully merged ${mergedCount} schools`, mergedCount });
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -323,10 +525,12 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.schoolRegistry.batchDelete.path, async (req, res) => {
+  app.post(api.schoolRegistry.batchDelete.path, isAdmin, writeLimiter, async (req, res) => {
     try {
       const input = api.schoolRegistry.batchDelete.input.parse(req.body);
       const result = await storage.batchDeleteSchoolRegistry(input.ids);
+      enterpriseCache.invalidate("schools:");
+      enterpriseCache.invalidate("gis:");
       const message = result.skippedCount > 0 
         ? `Deleted ${result.deletedCount} schools. Skipped ${result.skippedCount} schools because they are actively mapped to students.`
         : `Successfully deleted ${result.deletedCount} schools.`;
@@ -345,7 +549,7 @@ export async function registerRoutes(
   });
 
   // ── Location Mismatch Validation ──────────────────────────────────────
-  app.post("/api/schoolRegistry/validate-locations", async (req, res) => {
+  app.post("/api/schoolRegistry/validate-locations", isAdmin, writeLimiter, async (req, res) => {
     try {
       const { schoolIds } = req.body || {};
       const allSchools = await storage.listSchoolRegistry();
@@ -433,7 +637,7 @@ export async function registerRoutes(
   });
 
   // V2 High-Performance Import Engine Routes
-  app.get("/api/integrations/last-batch", async (req, res) => {
+  app.get("/api/integrations/last-batch", isAdmin, async (req, res) => {
     try {
       const db = getDb();
       const records = await db.select().from(systemSettings).where(eq(systemSettings.key, "last_batch_memory"));
@@ -454,7 +658,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/integrations/apply-batch", async (req, res) => {
+  app.post("/api/integrations/apply-batch", isAdmin, writeLimiter, async (req, res) => {
     try {
       const db = getDb();
       const now = new Date().toISOString();
@@ -482,13 +686,14 @@ export async function registerRoutes(
         notes: `Applied batch ${memory.batchId || 'N/A'} (${memory.totalRecords || 0} records) to Live Mapping.`,
       });
 
+      enterpriseCache.invalidate("gis:");
       res.json({ success: true, message: `Batch ${memory.batchId || ''} committed to Live GIS Mapping!`, memory });
     } catch (err: any) {
       res.status(500).json({ success: false, message: err.message || "Failed to apply batch" });
     }
   });
 
-  app.post("/api/integrations/sync-google-sheets", async (req, res) => {
+  app.post("/api/integrations/sync-google-sheets", isAdmin, uploadLimiter, async (req, res) => {
     try {
       const { sheetsUrl, sheetsToken, syncMode = "live" } = req.body;
       if (!sheetsUrl) return res.status(400).json({ success: false, message: "URL is required" });
@@ -528,7 +733,7 @@ export async function registerRoutes(
       });
 
       startImportSession(mappedRecords.length);
-      processBatch(mappedRecords).catch(console.error);
+      const syncJob = enterpriseQueue.enqueue("IMPORT_STUDENTS", { records: mappedRecords });
 
       // Save batch memory
       const db = getDb();
@@ -551,6 +756,7 @@ export async function registerRoutes(
 
       res.json({ 
         success: true, 
+        jobId: syncJob.id,
         message: syncMode === "staging" 
           ? `Staged batch of ${mappedRecords.length} records. Review or click Apply to commit.`
           : `Auto-sync started for ${mappedRecords.length} records. Live mapping active.`,
@@ -562,7 +768,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/imports/start", async (req, res) => {
+  app.post("/api/imports/start", isAdmin, uploadLimiter, async (req, res) => {
     const { totalRecords } = req.body;
     if (!totalRecords) return res.status(400).json({ message: "totalRecords is required" });
     
@@ -574,21 +780,21 @@ export async function registerRoutes(
     res.json({ success: true, message: "Import session started" });
   });
 
-  app.post("/api/imports/batch", async (req, res) => {
+  app.post("/api/imports/batch", isAdmin, uploadLimiter, async (req, res) => {
     const { records } = req.body;
     if (!records || !Array.isArray(records)) return res.status(400).json({ message: "records array is required" });
     
-    // Process batch asynchronously in the background so it doesn't block the request
-    processBatch(records).catch(console.error);
+    // Offload batch processing to the concurrent background job queue
+    const job = enterpriseQueue.enqueue("IMPORT_STUDENTS", { records });
     
-    res.json({ success: true, message: "Batch queued for processing" });
+    res.json({ success: true, jobId: job.id, message: "Batch queued for background processing" });
   });
 
-  app.get("/api/imports/progress", (req, res) => {
+  app.get("/api/imports/progress", isAdmin, (req, res) => {
     res.json(getImportProgress());
   });
 
-  app.get("/api/imports/staging", async (req, res) => {
+  app.get("/api/imports/staging", isAdmin, async (req, res) => {
     const db = getDb();
     const records = await db.select().from(studentImports);
     res.json(records);
@@ -597,28 +803,32 @@ export async function registerRoutes(
   app.get("/api/settings", async (req, res) => {
     const db = getDb();
     const records = await db.select().from(systemSettings);
-    // Convert array of {key, value} to an object map
+    const callerIsAdmin = Boolean(req.isAuthenticated && req.isAuthenticated() && (req.user as any)?.role === "admin");
+    // Mask sensitive integration tokens/secrets for non-admin or unauthenticated callers
     const settingsMap = records.reduce((acc: Record<string, string>, curr: any) => {
+      if (!callerIsAdmin && SENSITIVE_SETTING_KEY_PATTERN.test(curr.key)) {
+        return acc;
+      }
       acc[curr.key] = curr.value;
       return acc;
     }, {});
     res.json(settingsMap);
   });
 
-  app.post("/api/settings", async (req, res) => {
+  app.post("/api/settings", isAdmin, writeLimiter, async (req, res) => {
+    const parsed = settingsUpdateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Invalid settings payload" });
+    }
     const db = getDb();
-    
-    // Expects body to be an object { key: value }
-    const updates = req.body;
+
+    const updates = parsed.data;
     for (const [key, value] of Object.entries(updates)) {
-      if (typeof value === "string") {
-        // Upsert logic (Insert or Update)
-        const existing = await db.select().from(systemSettings).where(eq(systemSettings.key, key));
-        if (existing.length > 0) {
-          await db.update(systemSettings).set({ value }).where(eq(systemSettings.key, key));
-        } else {
-          await db.insert(systemSettings).values({ key, value });
-        }
+      const existing = await db.select().from(systemSettings).where(eq(systemSettings.key, key));
+      if (existing.length > 0) {
+        await db.update(systemSettings).set({ value }).where(eq(systemSettings.key, key));
+      } else {
+        await db.insert(systemSettings).values({ key, value });
       }
     }
     res.json({ success: true, message: "Settings saved successfully" });
@@ -626,14 +836,21 @@ export async function registerRoutes(
 
   // Departments and Programs API
   app.get("/api/departments", async (req, res) => {
-    const db = getDb();
-    const records = await db.select().from(departments);
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+    const records = await enterpriseCache.getOrSet("departments:all", 300, async () => {
+      const db = getDb();
+      return db.select().from(departments);
+    });
     res.json(records);
   });
 
-  app.post("/api/departments", async (req, res) => {
+  app.post("/api/departments", isAdmin, writeLimiter, async (req, res) => {
     try {
-      const { id, code, name, color, targetValue } = req.body;
+      const parsed = departmentUpsertSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid department data" });
+      }
+      const { id, code, name, color, targetValue } = parsed.data;
       const db = getDb();
       
       if (id) {
@@ -641,6 +858,8 @@ export async function registerRoutes(
           .set({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() })
           .where(eq(departments.id, id));
         const updated = await db.select().from(departments).where(eq(departments.id, id));
+        enterpriseCache.invalidate("departments:");
+        enterpriseCache.invalidate("programs:");
         res.json(updated[0]);
       } else {
         const existing = await db.select().from(departments).where(eq(departments.code, code)).limit(1);
@@ -649,66 +868,77 @@ export async function registerRoutes(
             .set({ name, color, targetValue: targetValue || 0, updatedAt: new Date() })
             .where(eq(departments.id, existing[0].id));
           const updated = await db.select().from(departments).where(eq(departments.id, existing[0].id));
+          enterpriseCache.invalidate("departments:");
+          enterpriseCache.invalidate("programs:");
           res.json(updated[0]);
         } else {
           const [result] = await db.insert(departments)
             .values({ code, name, color, targetValue: targetValue || 0, updatedAt: new Date() });
           const inserted = await db.select().from(departments).where(eq(departments.id, result.insertId));
+          enterpriseCache.invalidate("departments:");
+          enterpriseCache.invalidate("programs:");
           res.json(inserted[0]);
         }
       }
     } catch (error: any) {
-      if (error.code === '23505') {
+      if (error.code === '23505' || error.code === 'ER_DUP_ENTRY') {
         console.warn(`[POST /api/departments] Duplicate code attempt: ${req.body.code}`);
         return res.status(400).json({ message: "A department with this code already exists." });
       }
       console.error("[POST /api/departments] error:", error);
-      res.status(500).json({ message: error.message || "Failed to save department" });
+      res.status(500).json({ message: "Failed to save department" });
     }
   });
 
-  app.delete("/api/departments/:id", async (req, res) => {
+  app.delete("/api/departments/:id", isAdmin, writeLimiter, async (req, res) => {
     try {
+      const deptId = parsePositiveIntId(req.params.id);
+      if (!deptId) return res.status(400).json({ message: "Invalid department ID" });
       const db = getDb();
       // Also delete associated programs
-      await db.delete(programs).where(eq(programs.departmentId, parseInt(req.params.id)));
-      await db.delete(departments).where(eq(departments.id, parseInt(req.params.id)));
+      await db.delete(programs).where(eq(programs.departmentId, deptId));
+      await db.delete(departments).where(eq(departments.id, deptId));
+      enterpriseCache.invalidate("departments:");
+      enterpriseCache.invalidate("programs:");
       res.json({ success: true });
     } catch (error: any) {
       console.error("[DELETE /api/departments/:id] error:", error);
-      res.status(500).json({ message: error.message || "Failed to delete department" });
+      res.status(500).json({ message: "Failed to delete department" });
     }
   });
 
   app.get("/api/programs", async (req, res) => {
-    const db = getDb();
-    const dbPrograms = await db.select().from(programs);
-    const deptRecords = await db.select().from(departments);
-    const deptMap = new Map(deptRecords.map(d => [d.id, d]));
-    
-    const formatted = dbPrograms.map(p => {
-      const dept = deptMap.get(p.departmentId);
-      return {
-        ...p,
-        college: dept?.code || "Unknown",
-        collegeName: dept?.name || "Unknown",
-        department: dept?.code || "Unknown",
-        departmentName: dept?.name || "Unknown",
-        program: p.name,
-        departmentColor: dept?.color || "#e5e7eb"
-      };
+    res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+    const formatted = await enterpriseCache.getOrSet("programs:all", 300, async () => {
+      const db = getDb();
+      const dbPrograms = await db.select().from(programs);
+      const deptRecords = await db.select().from(departments);
+      const deptMap = new Map(deptRecords.map(d => [d.id, d]));
+
+      return dbPrograms.map(p => {
+        const dept = deptMap.get(p.departmentId);
+        return {
+          ...p,
+          college: dept?.code || "Unknown",
+          collegeName: dept?.name || "Unknown",
+          department: dept?.code || "Unknown",
+          departmentName: dept?.name || "Unknown",
+          program: p.name,
+          departmentColor: dept?.color || "#e5e7eb"
+        };
+      });
     });
     res.json(formatted);
   });
 
-  app.post("/api/programs", async (req, res) => {
+  app.post("/api/programs", isAdmin, writeLimiter, async (req, res) => {
     try {
-      const { id, departmentId, code, name, track, level, color, targetValue } = req.body;
-      const db = getDb();
-      
-      if (!departmentId) {
-        return res.status(400).json({ message: "Department ID is required" });
+      const parsed = programUpsertSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid program data" });
       }
+      const { id, departmentId, code, name, track, level, color, targetValue } = parsed.data;
+      const db = getDb();
 
       if (id) {
         await db.update(programs)
@@ -735,28 +965,30 @@ export async function registerRoutes(
         }
       }
     } catch (error: any) {
-      if (error.code === '23505') {
+      if (error.code === '23505' || error.code === 'ER_DUP_ENTRY') {
         console.warn(`[POST /api/programs] Duplicate code attempt: ${req.body.code}`);
         return res.status(400).json({ message: "A program with this code already exists." });
       }
       console.error("[POST /api/programs] error:", error);
-      res.status(500).json({ message: error.message || "Failed to save program" });
+      res.status(500).json({ message: "Failed to save program" });
     }
   });
 
-  app.delete("/api/programs/:id", async (req, res) => {
+  app.delete("/api/programs/:id", isAdmin, writeLimiter, async (req, res) => {
     try {
+      const progId = parsePositiveIntId(req.params.id);
+      if (!progId) return res.status(400).json({ message: "Invalid program ID" });
       const db = getDb();
-      await db.delete(programs).where(eq(programs.id, parseInt(req.params.id)));
+      await db.delete(programs).where(eq(programs.id, progId));
       await refreshCatalog();
       res.json({ success: true });
     } catch (error: any) {
       console.error("[DELETE /api/programs/:id] error:", error);
-      res.status(500).json({ message: error.message || "Failed to delete program" });
+      res.status(500).json({ message: "Failed to delete program" });
     }
   });
 
-  app.post("/api/imports/match-resolution", async (req, res) => {
+  app.post("/api/imports/match-resolution", isAdmin, writeLimiter, async (req, res) => {
     const db = getDb();
 
     const { importedName, officialSchoolId, createAlias } = req.body;
@@ -801,7 +1033,7 @@ export async function registerRoutes(
     res.json({ success: true, message: "Match resolution saved" });
   });
 
-  app.post("/api/imports/apply", async (req, res) => {
+  app.post("/api/imports/apply", isAdmin, uploadLimiter, async (req, res) => {
     const db = getDb();
 
     // Apply records that are Matched or Unmatched
@@ -830,10 +1062,11 @@ export async function registerRoutes(
       await db.update(studentImports).set({ importStatus: "Applied" }).where(eq(studentImports.id, record.id));
     }
     
+    enterpriseCache.invalidate("gis:");
     res.json({ success: true, appliedCount: matchedRecords.length });
   });
 
-  app.get("/api/settings/diagnostics", async (req, res) => {
+  app.get("/api/settings/diagnostics", isAdmin, async (req, res) => {
     const db = getDb();
 
     const registryCount = await db.select({ value: count() }).from(schoolRegistry);
@@ -858,12 +1091,12 @@ export async function registerRoutes(
     });
   });
 
-  app.get("/api/imports/logs", async (req, res) => {
+  app.get("/api/imports/logs", isAdmin, async (req, res) => {
     const logs = await getImportLogs(100);
     res.json(logs);
   });
 
-  app.post(api.integrations.preview.path, async (req, res) => {
+  app.post(api.integrations.preview.path, isAdmin, uploadLimiter, async (req, res) => {
     try {
       const input = api.integrations.preview.input.parse(req.body);
       const preview = await previewIntegrationSource(input);
@@ -876,7 +1109,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.geocode.school.path, async (req, res) => {
+  app.post(api.geocode.school.path, isAdmin, writeLimiter, async (req, res) => {
     try {
       const parsed = api.geocode.school.input.safeParse(req.body);
       if (!parsed.success) {
@@ -916,12 +1149,6 @@ export async function registerRoutes(
     }
   });
 
-  app.get(api.schoolRegistry.list.path, async (req, res) => {
-    const q = String(req.query.q || "");
-    const results = await searchSchools(q);
-    res.json(results);
-  });
-
   app.get(api.geocode.suggest.path, async (req, res) => {
     const q = String(req.query.q || "").trim();
     if (q.length < 2) {
@@ -942,10 +1169,12 @@ export async function registerRoutes(
     res.json(queue);
   });
 
-  app.post(api.mapping.verify.path, async (req, res) => {
+  app.post(api.mapping.verify.path, isAdmin, writeLimiter, async (req, res) => {
     try {
       const input = api.mapping.verify.input.parse(req.body);
       const school = await verifySchoolMapping(input);
+      enterpriseCache.invalidate("schools:");
+      enterpriseCache.invalidate("gis:");
       res.json(school);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -954,10 +1183,11 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.gis.studentsSync.path, async (req, res) => {
+  app.post(api.gis.studentsSync.path, isAdmin, uploadLimiter, async (req, res) => {
     try {
       const input = api.gis.studentsSync.input.parse(req.body);
       const result = await syncStudents(input.records, input.source);
+      enterpriseCache.invalidate("gis:");
       res.json(result);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -971,11 +1201,13 @@ export async function registerRoutes(
     res.json(rows);
   });
 
-  app.post(api.gis.batchDeleteStudents.path, async (req, res) => {
+  app.post(api.gis.batchDeleteStudents.path, isAdmin, writeLimiter, async (req, res) => {
     try {
       const input = api.gis.batchDeleteStudents.input.parse(req.body);
       const result = await storage.batchDeleteProcessedStudents(input.ids);
       await recomputeSchoolStudentCounts();
+      enterpriseCache.invalidate("gis:");
+      await logAuditEvent({ action: "DELETE", targetResource: "students_processed", details: `Batch deleted ${result.deletedCount} students` }, req);
       res.json({
         success: true,
         deletedCount: result.deletedCount,
@@ -989,10 +1221,13 @@ export async function registerRoutes(
     }
   });
 
-  app.patch(api.gis.updateProcessedStudent.path, async (req, res) => {
+  app.patch(api.gis.updateProcessedStudent.path, isAdmin, writeLimiter, async (req, res) => {
     try {
+      const id = parsePositiveIntId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid student ID" });
       const input = api.gis.updateProcessedStudent.input.parse(req.body);
-      const updated = await updateProcessedStudent(Number(req.params.id), input);
+      const updated = await updateProcessedStudent(id, input);
+      enterpriseCache.invalidate("gis:");
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -1001,10 +1236,11 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.gis.batchUpdateStudentStatus.path, async (req, res) => {
+  app.post(api.gis.batchUpdateStudentStatus.path, isAdmin, writeLimiter, async (req, res) => {
     try {
       const input = api.gis.batchUpdateStudentStatus.input.parse(req.body);
       const result = await batchUpdateProcessedStudentStatus(input.ids, input.enrollmentStatus);
+      enterpriseCache.invalidate("gis:");
       const action = input.enrollmentStatus === "Archived" ? "archived" : "updated";
       res.json({
         success: true,
@@ -1031,9 +1267,11 @@ export async function registerRoutes(
         return Array.isArray(val) ? val : [val];
       };
 
-      const mapData = await getGisMapData(
-        toArray(input.scholarships),
-        toArray(input.programs)
+      const scholArr = toArray(input.scholarships);
+      const progArr = toArray(input.programs);
+      const cacheKey = `gis:map:${JSON.stringify(scholArr || [])}:${JSON.stringify(progArr || [])}`;
+      const mapData = await enterpriseCache.getOrSet(cacheKey, 60, () =>
+        getGisMapData(scholArr, progArr),
       );
       res.json(mapData);
     } catch (err) {
@@ -1046,7 +1284,7 @@ export async function registerRoutes(
   });
 
   app.get(api.gis.overview.path, async (_req, res) => {
-    const stats = await getGisOverviewStats();
+    const stats = await enterpriseCache.getOrSet("gis:overview", 60, () => getGisOverviewStats());
     res.json(stats);
   });
 
@@ -1055,7 +1293,7 @@ export async function registerRoutes(
     res.json(logs);
   });
 
-  app.post(api.gis.batchDeleteImports.path, async (req, res) => {
+  app.post(api.gis.batchDeleteImports.path, isAdmin, writeLimiter, async (req, res) => {
     try {
       const input = api.gis.batchDeleteImports.input.parse(req.body);
       const result = await storage.batchDeleteImports(input.ids);
@@ -1073,7 +1311,7 @@ export async function registerRoutes(
   });
 
   // Student routes
-  app.post("/api/students/processed/archive-all", async (req, res) => {
+  app.post("/api/students/processed/archive-all", isAdmin, writeLimiter, async (req, res) => {
     try {
       const db = getDb();
       // Update all students that are not currently archived or have null statuses
@@ -1091,6 +1329,8 @@ export async function registerRoutes(
 
       // Clear the staging area so new imports start fresh
       await db.delete(studentImports);
+      enterpriseCache.invalidate("gis:");
+      await logAuditEvent({ action: "UPDATE", targetResource: "students_processed", details: "Archived all active student records and cleared import staging" }, req);
 
       res.json({ success: true, message: "Successfully archived all current student records." });
     } catch (err) {
@@ -1099,9 +1339,10 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/admin/verify-password", async (req, res) => {
+  app.post("/api/admin/verify-password", isAdmin, authLimiter, async (req, res) => {
     if (!req.user) return res.status(401).json({ success: false, message: "Unauthorized" });
-    const { password } = req.body;
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!password) return res.status(400).json({ success: false, message: "Password is required" });
     
     try {
       const db = getDb();
@@ -1121,24 +1362,26 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/students", async (req, res) => {
+  app.get("/api/students", isAdmin, async (req, res) => {
     const studentsList = await storage.getStudents();
     res.json(studentsList);
   });
 
-  app.get(api.students.getByNumber.path, async (req, res) => {
-    const student = await storage.getStudentByNumber(req.params.studentNumber);
+  app.get(api.students.getByNumber.path, publicApiLimiter, async (req, res) => {
+    const studentNumber = Array.isArray(req.params.studentNumber) ? req.params.studentNumber[0] : req.params.studentNumber;
+    const student = await storage.getStudentByNumber(studentNumber);
     if (!student) return res.status(404).json({ message: 'Student not found' });
     res.json(student);
   });
 
-  app.get(api.students.getByCode.path, async (req, res) => {
-    const student = await storage.getStudentByCode(req.params.referralCode);
+  app.get(api.students.getByCode.path, publicApiLimiter, async (req, res) => {
+    const referralCode = Array.isArray(req.params.referralCode) ? req.params.referralCode[0] : req.params.referralCode;
+    const student = await storage.getStudentByCode(referralCode);
     if (!student) return res.status(404).json({ message: 'Referral code not found' });
     res.json(student);
   });
 
-  app.post(api.students.register.path, async (req, res) => {
+  app.post(api.students.register.path, publicApiLimiter, async (req, res) => {
     try {
       const input = api.students.register.input.parse(req.body);
       if (!input.referralCode) {
@@ -1152,17 +1395,38 @@ export async function registerRoutes(
     }
   });
 
-  // Referral routes
-  app.get(api.referrals.list.path, async (req, res) => {
-    const referralsList = await storage.getReferrals();
-    res.json(referralsList);
+  // Student Referral routes (server-side owner scoping / MySQL RLS equivalent)
+  app.get(api.referrals.list.path, publicApiLimiter, async (req, res) => {
+    const callerIsAdmin = Boolean(req.isAuthenticated && req.isAuthenticated() && (req.user as any)?.role === "admin");
+    if (callerIsAdmin) {
+      const referralsList = await storage.getReferrals();
+      return res.json(referralsList);
+    }
+
+    // For non-admin student portal callers, enforce strict owner-only scoping
+    const rawReferrerId = typeof req.query.referrerId === "string" ? parsePositiveIntId(req.query.referrerId) : null;
+    const studentNumber = typeof req.query.studentNumber === "string" ? req.query.studentNumber.trim() : "";
+
+    if (rawReferrerId) {
+      const ownReferrals = await storage.getReferralsByStudent(rawReferrerId);
+      return res.json(ownReferrals);
+    }
+
+    if (studentNumber) {
+      const student = await storage.getStudentByNumber(studentNumber);
+      if (!student) return res.status(404).json({ message: "Student not found" });
+      const ownReferrals = await storage.getReferralsByStudent(student.id);
+      return res.json(ownReferrals);
+    }
+
+    return res.status(401).json({ message: "Authentication or student identifier required to view referrals." });
   });
 
   app.get("/api/test", (_req, res) => {
     res.json({ status: "ok", message: "Backend is running" });
   });
 
-  app.post(api.referrals.create.path, async (req, res) => {
+  app.post(api.referrals.create.path, publicApiLimiter, async (req, res) => {
     try {
       const input = api.referrals.create.input.parse(req.body);
       const referral = await storage.createReferral(input);
@@ -1173,10 +1437,12 @@ export async function registerRoutes(
     }
   });
 
-  app.patch(api.referrals.update.path, async (req, res) => {
+  app.patch(api.referrals.update.path, isAdmin, writeLimiter, async (req, res) => {
     try {
+      const id = parsePositiveIntId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid referral ID" });
       const input = api.referrals.update.input.parse(req.body);
-      const referral = await storage.updateReferral(Number(req.params.id), input);
+      const referral = await storage.updateReferral(id, input);
       if (!referral) return res.status(404).json({ message: 'Referral not found' });
       res.json(referral);
     } catch (err) {
@@ -1185,45 +1451,77 @@ export async function registerRoutes(
     }
   });
 
-  app.delete(api.referrals.delete.path, async (req, res) => {
-    await storage.deleteReferral(Number(req.params.id));
+  app.delete(api.referrals.delete.path, isAdmin, writeLimiter, async (req, res) => {
+    const id = parsePositiveIntId(req.params.id);
+    if (!id) return res.status(400).json({ message: "Invalid referral ID" });
+    await storage.deleteReferral(id);
     res.status(204).send();
   });
 
-  // await seedDatabase(); // Removed to prevent wiping DB on every boot
-    
-    // System Settings Endpoints
-    app.get("/api/settings", async (req, res) => {
-      try {
-        const records = await getDb().select().from(systemSettings);
-        const settingsMap = records.reduce((acc, curr) => {
-          acc[curr.key] = curr.value;
-          return acc;
-        }, {} as Record<string, string>);
-        res.json(settingsMap);
-      } catch (err: any) {
-        res.status(500).json({ message: "Failed to fetch settings" });
+  // Separate Non-Student Public Referrals API (isolated in `public_referrals` table)
+  app.post("/api/public-referrals", publicApiLimiter, async (req, res) => {
+    try {
+      const parsed = insertPublicReferralSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid public referral data" });
       }
-    });
+      const db = getDb();
+      const [result] = await db.insert(publicReferrals).values(parsed.data);
+      const [created] = await db
+        .select()
+        .from(publicReferrals)
+        .where(eq(publicReferrals.id, (result as any).insertId))
+        .limit(1);
+      res.status(201).json(created);
+    } catch (err) {
+      console.error("[POST /api/public-referrals] error:", err);
+      res.status(500).json({ message: "Failed to submit public referral" });
+    }
+  });
 
-    app.post("/api/settings", isAdmin, async (req, res) => {
-      try {
-        const updates = req.body;
-        for (const [key, value] of Object.entries(updates)) {
-          if (typeof value !== "string") continue;
-          
-          const existing = await getDb().select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1);
-          if (existing.length > 0) {
-            await getDb().update(systemSettings).set({ value }).where(eq(systemSettings.key, key));
-          } else {
-            await getDb().insert(systemSettings).values({ key, value });
-          }
-        }
-        res.json({ message: "Settings updated successfully" });
-      } catch (err: any) {
-        res.status(500).json({ message: "Failed to update settings" });
+  app.get("/api/public-referrals", isAdmin, async (_req, res) => {
+    try {
+      const db = getDb();
+      const rows = await db
+        .select()
+        .from(publicReferrals)
+        .where(isNull(publicReferrals.deletedAt))
+        .orderBy(desc(publicReferrals.createdAt));
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch public referrals" });
+    }
+  });
+
+  app.patch("/api/public-referrals/:id", isAdmin, writeLimiter, async (req, res) => {
+    try {
+      const id = parsePositiveIntId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid public referral ID" });
+      const parsed = publicReferralPatchSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid update payload" });
       }
-    });
+      const db = getDb();
+      await db.update(publicReferrals).set(parsed.data).where(eq(publicReferrals.id, id));
+      const [updated] = await db.select().from(publicReferrals).where(eq(publicReferrals.id, id)).limit(1);
+      if (!updated) return res.status(404).json({ message: "Public referral not found" });
+      res.json(updated);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to update public referral" });
+    }
+  });
+
+  app.delete("/api/public-referrals/:id", isAdmin, writeLimiter, async (req, res) => {
+    try {
+      const id = parsePositiveIntId(req.params.id);
+      if (!id) return res.status(400).json({ message: "Invalid public referral ID" });
+      const db = getDb();
+      await db.delete(publicReferrals).where(eq(publicReferrals.id, id));
+      res.status(204).send();
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete public referral" });
+    }
+  });
 
   return httpServer;
 }

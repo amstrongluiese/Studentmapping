@@ -19,7 +19,7 @@ export default function ReferralClient() {
   const [isRegistering, setIsRegistering] = useState(false);
   const { toast } = useToast();
   const { data: allReferrals = [] } = useQuery<Referral[]>({
-    queryKey: [api.referrals.list.path],
+    queryKey: [student ? `${api.referrals.list.path}?referrerId=${student.id}` : api.referrals.list.path],
     enabled: Boolean(student),
   });
   const studentReferrals = useMemo(

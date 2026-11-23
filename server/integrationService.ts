@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { IntegrationPreviewInput, IntegrationPreviewResponse } from "@shared/routes";
+import { assertSafeExternalUrl } from "./security";
 
 type SourceRecord = Record<string, unknown>;
 
@@ -22,6 +23,10 @@ export async function previewIntegrationSource(
   const targetUrl = input.sourceType === "googleSheets"
     ? toGoogleSheetsCsvUrl(input.url)
     : input.url;
+
+  // SSRF protection: ensure URL resolves only to public internet endpoints
+  await assertSafeExternalUrl(targetUrl);
+
   const headers = buildHeaders(input);
   const method = input.sourceType === "googleSheets" ? "GET" : input.method;
   const body = method === "POST" && input.body?.trim() ? input.body : undefined;

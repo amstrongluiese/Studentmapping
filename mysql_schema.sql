@@ -279,4 +279,21 @@ CREATE TABLE `data_access_logs` (
   `accessed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 15. Public (Non-Student) Referrals
+DROP TABLE IF EXISTS `public_referrals`;
+CREATE TABLE `public_referrals` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `referrer_name` VARCHAR(255) NOT NULL,
+  `referrer_contact` VARCHAR(100) NULL,
+  `referred_name` TEXT NOT NULL,
+  `relationship` VARCHAR(255) NOT NULL,
+  `contact_number` VARCHAR(100) NULL,
+  `notes` TEXT NULL,
+  `status` VARCHAR(100) NOT NULL DEFAULT 'pending',
+  `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `deleted_at` DATETIME NULL,
+  `deleted_by` INT NULL,
+  INDEX `idx_public_referrals_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
