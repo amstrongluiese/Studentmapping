@@ -1,5 +1,6 @@
 import type { SchoolRegistry, StudentProcessed } from "./schema";
 import { normalizeSchoolName } from "./schoolRegistry";
+import { cleanRawText, damerauLevenshtein } from "./textNormalization";
 
 export const ALL_PROGRAM_FILTER = "all";
 
@@ -167,12 +168,13 @@ const PROGRAM_ALIASES: Record<string, string> = {
 };
 
 export function normalizeProgramCode(value: string | null | undefined) {
-  const normalized = (value || "")
+  // Collapse dotted acronyms like "B.S.I.T." -> "BSIT" before stripping punctuation
+  const collapsedDots = (value || "").replace(/\b([A-Za-z])(?:\.([A-Za-z]))+\.?/g, (m) => m.replace(/\./g, ""));
+  const normalized = cleanRawText(collapsedDots)
     .toUpperCase()
-    .replace(/[().,]+/g, " ")
-    .replace(/[._]+/g, " ")
-    .replace(/[\/\\\-–—]+/g, " ")
-    .replace(/&/g, " AND ")
+    .replace(/\bBTVTED\b/g, "BTVTE")
+    .replace(/\bBSCOMPENG\b/g, "BSCPE")
+    .replace(/\bBSIT\s*-\s*/g, "BSIT ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -219,6 +221,21 @@ export function getProgramInfo(value: string | null | undefined): ProgramInfo | 
         else if (tokens.has("CRIMINOLOGY")) info = lookup.get("BS CRIM");
         else if (tokens.has("TOURISM")) info = lookup.get("BSTM");
         else if (tokens.has("NURSING") && (tokens.has("AID") || tokens.has("AIDE"))) info = lookup.get("NA");
+        else if (compact.length >= 5) {
+          // Typo-tolerant fallback: allow 1 transposition/edit (e.g. "BSIT MDW" -> "BSIT MWD", "BSCEP" -> "BSCPE")
+          let bestRecord: ProgramInfo | undefined;
+          let bestDist = Infinity;
+          for (const record of catalog) {
+            const targetCompact = record.code.replace(/\s+/g, "");
+            if (targetCompact.length < 4) continue;
+            const dist = damerauLevenshtein(compact, targetCompact);
+            if (dist <= 1 && dist < bestDist) {
+              bestDist = dist;
+              bestRecord = record;
+            }
+          }
+          if (bestRecord) info = bestRecord;
+        }
       }
     }
   }

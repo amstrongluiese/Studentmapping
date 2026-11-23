@@ -12,7 +12,8 @@
     "test:cache": "tsx tests/cache.test.ts",
     "test:queue": "tsx tests/queue.test.ts",
     "test:survival": "tsx tests/survival.test.ts",
-    "test:all": "tsx tests/security.test.ts && tsx tests/cache.test.ts && tsx tests/queue.test.ts && tsx tests/survival.test.ts",
+    "test:typos": "tsx tests/typoMatching.test.ts",
+    "test:all": "tsx tests/security.test.ts && tsx tests/cache.test.ts && tsx tests/queue.test.ts && tsx tests/survival.test.ts && tsx tests/typoMatching.test.ts",
     "db:push": "drizzle-kit push",
     "db:mysql:push": "drizzle-kit push --config=drizzle.mysql.config.ts",
     "db:mysql:generate": "drizzle-kit generate --config=drizzle.mysql.config.ts"

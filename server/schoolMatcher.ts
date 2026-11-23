@@ -1,5 +1,6 @@
 import Fuse from "fuse.js";
 import { normalizeSchoolName } from "@shared/schoolRegistry";
+import { cleanRawText, computeTypoSimilarity } from "@shared/textNormalization";
 import { type SchoolRegistry, type SchoolAlias, schoolAliases, schoolMatchHistory } from "@shared/schema";
 import { getDb } from "./db";
 import { sql, eq } from "drizzle-orm";
@@ -199,8 +200,9 @@ export class SchoolMatchingEngine {
     let dbTopSim = 0;
     let dbTopSchool: SchoolRegistry | null = null;
 
-    // Compare with fuse.js memory search
-    const fuzzyResults = this.fuse.search(rawName);
+    // Compare with fuse.js memory search AND hybrid Damerau-Levenshtein + Filipino phonetic similarity
+    const cleanedQuery = cleanRawText(rawName);
+    const fuzzyResults = this.fuse.search(cleanedQuery || rawName);
     let fuseTopSim = 0;
     let fuseTopSchool: SchoolRegistry | null = null;
 
@@ -209,8 +211,30 @@ export class SchoolMatchingEngine {
       fuseTopSchool = fuzzyResults[0].item;
     }
 
-    const bestSim = Math.max(dbTopSim, fuseTopSim);
-    const bestSchool = (bestSim === dbTopSim && dbTopSchool) ? dbTopSchool : fuseTopSchool;
+    // Hybrid typo/phonetic scan over registry for transposed/phonetic typos Fuse can miss
+    let typoTopSim = 0;
+    let typoTopSchool: SchoolRegistry | null = null;
+    if (normalized.length >= 4) {
+      for (const candidate of this.registry) {
+        const candNorm = normalizeSchoolName(candidate.normalizedSchoolName || candidate.schoolName);
+        if (!candNorm) continue;
+        const normSim = computeTypoSimilarity(normalized, candNorm);
+        const fullSim = computeTypoSimilarity(cleanedQuery || rawName, candidate.schoolName);
+        const sim = Math.max(normSim, fullSim);
+        if (sim > typoTopSim) {
+          typoTopSim = sim;
+          typoTopSchool = candidate;
+        }
+      }
+    }
+
+    const bestSim = Math.max(dbTopSim, fuseTopSim, typoTopSim);
+    const bestSchool =
+      bestSim === typoTopSim && typoTopSchool
+        ? typoTopSchool
+        : bestSim === dbTopSim && dbTopSchool
+          ? dbTopSchool
+          : fuseTopSchool;
     
     // We lower the threshold slightly to 0.75 because real-world messy data rarely hits 0.8 perfectly without exact substring match
     if (bestSchool && bestSim >= 0.75) {
@@ -321,15 +345,28 @@ export class SchoolMatchingEngine {
       }
     }
 
-    // 4. Fuzzy Match (> 90%)
-    const fuzzyResults = this.fuse.search(rawName);
-    if (fuzzyResults.length > 0) {
-      const top = fuzzyResults[0];
-      const confidence = Math.round((1 - (top.score ?? 1)) * 100);
-      
-      if (confidence >= 80) {
-        return { status: "matched", school: top.item, matchType: "fuzzy", confidence };
+    // 4. Hybrid Fuzzy + Typo/Phonetic Match
+    const cleanedQuery = cleanRawText(rawName);
+    const fuzzyResults = this.fuse.search(cleanedQuery || rawName);
+    let bestSchool: SchoolRegistry | null = fuzzyResults[0]?.item ?? null;
+    let bestScore = fuzzyResults[0] ? 1 - (fuzzyResults[0].score ?? 1) : 0;
+
+    if (normalized.length >= 4) {
+      for (const candidate of this.registry) {
+        const candNorm = normalizeSchoolName(candidate.normalizedSchoolName || candidate.schoolName);
+        if (!candNorm) continue;
+        const normSim = computeTypoSimilarity(normalized, candNorm);
+        const fullSim = computeTypoSimilarity(cleanedQuery || rawName, candidate.schoolName);
+        const sim = Math.max(normSim, fullSim);
+        if (sim > bestScore) {
+          bestScore = sim;
+          bestSchool = candidate;
+        }
       }
+    }
+
+    if (bestSchool && Math.round(bestScore * 100) >= 80) {
+      return { status: "matched", school: bestSchool, matchType: "fuzzy", confidence: Math.round(bestScore * 100) };
     }
     
     if (fuzzyResults.length > 0) {
