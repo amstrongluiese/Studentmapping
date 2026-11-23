@@ -12,7 +12,10 @@ import type { User as SelectUser } from "@shared/schema";
  * Google Maps, and Vite dev HMR so existing map visualizations continue working.
  */
 export function buildHelmetMiddleware(): RequestHandler {
-  const { IS_PRODUCTION } = getEnv();
+  const { IS_PRODUCTION, CORS_ORIGINS } = getEnv();
+  const isHttpsDeployment =
+    process.env.FORCE_HTTPS === "true" ||
+    CORS_ORIGINS.some((origin) => origin.startsWith("https://"));
 
   return helmet({
     contentSecurityPolicy: IS_PRODUCTION
@@ -55,13 +58,15 @@ export function buildHelmetMiddleware(): RequestHandler {
             objectSrc: ["'none'"],
             baseUri: ["'self'"],
             formAction: ["'self'"],
+            // Prevent breaking dynamic ES module chunk imports on plain http://localhost
+            upgradeInsecureRequests: isHttpsDeployment ? [] : null,
           },
         }
       : false,
     crossOriginEmbedderPolicy: false,
     frameguard: { action: "deny" },
     referrerPolicy: { policy: "strict-origin-when-cross-origin" },
-    hsts: IS_PRODUCTION ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
+    hsts: IS_PRODUCTION && isHttpsDeployment ? { maxAge: 31536000, includeSubDomains: true, preload: true } : false,
   });
 }
 
