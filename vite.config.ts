@@ -19,37 +19,13 @@ export default defineConfig({
   // Local client root
   root: path.resolve(import.meta.dirname, "client"),
 
-  // Production build with vendor chunking for fast mobile & low-end device loads
+  // Production build: let Rollup automatically split React.lazy() routes & workspaces
+  // without manualChunks circular-dependency issues (e.g. React/Recharts/Radix init order).
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
     target: "es2020",
     cssCodeSplit: true,
-    rollupOptions: {
-      output: {
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return;
-          if (id.includes("react-dom") || id.includes("/react/") || id.includes("wouter") || id.includes("@tanstack")) {
-            return "vendor-react";
-          }
-          if (id.includes("leaflet") || id.includes("@react-google-maps") || id.includes("@turf") || id.includes("supercluster")) {
-            return "vendor-maps";
-          }
-          if (id.includes("recharts") || id.includes("d3-")) {
-            return "vendor-charts";
-          }
-          if (id.includes("framer-motion")) {
-            return "vendor-motion";
-          }
-          if (id.includes("@radix-ui") || id.includes("lucide-react") || id.includes("vaul") || id.includes("cmdk")) {
-            return "vendor-ui";
-          }
-          if (id.includes("xlsx")) {
-            return "vendor-xlsx";
-          }
-        },
-      },
-    },
   },
 
   server: {
