@@ -1368,27 +1368,82 @@ export async function registerRoutes(
   });
 
   app.get(api.students.getByNumber.path, publicApiLimiter, async (req, res) => {
-    const studentNumber = Array.isArray(req.params.studentNumber) ? req.params.studentNumber[0] : req.params.studentNumber;
-    const student = await storage.getStudentByNumber(studentNumber);
-    if (!student) return res.status(404).json({ message: 'Student not found' });
-    res.json(student);
+    const rawNum = Array.isArray(req.params.studentNumber) ? req.params.studentNumber[0] : req.params.studentNumber;
+    const studentNumber = (rawNum || "").trim();
+    if (!studentNumber) return res.status(400).json({ message: "Student number is required." });
+
+    const db = getDb();
+    // Verify student exists in official processed Trimex student records
+    const [official] = await db
+      .select()
+      .from(studentsProcessed)
+      .where(eq(studentsProcessed.studentNumber, studentNumber))
+      .limit(1);
+
+    if (!official) {
+      return res.status(404).json({
+        message: "Student number not found in official Trimex student records. Non-students can use the Non-Student / Public tab.",
+      });
+    }
+
+    let student = await storage.getStudentByNumber(studentNumber);
+    if (!student) {
+      // Auto-provision referral profile for verified official Trimex student
+      const referralCode = `TRX-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      student = await storage.createStudent({
+        studentNumber: official.studentNumber,
+        name: official.fullName,
+        referralCode,
+      });
+    }
+
+    res.json({
+      ...student,
+      verified: true,
+      course: official.course,
+      enrollmentStatus: official.enrollmentStatus,
+    });
   });
 
   app.get(api.students.getByCode.path, publicApiLimiter, async (req, res) => {
-    const referralCode = Array.isArray(req.params.referralCode) ? req.params.referralCode[0] : req.params.referralCode;
+    const rawCode = Array.isArray(req.params.referralCode) ? req.params.referralCode[0] : req.params.referralCode;
+    const referralCode = (rawCode || "").trim();
     const student = await storage.getStudentByCode(referralCode);
-    if (!student) return res.status(404).json({ message: 'Referral code not found' });
+    if (!student) return res.status(404).json({ message: "Referral code not found" });
     res.json(student);
   });
 
   app.post(api.students.register.path, publicApiLimiter, async (req, res) => {
     try {
       const input = api.students.register.input.parse(req.body);
-      if (!input.referralCode) {
-        input.referralCode = `TRX-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      const studentNumber = input.studentNumber.trim();
+      const db = getDb();
+
+      // Enforce that only verified Trimex students in `students_processed` can register in the Student Portal
+      const [official] = await db
+        .select()
+        .from(studentsProcessed)
+        .where(eq(studentsProcessed.studentNumber, studentNumber))
+        .limit(1);
+
+      if (!official) {
+        return res.status(403).json({
+          message: "Student number is not in official Trimex student records. Please use the Non-Student / Public tab instead.",
+        });
       }
-      const student = await storage.createStudent(input);
-      res.status(201).json(student);
+
+      const existing = await storage.getStudentByNumber(studentNumber);
+      if (existing) {
+        return res.status(200).json({ ...existing, verified: true });
+      }
+
+      const referralCode = input.referralCode?.trim() || `TRX-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+      const student = await storage.createStudent({
+        studentNumber: official.studentNumber,
+        name: official.fullName,
+        referralCode,
+      });
+      res.status(201).json({ ...student, verified: true });
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
       throw err;

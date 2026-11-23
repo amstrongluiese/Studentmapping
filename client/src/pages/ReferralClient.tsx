@@ -9,6 +9,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { insertReferralSchema, insertStudentSchema, type Referral, type ReferralInput, type StudentInput, type Student } from "@shared/schema";
+import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
 import { Clock3, LogIn, CheckCircle2, Copy, UserCheck, UserPlus, XCircle } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -53,30 +54,51 @@ export default function ReferralClient() {
     }
   });
 
-  const publicReferralForm = useForm<ReferralInput & { referralCode: string }>({
-    resolver: zodResolver(insertReferralSchema.extend({ referralCode: insertStudentSchema.shape.referralCode })),
+  const publicEntrySchema = z.object({
+    referralCode: z.string().trim().optional().default(""),
+    referrerName: z.string().trim().optional().default(""),
+    referrerContact: z.string().trim().optional().default(""),
+    referredName: z.string().trim().min(2, "Candidate name is required"),
+    relationship: z.string().trim().min(1, "Relationship is required"),
+    contactNumber: z.string().trim().optional().default(""),
+  }).refine(
+    (data) => Boolean(data.referralCode?.trim()) || Boolean(data.referrerName?.trim()),
+    {
+      message: "Enter either a Student Referral Code or Your Name (for non-student referrers).",
+      path: ["referrerName"],
+    },
+  );
+
+  type PublicEntryFormValues = z.infer<typeof publicEntrySchema>;
+
+  const publicReferralForm = useForm<PublicEntryFormValues>({
+    resolver: zodResolver(publicEntrySchema),
     defaultValues: {
       referralCode: "",
+      referrerName: "",
+      referrerContact: "",
       referredName: "",
       relationship: "",
       contactNumber: "",
-      status: "pending"
     }
   });
 
   const loginMutation = useMutation({
     mutationFn: async (studentNumber: string) => {
-      const res = await fetch(buildUrl(api.students.getByNumber.path, { studentNumber }));
-      if (!res.ok) throw new Error("Student not found. Please register.");
+      const res = await fetch(buildUrl(api.students.getByNumber.path, { studentNumber: studentNumber.trim() }));
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Student not found in official Trimex records.");
+      }
       return res.json();
     },
     onSuccess: (data) => {
       setStudent(data);
       referralForm.setValue("referrerId", data.id);
-      toast({ title: "Welcome back!", description: `Hello, ${data.name}` });
+      toast({ title: "Verified Student", description: `Welcome, ${data.name}!` });
     },
     onError: (error: Error) => {
-      toast({ variant: "destructive", title: "Login Failed", description: error.message });
+      toast({ variant: "destructive", title: "Verification Failed", description: error.message });
     }
   });
 
@@ -90,13 +112,19 @@ export default function ReferralClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error("Registration failed.");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Registration failed.");
+      }
       return res.json();
     },
     onSuccess: (data) => {
       setStudent(data);
       referralForm.setValue("referrerId", data.id);
-      toast({ title: "Success!", description: "You are now registered for the referral system." });
+      toast({ title: "Verified & Registered!", description: "You are now verified for the Student Referral Portal." });
+    },
+    onError: (error: Error) => {
+      toast({ variant: "destructive", title: "Not Verified", description: error.message });
     }
   });
 
@@ -111,38 +139,59 @@ export default function ReferralClient() {
       return res.json();
     },
     onSuccess: () => {
+      if (student?.id) {
+        queryClient.invalidateQueries({ queryKey: [`${api.referrals.list.path}?referrerId=${student.id}`] });
+      }
       referralForm.reset({ referrerId: student?.id, status: "pending" });
       toast({ title: "Referral Sent", description: "Thank you for referring a student!" });
     }
   });
 
   const publicReferralMutation = useMutation({
-    mutationFn: async (data: ReferralInput & { referralCode: string }) => {
-      // 1. Validate referral code and get student
-      const studentRes = await fetch(buildUrl(api.students.getByCode.path, { referralCode: data.referralCode }));
-      if (!studentRes.ok) throw new Error("Invalid referral code.");
-      const studentData = await studentRes.json();
-      
-      // 2. Submit referral linked to that student
-      const referralData = {
-        referrerId: studentData.id,
-        referredName: data.referredName,
-        relationship: data.relationship,
-        contactNumber: data.contactNumber,
-        status: "pending"
-      };
-      
-      const res = await fetch(api.referrals.create.path, {
+    mutationFn: async (data: PublicEntryFormValues) => {
+      const code = data.referralCode?.trim();
+      if (code) {
+        // Student-linked referral via referral code -> `referrals` table
+        const studentRes = await fetch(buildUrl(api.students.getByCode.path, { referralCode: code }));
+        if (!studentRes.ok) throw new Error("Invalid referral code.");
+        const studentData = await studentRes.json();
+
+        const res = await fetch(api.referrals.create.path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            referrerId: studentData.id,
+            referredName: data.referredName,
+            relationship: data.relationship,
+            contactNumber: data.contactNumber || null,
+            status: "pending",
+          }),
+        });
+        if (!res.ok) throw new Error("Failed to submit referral.");
+        return res.json();
+      }
+
+      // Non-student public referral -> separate `public_referrals` table
+      const res = await fetch("/api/public-referrals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(referralData),
+        body: JSON.stringify({
+          referrerName: data.referrerName,
+          referrerContact: data.referrerContact || null,
+          referredName: data.referredName,
+          relationship: data.relationship,
+          contactNumber: data.contactNumber || null,
+        }),
       });
-      if (!res.ok) throw new Error("Failed to submit referral.");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Failed to submit public referral.");
+      }
       return res.json();
     },
     onSuccess: () => {
       publicReferralForm.reset();
-      toast({ title: "Referral Submitted", description: "Your referral has been sent for approval." });
+      toast({ title: "Referral Submitted", description: "Your referral has been sent for admissions review." });
     },
     onError: (error: Error) => {
       toast({ variant: "destructive", title: "Submission Failed", description: error.message });
@@ -161,8 +210,8 @@ export default function ReferralClient() {
               <CardTitle className="text-2xl">Trimex Referral Portal</CardTitle>
               <CardDescription>Register, share your code, and track referred students</CardDescription>
               <TabsList className="grid w-full grid-cols-2 mt-4">
-                <TabsTrigger value="login">Student Portal</TabsTrigger>
-                <TabsTrigger value="public">Public Entry</TabsTrigger>
+                <TabsTrigger value="login">Verified Student</TabsTrigger>
+                <TabsTrigger value="public">Non-Student / Public</TabsTrigger>
               </TabsList>
             </CardHeader>
             <CardContent className="pt-4">
@@ -212,13 +261,27 @@ export default function ReferralClient() {
                   <form onSubmit={publicReferralForm.handleSubmit((d) => publicReferralMutation.mutate(d))} className="space-y-4">
                     <FormField control={publicReferralForm.control} name="referralCode" render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Referral Code</FormLabel>
+                        <FormLabel>Student Referral Code (optional for non-students)</FormLabel>
                         <div className="relative">
                           <UserCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                           <FormControl>
-                            <Input placeholder="Enter TRX-XXXXXX" className="pl-9" {...field} />
+                            <Input placeholder="TRX-XXXXXX (leave blank if non-student)" className="pl-9" {...field} />
                           </FormControl>
                         </div>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={publicReferralForm.control} name="referrerName" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Your Name (for non-student referrers)</FormLabel>
+                        <FormControl><Input placeholder="Your full name" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={publicReferralForm.control} name="referrerContact" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Your Contact Number (optional)</FormLabel>
+                        <FormControl><Input placeholder="09XX..." {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )} />

@@ -189,7 +189,7 @@ function createSchoolIcon(
 
   return L.divIcon({
     html: `
-      <div class="gis-marker ${isCluster ? "gis-marker-cluster" : ""} ${showLabel ? "gis-marker-show-label" : ""}" style="--marker-color:${color}; --marker-secondary-color:${secondaryColor}; animation-delay:${Math.min(stableIndex * 35, 420)}ms">
+      <div class="gis-marker ${isCluster ? "gis-marker-cluster" : ""} ${showLabel ? "gis-marker-show-label" : ""}" style="--marker-color:${color}; --marker-secondary-color:${secondaryColor}; animation-delay:${Math.min(stableIndex * 12, 120)}ms">
         <div class="gis-marker-core">
           <div class="gis-pin-svg-wrap">
             <svg class="gis-pin-svg" viewBox="0 0 28 36" fill="none" xmlns="http://www.w3.org/2000/svg">

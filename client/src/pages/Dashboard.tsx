@@ -2010,24 +2010,79 @@ function ReferralProgramWorkspace({
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "student" | "public">("all");
   const [selectedReferrerId, setSelectedReferrerId] = useState("");
   const [candidateName, setCandidateName] = useState("");
   const [relationship, setRelationship] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [notes, setNotes] = useState("");
+  const { data: publicReferrals = [] } = useQuery<any[]>({ queryKey: ["/api/public-referrals"] });
   const studentsById = useMemo(() => new Map(students.map((student) => [student.id, student])), [students]);
-  const publicReferralUrl = `${window.location.origin}${window.location.pathname}#/referral`;
+  const publicReferralUrl = `${window.location.origin}/referral`;
+
+  const updatePublicReferral = async (id: number, status: string) => {
+    try {
+      await apiRequest("PATCH", `/api/public-referrals/${id}`, { status });
+      void queryClient.invalidateQueries({ queryKey: ["/api/public-referrals"] });
+      toast({ title: "Updated", description: `Public referral marked as ${status}.` });
+    } catch (err: any) {
+      toast({ title: "Update failed", description: err?.message || "Could not update referral.", variant: "destructive" });
+    }
+  };
+
+  const deletePublicReferral = async (id: number) => {
+    try {
+      await apiRequest("DELETE", `/api/public-referrals/${id}`);
+      void queryClient.invalidateQueries({ queryKey: ["/api/public-referrals"] });
+      toast({ title: "Deleted", description: "Public referral removed." });
+    } catch (err: any) {
+      toast({ title: "Delete failed", description: err?.message || "Could not delete referral.", variant: "destructive" });
+    }
+  };
+
+  const combinedReferrals = useMemo(() => {
+    const studentRows = referrals.map((r) => ({
+      key: `student-${r.id}`,
+      id: r.id,
+      source: "student" as const,
+      referrerId: r.referrerId,
+      referrerName: null as string | null,
+      referrerContact: null as string | null,
+      referredName: r.referredName,
+      relationship: r.relationship,
+      contactNumber: r.contactNumber,
+      notes: r.notes,
+      status: r.status,
+      createdAt: r.createdAt,
+    }));
+    const publicRows = publicReferrals.map((r: any) => ({
+      key: `public-${r.id}`,
+      id: r.id as number,
+      source: "public" as const,
+      referrerId: null as number | null,
+      referrerName: (r.referrerName || "Public Referrer") as string,
+      referrerContact: (r.referrerContact || null) as string | null,
+      referredName: r.referredName as string,
+      relationship: r.relationship as string,
+      contactNumber: (r.contactNumber || null) as string | null,
+      notes: (r.notes || null) as string | null,
+      status: (r.status || "pending") as string,
+      createdAt: r.createdAt,
+    }));
+    return [...studentRows, ...publicRows];
+  }, [referrals, publicReferrals]);
 
   const stats = useMemo(() => ({
-    total: referrals.length,
-    pending: referrals.filter((referral) => referral.status === "pending").length,
-    approved: referrals.filter((referral) => referral.status === "approved").length,
-    rejected: referrals.filter((referral) => referral.status === "rejected").length,
-  }), [referrals]);
+    total: combinedReferrals.length,
+    pending: combinedReferrals.filter((referral) => referral.status === "pending").length,
+    approved: combinedReferrals.filter((referral) => referral.status === "approved").length,
+    rejected: combinedReferrals.filter((referral) => referral.status === "rejected").length,
+  }), [combinedReferrals]);
 
   const filteredReferrals = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return referrals
+    return combinedReferrals
+      .filter((referral) => sourceFilter === "all" || referral.source === sourceFilter)
       .filter((referral) => statusFilter === "all" || referral.status === statusFilter)
       .filter((referral) => {
         if (!query) return true;
@@ -2038,13 +2093,15 @@ function ReferralProgramWorkspace({
           referral.contactNumber || "",
           referral.notes || "",
           referral.status,
+          referral.referrerName || "",
+          referral.referrerContact || "",
           referrer?.name || "",
           referrer?.studentNumber || "",
           referrer?.referralCode || "",
         ].some((value) => value.toLowerCase().includes(query));
       })
       .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  }, [referrals, search, statusFilter, studentsById]);
+  }, [combinedReferrals, search, statusFilter, sourceFilter, studentsById]);
 
   const resetForm = () => {
     setSelectedReferrerId("");
@@ -2195,6 +2252,14 @@ function ReferralProgramWorkspace({
                     onChange={(event) => setSearch(event.target.value)}
                   />
                 </div>
+                <Select value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "student" | "public")}>
+                  <SelectTrigger className="h-10 border-border/60 bg-muted/30 text-foreground sm:w-44"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Sources</SelectItem>
+                    <SelectItem value="student">Verified Student</SelectItem>
+                    <SelectItem value="public">Non-Student / Public</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="h-10 border-border/60 bg-muted/30 text-foreground sm:w-40"><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -2227,17 +2292,31 @@ function ReferralProgramWorkspace({
                   </TableRow>
                 ) : filteredReferrals.map((referral) => {
                   const referrer = referral.referrerId ? studentsById.get(referral.referrerId) : undefined;
+                  const isPublic = referral.source === "public";
                   return (
-                    <TableRow key={referral.id}>
+                    <TableRow key={referral.key}>
                       <TableCell>
                         <p className="font-semibold">{referral.referredName}</p>
                         <p className="text-xs text-muted-foreground">{referral.relationship}</p>
                         {referral.notes ? <p className="mt-1 max-w-xs truncate text-xs text-muted-foreground">{referral.notes}</p> : null}
                       </TableCell>
                       <TableCell>
-                        {referrer ? (
+                        {isPublic ? (
                           <div>
-                            <p className="font-medium">{referrer.name}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-medium">{referral.referrerName}</p>
+                              <Badge variant="outline" className="text-[10px] border-indigo-500/30 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">Non-Student</Badge>
+                            </div>
+                            {referral.referrerContact ? (
+                              <p className="text-xs text-muted-foreground">{referral.referrerContact}</p>
+                            ) : null}
+                          </div>
+                        ) : referrer ? (
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-medium">{referrer.name}</p>
+                              <Badge variant="outline" className="text-[10px] border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">Student</Badge>
+                            </div>
                             <p className="flex items-center gap-1 text-xs text-muted-foreground">
                               <KeyRound className="h-3 w-3" />
                               {referrer.referralCode}
@@ -2261,7 +2340,7 @@ function ReferralProgramWorkspace({
                             size="icon"
                             className="h-8 w-8 text-emerald-700"
                             disabled={referral.status === "approved"}
-                            onClick={() => updateReferral(referral.id, { status: "approved" })}
+                            onClick={() => isPublic ? void updatePublicReferral(referral.id, "approved") : updateReferral(referral.id, { status: "approved" })}
                             title="Approve referral"
                           >
                             <CheckCircle2 className="h-4 w-4" />
@@ -2271,7 +2350,7 @@ function ReferralProgramWorkspace({
                             size="icon"
                             className="h-8 w-8 text-rose-700"
                             disabled={referral.status === "rejected"}
-                            onClick={() => updateReferral(referral.id, { status: "rejected" })}
+                            onClick={() => isPublic ? void updatePublicReferral(referral.id, "rejected") : updateReferral(referral.id, { status: "rejected" })}
                             title="Reject referral"
                           >
                             <XCircle className="h-4 w-4" />
@@ -2281,7 +2360,7 @@ function ReferralProgramWorkspace({
                             size="icon"
                             className="h-8 w-8 text-slate-600"
                             disabled={referral.status === "pending"}
-                            onClick={() => updateReferral(referral.id, { status: "pending" })}
+                            onClick={() => isPublic ? void updatePublicReferral(referral.id, "pending") : updateReferral(referral.id, { status: "pending" })}
                             title="Return to pending"
                           >
                             <Clock3 className="h-4 w-4" />
@@ -2292,7 +2371,7 @@ function ReferralProgramWorkspace({
                             className="h-8 w-8 text-rose-600"
                             onClick={() => {
                               if (confirm(`Delete referral for ${referral.referredName}?`)) {
-                                void deleteReferral(referral.id);
+                                void (isPublic ? deletePublicReferral(referral.id) : deleteReferral(referral.id));
                               }
                             }}
                             title="Delete referral"
